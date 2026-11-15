@@ -25,7 +25,7 @@ function useEntityChoices(perm: string) {
 }
 
 function EmployeeForm({ initial, onClose }: { initial?: Employee; onClose: () => void }) {
-  const { can } = useAuth();
+  const { can, entityId } = useAuth();
   const qc = useQueryClient();
   const toast = useToast();
   const entities = useEntityChoices(initial ? "employees.edit" : "employees.create");
@@ -33,7 +33,8 @@ function EmployeeForm({ initial, onClose }: { initial?: Employee; onClose: () =>
     last_name: initial?.last_name ?? "", first_name: initial?.first_name ?? "", middle_name: initial?.middle_name ?? "", position: initial?.position ?? "",
     is_driver: initial?.is_driver ?? false, phone: initial?.phone ?? "", email: initial?.email ?? "", birth_date: initial?.birth_date ?? "",
     hired_on: initial?.hired_on ?? "", fired_on: initial?.fired_on ?? "", note: initial?.note ?? "", department_id: initial?.department_id ? String(initial.department_id) : "",
-    legal_entity_id: String(entities[0]?.id ?? ""), started_on: todayIso(),
+    // юрлицо по умолчанию: то, что выбрано в переключателе вверху (иначе новый сотрудник «пропадёт» из списка, который вы смотрите)
+    legal_entity_id: String((entities.find((x) => x.id === entityId) ?? entities[0])?.id ?? ""), started_on: todayIso(),
   });
   const entityForDepartments = initial?.legal_entities[0]?.id ?? Number(f.values.legal_entity_id);
   const deps = useQuery({
@@ -50,7 +51,16 @@ function EmployeeForm({ initial, onClose }: { initial?: Employee; onClose: () =>
       if (initial) return patch(`/employees/${initial.id}`, body);
       return post("/employees", { ...body, assignments: [{ legal_entity_id: Number(v.legal_entity_id), position: v.position, started_on: nul(v.started_on) }] });
     },
-    onSuccess: () => { qc.invalidateQueries(); toast.success(initial ? "Сохранено" : "Сотрудник добавлен"); onClose(); },
+    onSuccess: () => {
+      qc.invalidateQueries();
+      if (initial) toast.success("Сохранено");
+      else {
+        const chosen = entities.find((x) => String(x.id) === f.values.legal_entity_id);
+        const hidden = entityId !== null && chosen && chosen.id !== entityId;
+        toast.success(`Сотрудник добавлен в «${chosen?.name ?? "юрлицо"}»` + (hidden ? ". Вверху выбрано другое юрлицо, поэтому в этом списке его не видно: выберите «Все юрлица»." : ""));
+      }
+      onClose();
+    },
     onError: f.fail,
   });
   return (
@@ -92,10 +102,11 @@ function EmployeeForm({ initial, onClose }: { initial?: Employee; onClose: () =>
 }
 
 function AssignmentForm({ e, onClose }: { e: Employee; onClose: () => void }) {
+  const { entityId } = useAuth();
   const qc = useQueryClient();
   const toast = useToast();
   const entities = useEntityChoices("employees.edit").filter((x) => !e.assignments?.some((a) => a.legal_entity_id === x.id && !a.ended_on));
-  const f = useForm({ legal_entity_id: String(entities[0]?.id ?? ""), position: e.position, started_on: todayIso() });
+  const f = useForm({ legal_entity_id: String((entities.find((x) => x.id === entityId) ?? entities[0])?.id ?? ""), position: e.position, started_on: todayIso() });
   const m = useMutation({
     mutationFn: () => post(`/employees/${e.id}/assignments`, { legal_entity_id: Number(f.values.legal_entity_id), position: f.values.position, started_on: nul(f.values.started_on) }),
     onSuccess: () => { qc.invalidateQueries(); toast.success("Место работы добавлено"); onClose(); },
@@ -185,8 +196,9 @@ function EmployeeDialog({ id, onClose }: { id: number; onClose: () => void }) {
 }
 
 export function Employees() {
-  const { can } = useAuth();
+  const { can, me, setEntityId } = useAuth();
   const entity = useEntityParam();
+  const entityName = entity === undefined ? "" : me?.legal_entities.find((x) => x.id === entity)?.name ?? "";
   const [s, setS] = useUrlState({ q: "", kind: "", archived: "", page: "1" });
   const [text, setText] = useState(s.q);
   const debounced = useDebounced(text);
@@ -203,6 +215,16 @@ export function Employees() {
     <>
       <PageHeader title="Сотрудники" sub={list.data ? `Всего: ${list.data.total}` : undefined}
         actions={can("employees.create") && <Button variant="primary" icon={Plus} onClick={() => setCreating(true)}>Добавить сотрудника</Button>} />
+      {entity !== undefined && (
+        <div style={{ marginBottom: 14 }}>
+          <Alert tone="info">
+            <div className="row wrap" style={{ gap: 10 }}>
+              <span>Показаны сотрудники только юрлица «{entityName}». Работающие в других юрлицах скрыты.</span>
+              <Button size="sm" onClick={() => setEntityId(null)}>Показать всех</Button>
+            </div>
+          </Alert>
+        </div>
+      )}
       <Card flush>
         <div className="toolbar" style={{ padding: "14px 14px 0" }}>
           <div style={{ position: "relative", minWidth: 240, flex: "1 1 240px", maxWidth: 360 }}>

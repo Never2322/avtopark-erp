@@ -36,13 +36,14 @@ export function reading(v: Pick<VehicleRow, "current_km" | "current_hours" | "ty
 }
 
 function CreateVehicle({ onClose }: { onClose: () => void }) {
-  const { me, can } = useAuth();
+  const { me, can, entityId } = useAuth();
   const nav = useNavigate();
   const qc = useQueryClient();
   const toast = useToast();
   const types = useVehicleTypes();
   const entities = me!.legal_entities.filter((e) => can("vehicles.create", e.id));
-  const f = useForm({ legal_entity_id: String(entities[0]?.id ?? ""), type_id: "", plate: "", make: "", model: "", internal_no: "", vin: "", year: "", initial_km: "", initial_hours: "", note: "" });
+  // юрлицо по умолчанию: выбранное в переключателе вверху
+  const f = useForm({ legal_entity_id: String((entities.find((x) => x.id === entityId) ?? entities[0])?.id ?? ""), type_id: "", plate: "", make: "", model: "", internal_no: "", vin: "", year: "", initial_km: "", initial_hours: "", note: "" });
   const m = useMutation({
     mutationFn: () => post<{ id: number }>("/vehicles", {
       legal_entity_id: Number(f.values.legal_entity_id), type_id: Number(f.values.type_id), plate: f.values.plate, make: f.values.make, model: f.values.model,

@@ -248,7 +248,13 @@ function AssignModal({ v, onClose }: { v: Detail; onClose: () => void }) {
     <Modal title="Закрепить водителя" onClose={onClose} footer={<><Button onClick={onClose}>Отмена</Button><Button variant="primary" loading={m.isPending} disabled={!f.values.employee_id} onClick={() => { f.clear(); m.mutate(); }}>Закрепить</Button></>}>
       <div className="stack">
         {f.formError && !f.errors.employee_id && <Alert tone="error">{f.formError}</Alert>}
-        <Field label="Водитель" error={f.errors.employee_id} hint="В списке только водители этого юрлица">
+        {drivers.data && drivers.data.items.length === 0 && (
+          <Alert tone="info">
+            В юрлице «{v.legal_entity}» пока нет водителей. В списке бывают только сотрудники с галочкой «Водитель», которые работают в юрлице этой машины.
+            Откройте раздел <Link to="/employees">«Сотрудники»</Link>: отметьте человека как водителя и, если он работает в другом юрлице, нажмите в его карточке «Принять в юрлицо».
+          </Alert>
+        )}
+        <Field label="Водитель" error={f.errors.employee_id} hint={`В списке только водители юрлица «${v.legal_entity}»`}>
           <select className="input" value={f.values.employee_id} onChange={(e) => f.set("employee_id", e.target.value)}>
             <option value="">Выберите…</option>
             {drivers.data?.items.map((d) => <option key={d.id} value={d.id}>{d.full_name}</option>)}

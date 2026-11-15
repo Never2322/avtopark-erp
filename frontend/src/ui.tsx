@@ -405,7 +405,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   const push = useCallback((tone: Toast["tone"], text: string) => {
     const id = Date.now() + Math.random();
     setItems((s) => [...s, { id, tone, text }]);
-    setTimeout(() => setItems((s) => s.filter((t) => t.id !== id)), tone === "error" ? 7000 : 4000);
+    setTimeout(() => setItems((s) => s.filter((t) => t.id !== id)), Math.max(tone === "error" ? 7000 : 4000, text.length * 70));
   }, []);
   const api = { success: (t: string) => push("success", t), error: (t: string) => push("error", t) };
   return (
