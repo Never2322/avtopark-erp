@@ -14,8 +14,9 @@ from app.services import readings_import as imp
 from app.services.reminders import org_tz
 from app.services.xlsx_read import read_first_sheet, serial_to_date
 from app.services.xlsx import xlsx_book
+from app.common import org_today
 
-TODAY = dt.date.today()
+TODAY = org_today()
 
 
 def d(days_ago: int) -> str:

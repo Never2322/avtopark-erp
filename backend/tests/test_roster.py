@@ -8,8 +8,9 @@ from app.db import session_factory
 from app.models import AuditLog
 from tests.test_entries import day, fuel_body, set_specs, trip_body
 from tests.test_jobs import new_job
+from app.common import org_today
 
-TODAY = dt.date.today()
+TODAY = org_today()
 
 
 def rows(c, **params):

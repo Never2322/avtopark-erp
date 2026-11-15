@@ -18,7 +18,7 @@ from sqlalchemy import exists, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app import audit
-from app.common import fail, like, page_of, utcnow
+from app.common import fail, like, org_today, page_of, utcnow
 from app.db import get_db
 from app.deps import Principal, current, entity_filter, require
 from app.enums import (ALL_DOC_KINDS, DOC_EXPIRING_DAYS, DOC_KINDS_NO_EXPIRY, EMPLOYEE_DOC_KINDS, EMPLOYEE_SENSITIVE_KINDS,
@@ -40,12 +40,12 @@ def expiry_status(valid_until: dt.date | None, today: dt.date | None = None) -> 
     """none — срока нет; expired — просрочен; expiring — кончается в ближайшие 30 дней; ok — всё в порядке."""
     if valid_until is None:
         return "none"
-    days = (valid_until - (today or dt.date.today())).days
+    days = (valid_until - (today or org_today())).days
     return "expired" if days < 0 else "expiring" if days <= DOC_EXPIRING_DAYS else "ok"
 
 
 def days_left(valid_until: dt.date | None, today: dt.date | None = None) -> int | None:
-    return None if valid_until is None else (valid_until - (today or dt.date.today())).days
+    return None if valid_until is None else (valid_until - (today or org_today())).days
 
 
 # ---------------------------------------------------------------- права
@@ -181,7 +181,7 @@ def list_employee_files(q: str = "", legal_entity_id: int | None = None, drivers
         query = query.where(or_(Employee.last_name.ilike(t), Employee.first_name.ilike(t), Employee.middle_name.ilike(t), Employee.position.ilike(t)))
     if problems:
         # есть просроченный или скоро истекающий документ
-        horizon = dt.date.today() + dt.timedelta(days=DOC_EXPIRING_DAYS)
+        horizon = org_today() + dt.timedelta(days=DOC_EXPIRING_DAYS)
         query = query.where(exists().where(DossierDoc.employee_id == Employee.id, DossierDoc.archived_at.is_(None),
                                            DossierDoc.kind.notin_(tuple(DOC_KINDS_NO_EXPIRY)), DossierDoc.valid_until <= horizon,
                                            DossierDoc.kind.notin_(tuple(EMPLOYEE_SENSITIVE_KINDS))))
@@ -435,7 +435,7 @@ def list_vehicle_files(q: str = "", legal_entity_id: int | None = None, status: 
         t = like(q.strip())
         query = query.where(or_(Vehicle.plate.ilike(t), Vehicle.make.ilike(t), Vehicle.model.ilike(t), Vehicle.vin.ilike(t), Vehicle.internal_no.ilike(t)))
     if problems:
-        horizon = dt.date.today() + dt.timedelta(days=DOC_EXPIRING_DAYS)
+        horizon = org_today() + dt.timedelta(days=DOC_EXPIRING_DAYS)
         query = query.where(exists().where(DossierDoc.vehicle_id == Vehicle.id, DossierDoc.archived_at.is_(None),
                                            DossierDoc.kind.notin_(tuple(DOC_KINDS_NO_EXPIRY)), DossierDoc.valid_until <= horizon))
     rows, total = page_of(db, query, page, page_size)

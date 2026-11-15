@@ -29,9 +29,14 @@ export const fmtSize = (bytes?: number | null): string => {
   return fmtNum(bytes / 1024 / 1024, 1) + " МБ";
 };
 
+/** Сегодняшняя дата по поясу организации (так же её считает сервер), а не по часам телефона или компьютера. */
 export const todayIso = (): string => {
   const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  try {
+    return new Intl.DateTimeFormat("en-CA", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit" }).format(d);
+  } catch {
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  }
 };
 
 export const plural = (n: number, one: string, few: string, many: string): string => {

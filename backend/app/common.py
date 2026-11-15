@@ -5,6 +5,7 @@ import datetime as dt
 import io
 import re
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from fastapi import HTTPException
 from sqlalchemy import Select, func, select
@@ -18,6 +19,16 @@ def fail(status: int, code: str, message: str, field: str | None = None) -> HTTP
 
 def utcnow() -> dt.datetime:
     return dt.datetime.now(dt.timezone.utc)
+
+
+def org_today() -> dt.date:
+    """Сегодняшняя дата по часовому поясу организации (ORG_TIMEZONE).
+
+    Сервер живёт по UTC, а в Новосибирске уже наступил следующий день, поэтому dt.date.today() с 00:00 до 07:00 по местному
+    времени даёт вчерашнее число. Даты «с какого числа», сроки и «просрочено» считаем только по этой функции.
+    """
+    from app.config import get_settings
+    return dt.datetime.now(ZoneInfo(get_settings().org_timezone)).date()
 
 
 def norm_plate(value: str) -> str:

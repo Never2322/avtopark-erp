@@ -9,8 +9,9 @@ from app.models import AnnouncementTarget, AuditLog, Employee, EmploymentAssignm
 from app.services import notify
 from tests.test_events_calendar import d, event
 from tests.test_purchases import go, ids_of, part
+from app.common import org_today
 
-TODAY = dt.date.today()
+TODAY = org_today()
 
 
 def uid(login: str) -> int:

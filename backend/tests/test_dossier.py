@@ -13,6 +13,7 @@ from sqlalchemy.exc import DBAPIError
 from app.bootstrap import bootstrap
 from app.db import session_factory
 from app.models import AuditLog, DossierDoc, DossierDocFile, Permission, Role, RolePermission, StoredFile
+from app.common import org_today
 
 
 def png(color=(200, 30, 30), size=(64, 48)) -> bytes:
@@ -293,7 +294,7 @@ def test_adding_scans_to_an_existing_document(make_client, world):
 
 def test_expiry_statuses_and_problem_filter(make_client, world):
     c = make_client("admin")
-    today = dt.date.today()
+    today = org_today()
     add_employee_doc(c, world.d1, "driver_license", valid_until=(today - dt.timedelta(days=1)).isoformat())
     add_employee_doc(c, world.d2, "driver_license", valid_until=(today + dt.timedelta(days=10)).isoformat())
     ok = add_employee_doc(c, world.d2, "pts", valid_until=(today + dt.timedelta(days=400)).isoformat()).json()

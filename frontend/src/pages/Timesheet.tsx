@@ -7,7 +7,7 @@ import { ChevronLeft, ChevronRight, Download, Printer, Save, Undo2, Wand2 } from
 import { ApiError, get, post, put, qs } from "../api";
 import { useAuth } from "../auth";
 import { useUrlState } from "../hooks";
-import { plural } from "../format";
+import { plural, todayIso } from "../format";
 import { Alert, Button, Card, ConfirmModal, Empty, PageHeader, QueryState, useToast } from "../ui";
 
 export interface Code { code: string; label: string; kind: "day" | "absence" | "other"; hours: boolean }
@@ -59,7 +59,7 @@ export function sums(cells: { code: string | null; hours: number | null }[], cod
 }
 
 export const fmtH = (h: number) => String(h).replace(".", ",");
-export const currentMonth = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`; };
+export const currentMonth = () => todayIso().slice(0, 7);
 export const shiftMonth = (m: string, delta: number) => { const [y, mo] = m.split("-").map(Number); const n = y * 12 + mo - 1 + delta; return `${Math.floor(n / 12)}-${String((n % 12) + 1).padStart(2, "0")}`; };
 
 export function useTimesheetEntity() {

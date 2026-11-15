@@ -11,6 +11,7 @@ from app.db import session_factory
 from app.models import (Employee, EmploymentAssignment, LegalEntity, Role, User, UserRole, Vehicle, VehicleAssignment, VehicleType)
 from app.security import hash_password
 from app.services.readings import add_reading
+from app.common import org_today
 
 PASSWORD = "Tester-2026-Pass"
 _HASH = hash_password(PASSWORD)
@@ -76,7 +77,7 @@ def build_world() -> SimpleNamespace:
             e = Employee(last_name=last, first_name="Тест", is_driver=driver, position="водитель" if driver else "сотрудник")
             db.add(e)
             db.flush()
-            db.add(EmploymentAssignment(employee_id=e.id, legal_entity_id=entity, started_on=dt.date.today() - dt.timedelta(days=400)))
+            db.add(EmploymentAssignment(employee_id=e.id, legal_entity_id=entity, started_on=org_today() - dt.timedelta(days=400)))
             return e
 
         w.d1, w.d2, w.d3 = employee("Первый", w.A, True), employee("Второй", w.A, True), employee("Третий", w.B, True)
@@ -104,7 +105,7 @@ def build_world() -> SimpleNamespace:
 
         w.va1, w.va2, w.va3 = vehicle("А001АА54", w.A, w.type_id), vehicle("А002АА54", w.A, w.type_id), vehicle("А003АА54", w.A, w.type_id)
         w.vb1 = vehicle("В001ВВ54", w.B, w.type_id)
-        today = dt.date.today()
+        today = org_today()
         db.add(VehicleAssignment(vehicle_id=w.va1.id, employee_id=w.d1.id, started_on=today - dt.timedelta(days=30)))
         db.add(VehicleAssignment(vehicle_id=w.va2.id, employee_id=w.d2.id, started_on=today - dt.timedelta(days=30)))
         db.add(VehicleAssignment(vehicle_id=w.vb1.id, employee_id=w.d3.id, started_on=today - dt.timedelta(days=30)))

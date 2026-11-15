@@ -7,8 +7,9 @@ from sqlalchemy import func, select
 from app.db import session_factory
 from app.models import AuditLog, JobPhoto, StoredFile
 from tests.test_dossier import PDF, png
+from app.common import org_today
 
-TODAY = dt.date.today()
+TODAY = org_today()
 TODAY_ISO = TODAY.isoformat()
 
 

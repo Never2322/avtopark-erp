@@ -9,10 +9,11 @@ from app.db import session_factory
 from app.models import AuditLog, Notification, RequestPart, ServiceRequest, StockMove, User
 from tests.test_bills import issued as issued_bill
 from tests.test_purchases import go, new_request, part
+from app.common import org_today
 
 
 def today() -> str:
-    return dt.date.today().isoformat()
+    return org_today().isoformat()
 
 
 def make(c, path, body):
@@ -133,7 +134,7 @@ def test_move_validation(make_client, world):
         (dict(kind="receipt", qty=0), "qty"), (dict(kind="receipt", qty=-1), "qty"), (dict(kind="receipt", qty="abc"), "qty"),
         (dict(kind="receipt", qty="1,0001"), "qty"), (dict(kind="receipt", qty=1_000_001), "qty"), (dict(kind="receipt", qty=None), "qty"),
         (dict(kind="receipt", qty=1, price="-5"), "price"), (dict(kind="receipt", qty=1, price="много"), "price"),
-        (dict(kind="receipt", qty=1, move_date=(dt.date.today() + dt.timedelta(days=1)).isoformat()), "move_date"),
+        (dict(kind="receipt", qty=1, move_date=(org_today() + dt.timedelta(days=1)).isoformat()), "move_date"),
         (dict(kind="receipt", qty=1, move_date="1990-01-01"), "move_date"),
         (dict(kind="transfer", qty=1, to_warehouse_id=main), "to_warehouse_id"), (dict(kind="transfer", qty=1), "to_warehouse_id"),
         (dict(kind="issue", qty=1, to_warehouse_id=garage), "to_warehouse_id"),
@@ -246,7 +247,7 @@ def test_patch_changes_only_description(make_client, world):
     sup = make(boss, "/counterparties", {"name": "ООО Запчасти", "kind": "supplier"})["id"]
     w, f = wh(store, world), item(store, world)
     m = ok(move(store, "receipt", f, w, 5, price="100"))["move"]
-    day = (dt.date.today() - dt.timedelta(days=3)).isoformat()
+    day = (org_today() - dt.timedelta(days=3)).isoformat()
     r = ok(store.patch(f"/stock/moves/{m['id']}", {"price": "120,50", "note": "Пересчитали", "doc_number": "УПД 7", "counterparty_id": sup,
                                                    "move_date": day, "qty": 999, "item_id": 12345, "kind": "issue", "warehouse_id": 777}), 200)
     assert (r["price"], r["note"], r["doc_number"], r["counterparty"], r["move_date"]) == (120.5, "Пересчитали", "УПД 7", "ООО Запчасти", day)
@@ -323,7 +324,7 @@ def test_journal_filters_and_sums(make_client, world):
     store, boss = make_client("store_a"), make_client("dir_a")
     w, g = wh(store, world), wh(store, world, "Гараж")
     f, s = item(store, world, "Фильтр", sku="WIX-1"), item(store, world, "Свеча")
-    old = (dt.date.today().replace(day=1) - dt.timedelta(days=5)).isoformat()
+    old = (org_today().replace(day=1) - dt.timedelta(days=5)).isoformat()
     ok(move(store, "receipt", f, w, 10, price="100", move_date=old, doc_number="УПД-1"))
     ok(move(store, "receipt", s, w, 4, price="50"))
     ok(move(store, "issue", f, w, 2, vehicle_id=world.va1, note="на А001"))

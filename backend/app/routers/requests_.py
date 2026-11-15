@@ -9,7 +9,7 @@ from sqlalchemy import and_, case, func, or_, select
 from sqlalchemy.orm import Session
 
 from app import audit
-from app.common import fail, like, page_of, utcnow
+from app.common import fail, like, org_today, page_of, utcnow
 from app.db import get_db
 from app.deps import Principal, current, load_grants, require
 from app.enums import (REQUEST_APPROVAL_STEPS, REQUEST_FLOW, REQUEST_OPEN, REQUEST_PARTS_MAX, REQUEST_PRIORITIES, REQUEST_STATUSES,
@@ -103,7 +103,7 @@ def out(db: Session, p: Principal, r: ServiceRequest, detailed: bool = False) ->
         "due_date": r.due_date.isoformat() if r.due_date else None,
         "created_at": r.created_at.isoformat(), "updated_at": r.updated_at.isoformat(),
         "closed_at": r.closed_at.isoformat() if r.closed_at else None,
-        "overdue": bool(r.due_date and r.due_date < dt.date.today() and r.status in REQUEST_OPEN),
+        "overdue": bool(r.due_date and r.due_date < org_today() and r.status in REQUEST_OPEN),
     }
     if detailed:
         data.update({

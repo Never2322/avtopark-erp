@@ -6,7 +6,7 @@ from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session
 
 from app import audit
-from app.common import fail, utcnow
+from app.common import fail, org_today, utcnow
 from app.enums import STATUS_NEEDS_REASON, STATUS_TERMINAL, VEHICLE_STATUSES
 from app.models import Employee, EmploymentAssignment, Vehicle, VehicleAssignment, VehicleStatusHistory
 
@@ -34,7 +34,7 @@ def change_status(db: Session, who, vehicle: Vehicle, status: str, reason: str =
 
 
 def active_assignment_filter(on: dt.date | None = None):
-    on = on or dt.date.today()
+    on = on or org_today()
     return and_(VehicleAssignment.started_on <= on, or_(VehicleAssignment.ended_on.is_(None), VehicleAssignment.ended_on >= on))
 
 
@@ -47,7 +47,7 @@ def assigned_vehicle_ids(db: Session, employee_id: int | None) -> set[int]:
 
 
 def employee_in_entity(db: Session, employee: Employee, legal_entity_id: int, on: dt.date | None = None) -> bool:
-    on = on or dt.date.today()
+    on = on or org_today()
     return db.scalar(select(EmploymentAssignment.id).where(
         EmploymentAssignment.employee_id == employee.id, EmploymentAssignment.legal_entity_id == legal_entity_id,
         or_(EmploymentAssignment.started_on.is_(None), EmploymentAssignment.started_on <= on),

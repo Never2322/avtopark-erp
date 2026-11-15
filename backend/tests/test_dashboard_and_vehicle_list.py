@@ -8,8 +8,9 @@ from sqlalchemy import update
 from app.db import session_factory
 from app.models import FuelFill, Vehicle
 from tests.test_trade import customer, order
+from app.common import org_today
 
-TODAY = dt.date.today()
+TODAY = org_today()
 
 
 def d(offset: int = 0) -> str:

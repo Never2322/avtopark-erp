@@ -19,7 +19,7 @@ from sqlalchemy import and_, exists, func, or_, select
 from sqlalchemy.orm import Session
 
 from app import audit
-from app.common import csv_text, fail, like, num, utcnow
+from app.common import csv_text, fail, like, num, org_today, utcnow
 from app.db import get_db
 from app.deps import Principal, current, require
 from app.enums import EFFECTIVE_STATES, JOB_STATES, REQUEST_OPEN, VEHICLE_STATUSES
@@ -192,7 +192,7 @@ def free_drivers(db: Session, p: Principal, legal_entity_id: int | None) -> list
     ents = None if (roster.everything and staff.everything) else (staff.ids if roster.everything else roster.ids if staff.everything else roster.ids & staff.ids)
     if legal_entity_id is not None:
         ents = {legal_entity_id} if ents is None or legal_entity_id in ents else set()
-    today = dt.date.today()
+    today = org_today()
     cond = [Employee.is_driver.is_(True), Employee.archived_at.is_(None), or_(Employee.fired_on.is_(None), Employee.fired_on >= today),
             ~exists().where(VehicleAssignment.employee_id == Employee.id, active_assignment_filter(today))]
     if ents is not None:

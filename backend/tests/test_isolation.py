@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """Записи принадлежат своему юрлицу; чужое не видно ни в списках, ни по прямой ссылке."""
 import datetime as dt
+from app.common import org_today
 
 
 def test_director_of_a_does_not_see_entity_b_anywhere(make_client, world):
@@ -84,5 +85,5 @@ def test_driver_cannot_be_assigned_across_entities(make_client, world):
     c = make_client("admin")
     r = c.post(f"/vehicles/{world.va3}/assignments", {"employee_id": world.d3})
     assert r.status_code in (409, 422), r.text
-    r = c.post("/waybills", {"vehicle_id": world.va3, "driver_id": world.d3, "work_date": dt.date.today().isoformat()})
+    r = c.post("/waybills", {"vehicle_id": world.va3, "driver_id": world.d3, "work_date": org_today().isoformat()})
     assert r.status_code == 422 and r.json()["code"] == "driver_other_entity"

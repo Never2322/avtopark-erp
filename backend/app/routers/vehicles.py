@@ -9,7 +9,7 @@ from sqlalchemy import and_, asc, desc, exists, func, or_, select
 from sqlalchemy.orm import Session
 
 from app import audit
-from app.common import csv_text, fail, like, norm_plate, page_of, utcnow
+from app.common import csv_text, fail, like, norm_plate, org_today, page_of, utcnow
 from app.db import get_db
 from app.deps import Principal, current, entity_filter, require
 from app.enums import READING_KINDS, REQUEST_OPEN, VEHICLE_CATEGORIES, VEHICLE_STATUSES
@@ -358,7 +358,7 @@ def status_history(vid: int, p: Principal = Depends(current), db: Session = Depe
 def assignment_out(a: VehicleAssignment) -> dict:
     return {"id": a.id, "employee_id": a.employee_id, "employee": " ".join(x for x in (a.employee.last_name, a.employee.first_name) if x),
             "role": a.role, "started_on": a.started_on.isoformat(), "ended_on": a.ended_on.isoformat() if a.ended_on else None,
-            "active": a.started_on <= dt.date.today() and (a.ended_on is None or a.ended_on >= dt.date.today())}
+            "active": a.started_on <= org_today() and (a.ended_on is None or a.ended_on >= org_today())}
 
 
 @router.get("/{vid}/assignments")
@@ -382,7 +382,7 @@ def add_assignment(vid: int, body: AssignmentIn, p: Principal = Depends(require(
         raise fail(422, "not_driver", "У сотрудника не отмечено «водитель»", "employee_id")
     if not employee_in_entity(db, emp, v.legal_entity_id):
         raise fail(422, "wrong_entity", "Сотрудник не работает в юрлице этой машины", "employee_id")
-    start = body.started_on or dt.date.today()
+    start = body.started_on or org_today()
     active = db.scalars(select(VehicleAssignment).where(VehicleAssignment.vehicle_id == v.id, active_assignment_filter())).all()
     if any(a.employee_id == emp.id for a in active):
         raise fail(409, "already_assigned", "Этот водитель уже закреплён за машиной", "employee_id")
@@ -405,9 +405,9 @@ def end_assignment(vid: int, aid: int, body: EndIn, p: Principal = Depends(requi
     a = db.get(VehicleAssignment, aid)
     if not a or a.vehicle_id != v.id:
         raise fail(404, "not_found", "Закрепление не найдено")
-    if a.ended_on is not None and a.ended_on <= dt.date.today():
+    if a.ended_on is not None and a.ended_on <= org_today():
         raise fail(409, "already_ended", "Закрепление уже снято")
-    end = body.ended_on or dt.date.today()
+    end = body.ended_on or org_today()
     if end < a.started_on:
         raise fail(422, "bad_dates", "Дата окончания раньше даты начала", "ended_on")
     a.ended_on = end

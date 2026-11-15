@@ -5,7 +5,6 @@
 Адресат видит объявление в разделе «Мои объявления» и в колокольчике, может ответить; у каждого адресата своя переписка,
 отвечают ему сотрудники прямо на сайте. Объявление не удаляют: его закрывают (пропадает у адресатов) или убирают в архив с причиной.
 """
-import datetime as dt
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
@@ -13,7 +12,7 @@ from sqlalchemy import func, or_, select, update
 from sqlalchemy.orm import Session
 
 from app import audit
-from app.common import fail, like, page_of, utcnow
+from app.common import fail, like, org_today, page_of, utcnow
 from app.db import get_db
 from app.deps import Principal, current, entity_filter, require
 from app.enums import ANNOUNCEMENT_AUDIENCES, ANNOUNCEMENT_BODY_MAX, ANNOUNCEMENT_REPLY_MAX, ANNOUNCEMENT_TITLE_MAX
@@ -58,7 +57,7 @@ def candidates(db: Session, entity_id: int) -> list[dict]:
     allowed = notify.users_with(db, "announcements.read_own", entity_id)
     if not allowed:
         return []
-    today = dt.date.today()
+    today = org_today()
     q = (select(Employee).join(EmploymentAssignment, EmploymentAssignment.employee_id == Employee.id)
          .join(User, User.id == Employee.user_id)
          .where(EmploymentAssignment.legal_entity_id == entity_id,

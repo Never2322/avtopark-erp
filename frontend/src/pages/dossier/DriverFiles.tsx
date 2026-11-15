@@ -5,7 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, ImagePlus, Search, UserSquare2 } from "lucide-react";
 import { get } from "../../api";
 import { useAuth } from "../../auth";
-import { fmtDate } from "../../format";
+import { fmtDate, todayIso } from "../../format";
 import { Page, useDebounced, useEntityParam, useUrlState } from "../../hooks";
 import { Alert, Badge, Button, Card, Empty, FilterChips, PageHeader, Pagination, QueryState, Table } from "../../ui";
 import { Avatar, Checklist, Doc, DocsBlock, ExpiryBadge, Expiry, Kind, NewDocModal, Summary, SummaryBadges } from "./shared";
@@ -71,8 +71,8 @@ export function DriverFiles() {
 function daysTo(iso: string): number {
   const [y, m, d] = iso.split("-").map(Number);
   const end = Date.UTC(y, m - 1, d);
-  const now = new Date();
-  return Math.round((end - Date.UTC(now.getFullYear(), now.getMonth(), now.getDate())) / 86400000);
+  const [ty, tm, td] = todayIso().split("-").map(Number);
+  return Math.round((end - Date.UTC(ty, tm - 1, td)) / 86400000);
 }
 
 interface Detail {

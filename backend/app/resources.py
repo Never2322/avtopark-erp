@@ -6,7 +6,7 @@ from decimal import ROUND_HALF_UP, Decimal
 
 from sqlalchemy import and_, case, func, select
 
-from app.common import num
+from app.common import num, org_today
 from app.enums import (MAINTENANCE_KINDS, TIRE_SEASONS, VEHICLE_FINANCE_KINDS, VEHICLE_REPAIR_KINDS, CALENDAR_COLORS, CALENDAR_REMIND_MAX, EMPLOYEE_EVENT_KINDS, EMPLOYEE_EVENT_MONEY_KINDS, REMINDER_LEAD_DAYS, PPE_SOON_DAYS, PPE_WEAR_MAX_MONTHS, PART_UNITS, CASH_ACCOUNT_KINDS, CASH_OP_KINDS, COUNTERPARTY_KINDS, DOC_FULL_NAMES, DOC_TYPES, ENTRY_LATE_DAYS, FINE_PAYERS,
                        FUEL_MAX_LITERS, JOB_DATE_WINDOW_DAYS, JOB_STATES, ORDER_STATUSES, PAYMENT_KINDS, RENTAL_DIRECTIONS, TARIFF_UNITS,
                        STOCK_UNITS, VAT_RATES)
@@ -30,7 +30,7 @@ ONE_DAY = dt.timedelta(days=1)
 
 
 def _today() -> dt.date:
-    return dt.date.today()
+    return org_today()
 
 
 def _not_future(m: dict, name: str, label: str, errors: dict):

@@ -9,8 +9,9 @@ from sqlalchemy import func, select
 from app.db import session_factory
 from app.models import AuditLog, Employee, TimesheetMark, Waybill
 from app.services import timesheet as ts
+from app.common import org_today
 
-TODAY = dt.date.today()
+TODAY = org_today()
 PREV = (TODAY.replace(day=1) - dt.timedelta(days=1)).replace(day=1)       # прошлый месяц целиком: результат не зависит от «сегодня»
 MONTH = PREV.strftime("%Y-%m")
 DAYS = calendar.monthrange(PREV.year, PREV.month)[1]

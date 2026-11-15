@@ -10,7 +10,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app import audit
-from app.common import fail, like, page_of, utcnow
+from app.common import fail, like, org_today, page_of, utcnow
 from app.db import get_db
 from app.deps import Principal, current, require
 from app.enums import READING_KINDS, VEHICLE_STATUSES, WAYBILL_SHIFTS, WAYBILL_STATUSES
@@ -272,7 +272,7 @@ def create_waybill(body: WaybillCreate, p: Principal = Depends(current), db: Ses
     driver_id = body.driver_id or p.employee_id
     if not driver_id:
         raise fail(422, "driver_required", "Укажите водителя", "driver_id")
-    work_date = body.work_date or dt.date.today()
+    work_date = body.work_date or org_today()
     v, d = check_pair(db, p, body.vehicle_id, driver_id, work_date)
     w = Waybill(legal_entity_id=v.legal_entity_id, year=work_date.year, number=next_number(db, v.legal_entity_id, "waybill", work_date.year),
                 vehicle_id=v.id, driver_id=d.id, shift=body.shift, work_date=work_date, status="draft", route=body.route.strip(),

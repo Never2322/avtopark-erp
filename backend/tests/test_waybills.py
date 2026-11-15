@@ -8,6 +8,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 
 from app.db import session_factory
+from app.common import org_today
 
 
 def make(c, vid, did, **extra):
@@ -196,10 +197,10 @@ def test_waybill_numbers_are_unique_under_parallel_requests(make_client, world):
 def test_waybill_filters(make_client, world):
     disp = make_client("disp_a")
     a = make(disp, world.va1, world.d1)
-    make(disp, world.va2, world.d2, work_date=(dt.date.today() - dt.timedelta(days=3)).isoformat())
+    make(disp, world.va2, world.d2, work_date=(org_today() - dt.timedelta(days=3)).isoformat())
     assert disp.get("/waybills", params={"vehicle_id": world.va2}).json()["total"] == 1
     assert disp.get("/waybills", params={"driver_id": world.d1}).json()["total"] == 1
-    assert disp.get("/waybills", params={"date_from": dt.date.today().isoformat()}).json()["total"] == 1
+    assert disp.get("/waybills", params={"date_from": org_today().isoformat()}).json()["total"] == 1
     assert disp.get("/waybills", params={"q": "Второй"}).json()["total"] == 1
     assert disp.get("/waybills", params={"status": "active"}).json()["total"] == 2
     assert disp.get("/waybills", params={"status": "zzz"}).status_code == 422

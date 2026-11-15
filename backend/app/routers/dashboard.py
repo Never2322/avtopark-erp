@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import and_, func, select
 from sqlalchemy.orm import Session
 
-from app.common import fail
+from app.common import fail, org_today
 from app.db import get_db
 from app.deps import Principal, current
 from app.enums import MAINTENANCE_KINDS, REQUEST_OPEN, REQUEST_PRIORITIES, REQUEST_STATUSES, VEHICLE_STATUSES
@@ -46,7 +46,7 @@ def expenses(db: Session, p: Principal, legal_entity_id: int | None) -> dict | N
     """Затраты по месяцам за полгода: топливо, ремонт, прочее. Только тем, у кого есть право на деньги в отчётах."""
     if not (p.can("reports.money") and p.can("vehicles.view")):
         return None
-    today, now = dt.date.today(), dt.datetime.now(dt.timezone.utc)
+    today, now = org_today(), dt.datetime.now(dt.timezone.utc)
     months, ids = [], None
     for y, m in rep.last_months(today, 6):
         a, b = rep.month_bounds(y, m)
@@ -70,7 +70,7 @@ def maintenance_summary(db: Session, p: Principal, legal_entity_id: int | None) 
     scope = p.scope("maintenance.view")
     if not scope:
         return None
-    today = dt.date.today()
+    today = org_today()
     q = (select(MaintenanceItem, Vehicle).join(Vehicle, Vehicle.id == MaintenanceItem.vehicle_id)
          .where(MaintenanceItem.archived_at.is_(None), Vehicle.archived_at.is_(None), MaintenanceItem.controlled.is_(True),
                 MaintenanceItem.done_at.is_(None), scope.cond(MaintenanceItem.legal_entity_id)))
@@ -95,7 +95,7 @@ def orders_summary(db: Session, p: Principal, legal_entity_id: int | None) -> di
     scope = p.scope("orders.view")
     if not scope:
         return None
-    today = dt.date.today()
+    today = org_today()
     cond = [Order.archived_at.is_(None), scope.cond(Order.legal_entity_id)]
     if legal_entity_id is not None:
         cond.append(Order.legal_entity_id == legal_entity_id)
@@ -117,7 +117,7 @@ def dashboard(legal_entity_id: int | None = None, p: Principal = Depends(current
     if not p.can("dashboard.view"):
         raise fail(403, "forbidden", "Нет доступа к главной странице")
     check_entity(p, legal_entity_id)
-    today = dt.date.today()
+    today = org_today()
     data: dict = {"date": today.isoformat(), "vehicles": None, "requests": None, "waybills": None, "readings": None, "audit": None, "jobs": None,
             "expenses": None, "maintenance": None, "orders": None, "reminders": None}
 

@@ -7,8 +7,9 @@ from sqlalchemy import select
 from app.db import session_factory
 from app.models import AuditLog, LegalEntity
 from tests.test_registry import err_fields
+from app.common import org_today
 
-TODAY = dt.date.today().isoformat()
+TODAY = org_today().isoformat()
 
 
 def customer(c, name="ООО Заказчик", **kw):
@@ -208,7 +209,7 @@ def test_document_numbers_are_unique_under_concurrency(world, make_client):
     with cf.ThreadPoolExecutor(6) as ex:
         res = list(ex.map(go, ids))
     assert all(r.status_code == 201 for r in res), [r.text for r in res if r.status_code != 201]
-    assert sorted(r.json()["doc_no"] for r in res) == sorted(f"Счёт № {i}/{dt.date.today().year}" for i in range(1, 7))
+    assert sorted(r.json()["doc_no"] for r in res) == sorted(f"Счёт № {i}/{org_today().year}" for i in range(1, 7))
 
 
 # ---------------------------------------------------------------- права и юрлица

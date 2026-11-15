@@ -29,7 +29,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app import audit
-from app.common import csv_text, fail, like, page_of, utcnow
+from app.common import csv_text, fail, like, org_today, page_of, utcnow
 from app.config import get_settings
 from app.db import get_db
 from app.deps import NOTHING, Principal, Scope, current, entity_filter
@@ -304,7 +304,7 @@ def apply_filters(res: R, q, params: dict, *, search: str, date_from: str, date_
     if state:
         if state not in res.states or res.state_filter is None:
             raise fail(422, "bad_filter", "Неверное значение отбора", "state")
-        q = res.state_filter(q, state, dt.date.today())
+        q = res.state_filter(q, state, org_today())
     if res.date:
         col = getattr(res.model, res.date)
         for raw, op in ((date_from, "ge"), (date_to, "le")):

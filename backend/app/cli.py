@@ -27,6 +27,7 @@ from app.services import backup
 from app.services.numbering import next_number
 from app.services.readings import add_reading
 from app.services.vehicles import change_status
+from app.common import org_today
 
 
 def cmd_init(_args) -> int:
@@ -106,7 +107,7 @@ def cmd_seed_demo(args) -> int:
         entities = [main, second]
         for e in entities:
             db.add(Department(legal_entity_id=e.id, name="Основной", created_by_id=admin.id, updated_by_id=admin.id))
-        today = dt.date.today()
+        today = org_today()
         staff = []
         for last, first, middle, position, is_driver in DEMO["people"]:
             emp = Employee(last_name=last, first_name=first, middle_name=middle, position=position, is_driver=is_driver,

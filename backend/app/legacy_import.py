@@ -33,6 +33,7 @@ from app.models import (CalendarEvent, CashAccount, CashOp, ControlEvent, Consta
                         VehicleFinance, VehicleReading, VehicleRepair, VehicleSpecs, VehicleStatusHistory, VehicleTire, VehicleType,
                         Waybill, Warehouse)
 from app.services.readings import recompute_current
+from app.common import org_today
 
 # Что не переносится и почему (для отчёта). Ключ — таблица старой базы.
 SKIPPED = {
@@ -142,7 +143,7 @@ class Importer:
         self.employee_entity: dict[int, int] = {}
         self.used_numbers: dict[tuple, set[int]] = {}
         self.old_tables = {r[0] for r in old.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-        self.today = dt.date.today()
+        self.today = org_today()
         self._row_links: list[tuple[str, int, str]] = []
 
     # ------------------------------------------------------------ вспомогательное

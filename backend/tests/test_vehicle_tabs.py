@@ -8,8 +8,9 @@ from sqlalchemy import select
 from app.db import session_factory
 from app.models import User
 from app.services import control, notify
+from app.common import org_today
 
-TODAY = dt.date.today()
+TODAY = org_today()
 
 
 def d(offset: int = 0) -> str:

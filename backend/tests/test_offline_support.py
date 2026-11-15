@@ -9,6 +9,7 @@ from app.models import AuditLog, Job, JobPhoto
 from tests.test_dossier import png
 from tests.test_entries import day, fuel_body, set_specs
 from tests.test_jobs import new_job, photos
+from app.common import org_today
 
 UTC = dt.timezone.utc
 
@@ -143,6 +144,6 @@ def test_driver_home_requests_and_fuel(world, make_client):
 def test_driver_home_without_vehicle(world, make_client):
     d, drv = make_client("disp_a"), make_client("drv2")
     aid = d.get(f"/vehicles/{world.va2}/assignments").json()["items"][0]["id"]
-    assert d.post(f"/vehicles/{world.va2}/assignments/{aid}/end", {"ended_on": (dt.date.today() - dt.timedelta(days=1)).isoformat()}).status_code == 200
+    assert d.post(f"/vehicles/{world.va2}/assignments/{aid}/end", {"ended_on": (org_today() - dt.timedelta(days=1)).isoformat()}).status_code == 200
     h = drv.get("/driver/home").json()
     assert h["has_vehicle"] is False and h["vehicles"] == []

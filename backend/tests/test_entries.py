@@ -8,8 +8,9 @@ from sqlalchemy import func, select
 from app.db import session_factory
 from app.models import AuditLog, EntryPhoto, FuelFill, Trip, Vehicle, VehicleReading
 from tests.test_dossier import PDF, png
+from app.common import org_today
 
-TODAY = dt.date.today()
+TODAY = org_today()
 
 
 def day(n: int = 0) -> str:
