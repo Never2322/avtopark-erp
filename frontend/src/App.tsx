@@ -27,6 +27,9 @@ import { tradeActions } from "./pages/tradeActions";
 import { PrintPage } from "./pages/Print";
 import { Calendar } from "./pages/Calendar";
 import { Reminders } from "./pages/Reminders";
+import { Notifications } from "./pages/Notifications";
+import { AnnouncementCard, Announcements } from "./pages/Announcements";
+import { News, NewsCard } from "./pages/News";
 import { Timesheet } from "./pages/Timesheet";
 import { TimesheetPrint } from "./pages/TimesheetPrint";
 import { JobsBoard, MyJobs } from "./pages/Jobs";
@@ -82,6 +85,11 @@ export function App() {
         <Route path="outbox" element={<OutboxPage />} />
         <Route path="calendar" element={<Guard any={["calendar.view"]}><Calendar /></Guard>} />
         <Route path="reminders" element={<Guard any={["reminders.view"]}><Reminders /></Guard>} />
+        <Route path="notifications" element={<Notifications />} />
+        <Route path="announcements" element={<Guard any={["announcements.view"]}><Announcements /></Guard>} />
+        <Route path="announcements/:id" element={<Guard any={["announcements.view"]}><AnnouncementCard /></Guard>} />
+        <Route path="news" element={<Guard any={["announcements.read_own"]}><News /></Guard>} />
+        <Route path="news/:id" element={<Guard any={["announcements.read_own"]}><NewsCard /></Guard>} />
         <Route path="employees" element={<Guard any={["employees.view"]}><Employees /></Guard>} />
         <Route path="dossier/employees" element={<Guard any={["employee_files.view"]}><DriverFiles /></Guard>} />
         <Route path="dossier/employees/:id" element={<Guard any={["employee_files.view"]}><DriverFile /></Guard>} />

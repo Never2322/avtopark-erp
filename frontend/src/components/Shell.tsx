@@ -3,15 +3,16 @@ import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import {
   BellRing, Building2, CalendarCheck, CalendarClock, CalendarDays, ChevronDown, ClipboardList, DatabaseBackup, Gauge, LayoutDashboard, LogOut, Menu, ScrollText, Search, ShieldCheck,
-  Truck, User as UserIcon, UserCog, UserSquare2, Users, UsersRound, Wrench, FolderOpen, Fuel, NotebookPen, ShoppingCart, ReceiptText, type LucideIcon,
+  Truck, User as UserIcon, UserCog, UserSquare2, Users, UsersRound, Wrench, FolderOpen, Fuel, NotebookPen, ShoppingCart, ReceiptText, Megaphone, Newspaper, type LucideIcon,
 } from "lucide-react";
 import { ConnectionBar, useOutboxSync } from "./Outbox";
+import { BellMenu, useNotifSummary } from "./Bell";
 import { useAuth } from "../auth";
 import { get } from "../api";
 import { SECTIONS } from "../sections";
 import { Empty } from "../ui";
 
-interface Item { to: string; label: string; icon: LucideIcon; any: string[]; end?: boolean; badge?: "pending" | "reminders"; unless?: string[] }
+interface Item { to: string; label: string; icon: LucideIcon; any: string[]; end?: boolean; badge?: "pending" | "reminders" | "news"; unless?: string[] }
 const sectionItems = (...keys: string[]): Item[] =>
   keys.map((k) => SECTIONS.find((x) => x.key === k)!).map((x) => ({ to: x.path, label: x.label, icon: x.icon, any: [`${x.key}.view`] }));
 
@@ -26,6 +27,8 @@ const NAV: { title: string; items: Item[] }[] = [
       { to: "/readings", label: "Показания на проверке", icon: Gauge, any: ["readings.review"], badge: "pending" },
       { to: "/calendar", label: "Календарь", icon: CalendarClock, any: ["calendar.view"] },
       { to: "/reminders", label: "Напоминания", icon: BellRing, any: ["reminders.view"], badge: "reminders" },
+      { to: "/announcements", label: "Объявления", icon: Megaphone, any: ["announcements.view"], badge: "news" },
+      { to: "/news", label: "Мои объявления", icon: Newspaper, any: ["announcements.read_own"], unless: ["announcements.view"], badge: "news" },
     ],
   },
   {
@@ -114,6 +117,9 @@ export function Shell() {
     refetchInterval: 5 * 60_000,
   });
 
+  const notif = useNotifSummary();
+  const news = notif.data?.news_unread ?? 0;
+
   const canSearch = canAny("vehicles.view", "vehicles.view_own");
   const roleNames = Array.from(new Set(me!.roles.map((r) => r.name))).join(", ");
 
@@ -137,6 +143,7 @@ export function Shell() {
                   {i.label}
                   {i.badge === "pending" && (pending.data?.items.length ?? 0) > 0 && <span className="count">{pending.data!.items.length}</span>}
                   {i.badge === "reminders" && (due.data?.due ?? 0) > 0 && <span className="count" title="Наступило">{due.data!.due}</span>}
+                  {i.badge === "news" && news > 0 && <span className="count" title="Адресовано вам, не открыто">{news}</span>}
                 </NavLink>
               ))}
             </nav>
@@ -156,6 +163,7 @@ export function Shell() {
             </form>
           )}
           <span className="spacer" />
+          <BellMenu />
           {me!.legal_entities.length > 1 && (
             <select className="input compact" aria-label="Юридическое лицо" value={entityId ?? ""} onChange={(e) => setEntityId(e.target.value ? Number(e.target.value) : null)}>
               <option value="">Все юрлица</option>

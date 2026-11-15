@@ -17,7 +17,7 @@ BACKEND = Path(__file__).resolve().parents[1]
 BACKUPS = tempfile.mkdtemp(prefix="erp-backups-")
 
 os.environ.update({"DATABASE_URL": TEST_URL, "BACKUP_SCHEDULE": "false", "BACKUP_DIR": BACKUPS, "BACKUP_KEEP": "3",
-                   "DEFAULT_LEGAL_ENTITY": "ООО «Альфа»", "COOKIE_SECURE": "false", "ADMIN_LOGIN": "", "ADMIN_PASSWORD": ""})
+                   "DEFAULT_LEGAL_ENTITY": "ООО «Альфа»", "COOKIE_SECURE": "false", "NOTIFY_SCHEDULE": "false", "ADMIN_LOGIN": "", "ADMIN_PASSWORD": ""})
 sys.path.insert(0, str(BACKEND))
 
 import pytest                                    # noqa: E402

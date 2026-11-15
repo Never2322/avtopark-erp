@@ -36,6 +36,7 @@ class Settings(BaseSettings):
     backup_dir: str = "/backups"
     backup_keep: int = 14                        # сколько последних копий хранить
     backup_schedule: bool = True                 # ежедневная копия
+    notify_schedule: bool = True                 # фоновый обход: сроки превращаются в уведомления
     backup_hour: int = 3                         # час (по времени организации)
     pg_bin_dir: str = ""                         # папка с pg_dump и pg_restore, если их нет в PATH
 

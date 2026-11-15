@@ -30,6 +30,7 @@ from app.models import Job, JobPhoto, StoredFile, Vehicle
 from app.registry import _vehicle_label, org_tz
 from app.resources import job_check_date, job_check_vehicle, job_state_badge, job_today
 from app.routers.dossier import read_uploads, store
+from app.services import notify
 from app.services.people import user_names
 from app.services.vehicles import assigned_vehicle_ids
 
@@ -217,6 +218,7 @@ def arrive(jid: int, body: MarkIn | None = None, p: Principal = Depends(current)
         job.state, job.arrived_at, job.arrived_by_id, job.updated_by_id = "on_site", when, p.id, p.id
         audit.log(db, p, "jobs.arrive", "jobs", job.id, job.legal_entity_id, vehicle_id=job.vehicle_id, address=job.address,
                   **({"reported_at": when.isoformat()} if late else {}))
+        notify.on_job_progress(db, job, "Водитель приехал", p.id)
         db.commit()
     return {"changed": changed, "job": one_out(db, p, job)}
 
@@ -238,6 +240,7 @@ def finish(jid: int, body: FinishIn, p: Principal = Depends(current), db: Sessio
             job.arrived_at, job.arrived_by_id = now, p.id
         audit.log(db, p, "jobs.finish", "jobs", job.id, job.legal_entity_id, vehicle_id=job.vehicle_id, note=note,
                   **({"reported_at": now.isoformat()} if late else {}))
+        notify.on_job_progress(db, job, "Работа закончена", p.id)
         db.commit()
     return {"changed": changed, "job": one_out(db, p, job)}
 
@@ -266,6 +269,8 @@ def set_state(jid: int, body: StateIn, p: Principal = Depends(current), db: Sess
         job.finished_at, job.finished_by_id = now, p.id
     job.state, job.updated_by_id = body.state, p.id
     audit.log(db, p, "jobs.state", "jobs", job.id, job.legal_entity_id, changes={"state": [old, body.state]})
+    if body.state == "cancelled" or old == "cancelled":
+        notify.on_job_cancelled(db, job, body.state, p.id)
     db.commit()
     return {"changed": True, "job": one_out(db, p, job)}
 

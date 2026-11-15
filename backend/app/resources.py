@@ -16,6 +16,7 @@ from app.registry import MAX_MONEY, Col, F, Invalid, R, org_tz, register
 from app.parts_seed import norm as part_key
 from app.services import fuel as fuel_calc
 from app.services import ppe as ppe_calc
+from app.services import notify as notify_svc
 from app.services import reminders as rem
 from app.services.people import user_names
 from app.services.vehicles import current_driver_id
@@ -722,6 +723,7 @@ register(R(
     search_refs=(("vehicle_id", Vehicle, ("plate", "make", "model")),),
     states={"open": "Не закончены", "done": "Выполнены", "cancelled": "Отменены"}, state_filter=_job_filter,
     date="job_date", order=("-job_date", "time_from", "id"), prepare=_job_prepare, computed=_job_computed,
+    after_save=lambda db, p, job, creating: notify_svc.on_job_saved(db, job, creating, p.id),
 ))
 
 

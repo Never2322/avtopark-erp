@@ -19,12 +19,13 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, deferred, mapped_column, relationship
 
 from app.db import Base
-from app.enums import (ALL_DOC_KINDS, CALENDAR_COLORS, CALENDAR_REMIND_MAX, EMPLOYEE_EVENT_KINDS, BACKUP_STATUSES, BILL_KINDS, BILL_STATUSES, CASH_ACCOUNT_KINDS, CASH_OP_KINDS, COUNTERPARTY_KINDS, DOC_TYPES, FINE_PAYERS,
+from app.enums import (ALL_DOC_KINDS, ANNOUNCEMENT_AUDIENCES, NOTIFICATION_KINDS, CALENDAR_COLORS, CALENDAR_REMIND_MAX, EMPLOYEE_EVENT_KINDS, BACKUP_STATUSES, BILL_KINDS, BILL_STATUSES, CASH_ACCOUNT_KINDS, CASH_OP_KINDS, COUNTERPARTY_KINDS, DOC_TYPES, FINE_PAYERS,
                        JOB_STAGES, JOB_STATES, ORDER_STATUSES, VAT_RATES,
                        PAYMENT_KINDS, RENTAL_DIRECTIONS, TARIFF_UNITS, TIMESHEET_CODES, READING_KINDS, READING_SOURCES, REQUEST_PRIORITIES, REQUEST_STATUSES,
                        REVIEW_STATES, VEHICLE_CATEGORIES, VEHICLE_STATUSES, WAYBILL_SHIFTS, WAYBILL_STATUSES, check_in)
 
 TS = DateTime(timezone=True)
+sql_text = text      # в классах с полем text() закрыт именем поля
 
 
 class Audited:
@@ -1052,3 +1053,60 @@ class CalendarEvent(Audited, Voidable, Base):
         CheckConstraint("end_at IS NULL OR end_at >= start_at", name="dates"),
         CheckConstraint(f"remind_min IS NULL OR (remind_min >= 0 AND remind_min <= {CALENDAR_REMIND_MAX})", name="remind_min"),
     )
+
+
+# ---------------------------------------------------------------- уведомления и объявления (этап 3в)
+
+class Notification(Base):
+    """Уведомление на сайте (колокольчик). key не даёт сообщить об одном и том же дважды (напоминания по срокам)."""
+    __tablename__ = "notifications"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    kind: Mapped[str] = mapped_column(String(12), default="info", server_default="info")
+    title: Mapped[str] = mapped_column(String(160))
+    text: Mapped[str] = mapped_column(String(500), default="", server_default="")
+    url: Mapped[str] = mapped_column(String(200), default="", server_default="")
+    legal_entity_id: Mapped[int | None] = mapped_column(ForeignKey("legal_entities.id"))
+    key: Mapped[str | None] = mapped_column(String(120))
+    created_at: Mapped[dt.datetime] = mapped_column(TS, server_default=func.now())
+    read_at: Mapped[dt.datetime | None] = mapped_column(TS)
+    __table_args__ = (
+        CheckConstraint(check_in("kind", NOTIFICATION_KINDS), name="kind"),
+        Index("ix_notifications_user", "user_id", "read_at", "id"),
+        Index("uq_notifications_user_key", "user_id", "key", unique=True, postgresql_where=sql_text("key IS NOT NULL")),
+    )
+
+
+class Announcement(Audited, Voidable, Base):
+    """Объявление сотрудникам юрлица: всем водителям, всем с входом или выбранным. На него можно ответить: у каждого своя переписка."""
+    __tablename__ = "announcements"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    legal_entity_id: Mapped[int] = mapped_column(ForeignKey("legal_entities.id"), index=True)
+    title: Mapped[str] = mapped_column(String(120))
+    body: Mapped[str] = mapped_column(Text, default="", server_default="")
+    audience: Mapped[str] = mapped_column(String(8), default="drivers", server_default="drivers")
+    closed: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"))
+    __table_args__ = (CheckConstraint(check_in("audience", ANNOUNCEMENT_AUDIENCES), name="audience"),
+                      CheckConstraint("length(btrim(title)) > 0", name="title"))
+
+
+class AnnouncementTarget(Base):
+    """Кому адресовано объявление и когда человек его открыл."""
+    __tablename__ = "announcement_targets"
+    announcement_id: Mapped[int] = mapped_column(ForeignKey("announcements.id", ondelete="CASCADE"), primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True, index=True)
+    read_at: Mapped[dt.datetime | None] = mapped_column(TS)
+
+
+class AnnouncementReply(Base):
+    """Переписка по объявлению. thread_user_id говорит, чья это переписка: у каждого адресата своя."""
+    __tablename__ = "announcement_replies"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    announcement_id: Mapped[int] = mapped_column(ForeignKey("announcements.id", ondelete="CASCADE"))
+    thread_user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    author_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    from_staff: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"))
+    text: Mapped[str] = mapped_column(String(1000))
+    created_at: Mapped[dt.datetime] = mapped_column(TS, server_default=func.now())
+    __table_args__ = (CheckConstraint("length(btrim(text)) > 0", name="text"),
+                      Index("ix_announcement_replies_thread", "announcement_id", "thread_user_id", "id"))

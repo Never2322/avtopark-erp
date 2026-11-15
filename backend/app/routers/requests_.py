@@ -15,7 +15,7 @@ from app.deps import Principal, current, load_grants, require
 from app.enums import (REQUEST_APPROVAL_STEPS, REQUEST_FLOW, REQUEST_OPEN, REQUEST_PARTS_MAX, REQUEST_PRIORITIES, REQUEST_STATUSES,
                        VEHICLE_STATUSES)
 from app.models import RequestPart, ServiceRequest, ServiceRequestEvent, User, Vehicle
-from app.services import access
+from app.services import access, notify
 from app.services import bills as bills_svc
 from app.services import parts as parts_svc
 from app.services.numbering import next_number
@@ -229,6 +229,7 @@ def create_request(body: RequestCreate, p: Principal = Depends(require("requests
         add_event(db, r, p, "edit", "Добавлены детали: " + ", ".join(f"{x['name']} — {parts_svc.qty_text(x['qty'])} {x['unit']}" for x in lines))
     audit.log(db, p, "request.create", "request", r.id, r.legal_entity_id, number=r.number, vehicle=v.plate, priority=r.priority,
               parts=[x["name"] for x in lines])
+    notify.on_request_new(db, r, p.id)
     db.commit()
     db.refresh(r)
     return out(db, p, r, detailed=True)
@@ -273,6 +274,8 @@ def update_request(rid: int, body: RequestUpdate, p: Principal = Depends(require
             r.assignee_id = new_id
             add_event(db, r, p, "assign", "Исполнитель: " + (name_of(db.get(User, new_id)) if new_id else "не назначен"))
             changed.append("assignee")
+            if new_id is not None:
+                notify.on_request_assigned(db, r, new_id, p.id)
     non_assign = [c for c in changed if c != "assignee"]
     if non_assign:
         add_event(db, r, p, "edit", "Изменено: " + ", ".join(FIELD_NAMES.get(c, c) for c in non_assign))
@@ -310,6 +313,7 @@ def transition(rid: int, body: TransitionIn, p: Principal = Depends(current), db
         change_status(db, p, r.vehicle, body.vehicle_status, f"Обращение №{r.number}: {REQUEST_STATUSES[body.to_status].lower()}", r.id)
     audit.log(db, p, "request.transition", "request", r.id, r.legal_entity_id, number=r.number, from_status=old,
               to_status=body.to_status, vehicle_status=body.vehicle_status, comment=comment)
+    notify.on_request_status(db, r, body.to_status, comment, p.id)
     db.commit()
     db.refresh(r)
     return out(db, p, r, detailed=True)
@@ -324,5 +328,6 @@ def comment(rid: int, body: CommentIn, p: Principal = Depends(current), db: Sess
     r.updated_by_id = p.id
     r.updated_at = utcnow()
     audit.log(db, p, "request.comment", "request", r.id, r.legal_entity_id, number=r.number)
+    notify.on_request_comment(db, r, body.text.strip(), p.id)
     db.commit()
     return out(db, p, r, detailed=True)

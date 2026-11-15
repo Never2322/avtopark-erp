@@ -88,6 +88,8 @@ PERMISSIONS: list[tuple[str, str, str]] = [
     *_crud("calendar_events", "Календарь", "свои события в календаре"),
     ("calendar.view", "Календарь", "Видеть календарь: сроки из других разделов показываются только по тем, на которые есть право"),
     ("reminders.view", "Напоминания", "Видеть напоминания: только по тем разделам, на которые есть право"),
+    *_crud("announcements", "Объявления", "объявления сотрудникам (кому адресованы, ответы, закрытие)"),
+    ("announcements.read_own", "Объявления", "Читать адресованные себе объявления и отвечать на них"),
     ("roster.view", "Водители и техника", "Видеть сводку: кто на какой машине и что с ней сейчас"),
     ("roster.export", "Водители и техника", "Выгружать сводку в Excel"),
     ("legal_entities.view", "Организации", "Видеть юридические лица"),
@@ -196,4 +198,10 @@ ROLE_DEFAULTS["accountant"] += _all("employee_events", "calendar_events", only=_
 ROLE_DEFAULTS["dispatcher"] += _all("employee_events", only=_VIEW) + _all("calendar_events", only=_WORK) + ["calendar.view", "reminders.view"]
 ROLE_DEFAULTS["mechanic"] += _all("calendar_events", only=_WORK) + ["calendar.view", "reminders.view"]
 ROLE_DEFAULTS["storekeeper"] += _all("calendar_events", only=_VIEW) + ["calendar.view", "reminders.view"]
+# Объявления и уведомления (этап 3в). Допущения: объявления пишет директор, диспетчер пишет и отвечает, читают и отвечают все;
+# уведомления на сайте получает каждый пользователь по своим делам (отдельного права на них нет).
+ROLE_DEFAULTS["director"] += _all("announcements")
+ROLE_DEFAULTS["dispatcher"] += _all("announcements", only=_WORK)
+for _role in ("director", "mechanic", "dispatcher", "driver", "storekeeper", "accountant", "employee"):
+    ROLE_DEFAULTS[_role] += ["announcements.read_own"]
 assert all(c in PERMISSION_CODES for codes in ROLE_DEFAULTS.values() for c in codes)

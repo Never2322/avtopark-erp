@@ -14,6 +14,9 @@ from app.models import AuditLog
 router = APIRouter(prefix="/audit", tags=["Журнал действий"])
 
 ACTIONS = {
+    "announcement.create": "Написано объявление", "announcement.answer": "Ответ на объявление", "announcement.reply": "Ответ адресата на объявление",
+    "announcement.close": "Объявление закрыто", "announcement.reopen": "Объявление показано снова", "announcement.void": "Объявление в архиве",
+    "announcement.restore": "Объявление возвращено из архива",
     "login.ok": "Вход", "login.failed": "Неудачный вход", "login.blocked": "Вход заблокирован после неудач",
     "logout": "Выход", "logout.others": "Выход на других устройствах", "password.change": "Смена пароля",
     "user.create": "Создан пользователь", "user.update": "Изменён пользователь", "user.password_reset": "Сброшен пароль",

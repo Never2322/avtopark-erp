@@ -16,6 +16,7 @@ from app.enums import REQUEST_PARTS_OPEN, REQUEST_STATUSES
 from app.models import RequestPart, ServiceRequest, User, Vehicle
 from app.parts_seed import norm
 from app.registry import org_tz
+from app.services import notify
 from app.services import parts as svc
 
 router = APIRouter(prefix="/purchases", tags=["Что купить"])
@@ -124,6 +125,7 @@ def mark_bought(body: MarkIn, p: Principal = Depends(require("purchases.mark")),
         if svc.after_bought(db, r, p):
             advanced.append(r.number)
         audit.log(db, p, "purchase.bought", "request", r.id, r.legal_entity_id, number=r.number, parts=[x.name for x in rows])
+        notify.on_parts_bought(db, r, [x.name for x in rows], p.id)
     db.commit()
     return {"marked": marked, "advanced": advanced}
 

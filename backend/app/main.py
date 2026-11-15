@@ -32,10 +32,13 @@ async def lifespan(app: FastAPI):
     from app.services import backup
     with session_factory()() as db:
         bootstrap(db)
+    from app.services import notify
     task = asyncio.create_task(backup.scheduler()) if get_settings().backup_schedule else None
+    sweeper = asyncio.create_task(notify.scheduler()) if get_settings().notify_schedule else None
     yield
-    if task:
-        task.cancel()
+    for t in (task, sweeper):
+        if t:
+            t.cancel()
 
 
 def create_app() -> FastAPI:
@@ -81,12 +84,13 @@ def create_app() -> FastAPI:
         return {"status": "ok"}
 
     from app.routers import (audit_log, auth, backups, bills, dashboard, dossier, driver, employees, entries, jobs, legal_entities, purchases, readings,
-                             request_parts, requests_, roles, roster, timesheet, trade, users, vehicles, waybills, ppe, calendar_view, reminders)
+                             request_parts, requests_, roles, roster, timesheet, trade, users, vehicles, waybills, ppe, calendar_view, reminders, notifications, announcements)
     from app import resources  # noqa: F401  (описания разделов регистрируются при импорте)
     from app.registry import RESOURCES, build_router, options_router
     for module in (auth, legal_entities, users, roles, employees, vehicles, readings, requests_, waybills, dashboard,
-                   dossier, audit_log, backups, trade, jobs, entries, roster, driver, request_parts, purchases, bills, ppe, timesheet, calendar_view, reminders):
+                   dossier, audit_log, backups, trade, jobs, entries, roster, driver, request_parts, purchases, bills, ppe, timesheet, calendar_view, reminders, notifications, announcements):
         app.include_router(module.router, prefix="/api")
+    app.include_router(announcements.news, prefix="/api")
     for res in RESOURCES.values():
         app.include_router(build_router(res), prefix="/api")
     app.include_router(options_router, prefix="/api")
