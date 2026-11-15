@@ -1,0 +1,76 @@
+# Запуск: docker compose up -d --build
+# Сайт откроется на http://localhost:${HTTP_PORT:-8080}. Данные базы и копии лежат в томах Docker и переживают перезапуск.
+services:
+  db:
+    image: postgres:16-bookworm
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?Заполните .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Заполните .env}
+      POSTGRES_DB: ${POSTGRES_DB:-erp}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    # порт базы наружу не открывается: к ней ходит только сервер приложения
+
+  backend:
+    build: ./backend
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      POSTGRES_HOST: db
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-erp}
+      ADMIN_LOGIN: ${ADMIN_LOGIN:-}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      TRUST_PROXY: "true"
+      ORG_TIMEZONE: ${ORG_TIMEZONE:-Asia/Novosibirsk}
+      DEFAULT_LEGAL_ENTITY: ${DEFAULT_LEGAL_ENTITY:-ООО «Основное»}
+      DOCS_ENABLED: ${DOCS_ENABLED:-true}
+      BACKUP_KEEP: ${BACKUP_KEEP:-14}
+      BACKUP_HOUR: ${BACKUP_HOUR:-3}
+    volumes:
+      - backups:/backups
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/health').status == 200 else 1)"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  frontend:
+    build: ./frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "${HTTP_PORT:-8080}:80"
+
+  # Необязательно: автоматический https для домена. Запуск: docker compose --profile https up -d  (нужны DOMAIN в .env и открытые порты 80 и 443)
+  caddy:
+    image: caddy:2
+    profiles: ["https"]
+    restart: unless-stopped
+    depends_on:
+      - frontend
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN:-}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+
+volumes:
+  pgdata:
+  backups:
+  caddy_data:
