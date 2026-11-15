@@ -405,12 +405,27 @@ def end_assignment(vid: int, aid: int, body: EndIn, p: Principal = Depends(requi
     a = db.get(VehicleAssignment, aid)
     if not a or a.vehicle_id != v.id:
         raise fail(404, "not_found", "Закрепление не найдено")
-    if a.ended_on is not None and a.ended_on <= org_today():
+    today = org_today()
+    if a.ended_on is not None and a.ended_on < today:
         raise fail(409, "already_ended", "Закрепление уже снято")
-    end = body.ended_on or org_today()
-    if end < a.started_on:
-        raise fail(422, "bad_dates", "Дата окончания раньше даты начала", "ended_on")
-    a.ended_on = end
-    audit.log(db, p, "vehicle.unassign", "vehicle", v.id, v.legal_entity_id, plate=v.plate, employee_id=a.employee_id)
+    # «Последний день» включается: закрепление с ended_on = сегодня действует до конца дня.
+    # Поэтому «Снять» без даты ставит последним днём вчера, и водитель перестаёт быть закреплённым сразу.
+    removed = False
+    if body.ended_on is None:
+        end = today - dt.timedelta(days=1)
+        removed = end < a.started_on          # закрепили сегодня и сняли в тот же день: ни одного полного дня не было
+    else:
+        end = body.ended_on
+        if end < a.started_on:
+            raise fail(422, "bad_dates", "Дата окончания раньше даты начала", "ended_on")
+    out = assignment_out(a)
+    if removed:
+        db.delete(a)
+        out.update(active=False)
+    else:
+        a.ended_on = end
+        out = assignment_out(a)
+    audit.log(db, p, "vehicle.unassign", "vehicle", v.id, v.legal_entity_id, plate=v.plate, employee_id=a.employee_id,
+              removed=removed)
     db.commit()
-    return assignment_out(a)
+    return out
