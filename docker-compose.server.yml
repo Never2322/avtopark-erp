@@ -1,0 +1,123 @@
+# Запуск на сервере за общим Nginx. Подробно: docs/Выкладка-на-сервер.md
+#
+# Что здесь устроено специально для общего сервера:
+#  - НИ ОДИН порт наружу не открывается (нет блока ports): 80, 443, 5432, 8000 и стандартные порты React не заняты.
+#    Весь трафик идёт из общего Nginx через внешнюю сеть proxy-network на контейнер avtopark-web.
+#  - В общую сеть подключён только avtopark-web. База и сервер приложения живут в своей закрытой сети проекта.
+#  - Имена, которые видны в общей сети, уникальные (avtopark-web), поэтому они не пересекаются с другими проектами.
+#
+# Команды те же, что на компьютере (docker compose up -d --build): файл выбирается строкой COMPOSE_FILE в .env
+# (см. .env.server.example). Если её нет, добавляйте -f docker-compose.server.yml к каждой команде.
+name: avtopark-erp
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  db:
+    image: postgres:16-bookworm
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?Заполните .env (см. .env.server.example)}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Заполните .env (см. .env.server.example)}
+      POSTGRES_DB: ${POSTGRES_DB:-erp}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    logging: *logging
+    # порт базы наружу не открывается: к ней ходит только сервер приложения
+
+  backend:
+    build: ./backend
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      POSTGRES_HOST: db
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-erp}
+      ADMIN_LOGIN: ${ADMIN_LOGIN:-}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      # на сервере сайт открывается по https, поэтому по умолчанию true
+      COOKIE_SECURE: ${COOKIE_SECURE:-true}
+      TRUST_PROXY: "true"
+      ORG_TIMEZONE: ${ORG_TIMEZONE:-Asia/Novosibirsk}
+      DEFAULT_LEGAL_ENTITY: ${DEFAULT_LEGAL_ENTITY:-ООО «Основное»}
+      TWOGIS_KEY: ${TWOGIS_KEY:-}
+      MAP_CITY: ${MAP_CITY:-Новосибирск}
+      MAP_LON: ${MAP_LON:-82.92}
+      MAP_LAT: ${MAP_LAT:-55.03}
+      MAP_ZOOM: ${MAP_ZOOM:-11}
+      # на рабочем сервере страница описания программного интерфейса по умолчанию выключена
+      DOCS_ENABLED: ${DOCS_ENABLED:-false}
+      BACKUP_KEEP: ${BACKUP_KEEP:-14}
+      BACKUP_HOUR: ${BACKUP_HOUR:-3}
+      PUBLIC_URL: ${PUBLIC_URL:-}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_SECURITY: ${SMTP_SECURITY:-starttls}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+      OFFSITE_PASSWORD: ${OFFSITE_PASSWORD:-}
+      OFFSITE_EMAIL_TO: ${OFFSITE_EMAIL_TO:-}
+      OFFSITE_TELEGRAM_CHAT_ID: ${OFFSITE_TELEGRAM_CHAT_ID:-}
+      OFFSITE_EMAIL_MAX_MB: ${OFFSITE_EMAIL_MAX_MB:-20}
+    volumes:
+      - backups:/backups
+    # Уникальное имя в сети проекта: сайт обращается к серверу приложения именно по нему (см. deploy/web-nginx.conf),
+    # чтобы имя «backend» не могло совпасть с чужим контейнером в общей сети.
+    networks:
+      default:
+        aliases:
+          - avtopark-backend
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/health').status == 200 else 1)"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    logging: *logging
+
+  # Единственная точка входа: сюда приходит трафик из общего Nginx (http://avtopark-web:80).
+  # Внутри свой nginx: отдаёт сайт и передаёт запросы /api серверу приложения.
+  avtopark-web:
+    build: ./frontend
+    container_name: avtopark-web
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    volumes:
+      - ./deploy/web-nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    networks:
+      - default   # связь с сервером приложения
+      - proxy     # связь с общим Nginx
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/ || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    logging: *logging
+    # ports не указываем: наружу сайт напрямую не открывается
+
+volumes:
+  pgdata:
+  backups:
+
+networks:
+  # общая сеть, в которой живёт ваш Nginx; создана заранее, этот файл её только подключает
+  proxy:
+    external: true
+    name: ${PROXY_NETWORK:-proxy-network}
