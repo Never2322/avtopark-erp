@@ -1,7 +1,7 @@
 import { useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Archive, ArrowLeft, CheckCircle2, Gauge, History, Pencil, Plus, RotateCcw, UserPlus, Wrench, XCircle } from "lucide-react";
+import { Archive, ArrowLeft, CheckCircle2, Disc3, Gauge, Hammer, History, Pencil, PiggyBank, Plus, RotateCcw, Timer, UserPlus, Wrench, XCircle } from "lucide-react";
 import { get, post, patch } from "../api";
 import { fmtDate, fmtDateTime, fmtNum, readingUnit, todayIso } from "../format";
 import { Page, useVehicleTypes } from "../hooks";
@@ -11,6 +11,9 @@ import {
 import { reading, VehicleRow } from "./Vehicles";
 import { RequestsTable } from "./Requests";
 import { WaybillsTable } from "./Waybills";
+import { VehicleSection } from "../components/VehicleSection";
+import { maintenanceActions } from "./maintenanceActions";
+import { useAuth } from "../auth";
 
 interface Detail extends VehicleRow {
   note: string; department_id: number | null; status_changed_at: string | null;
@@ -23,7 +26,16 @@ interface Reading {
 interface Hist { id: number; status: string; status_label: string; from_label: string | null; reason: string; changed_at: string; by: string | null; request_number: number | null; request_id: number | null }
 interface Assign { id: number; employee_id: number; employee: string; role: string; started_on: string; ended_on: string | null; active: boolean }
 
-type TabId = "overview" | "readings" | "history" | "drivers" | "requests" | "waybills";
+type TabId = "overview" | "readings" | "history" | "drivers" | "requests" | "waybills" | "maintenance" | "events" | "tires" | "repairs" | "finance";
+
+/** Вкладки, которые рисует общий компонент по описанию раздела с сервера. Видны тем, у кого есть право смотреть раздел. */
+const SECTION_TABS: { id: TabId; resource: string; label: string; icon: typeof Wrench; empty: string }[] = [
+  { id: "maintenance", resource: "maintenance", label: "ТО", icon: Wrench, empty: "Добавьте плановое ТО: вид, что сделать и срок по дате или пробегу." },
+  { id: "events", resource: "vehicle_events", label: "Мероприятия", icon: Timer, empty: "Добавьте мероприятие со сроком: тахограф, поверка, замена ремня." },
+  { id: "tires", resource: "tires", label: "Шины", icon: Disc3, empty: "Добавьте шины: марка, размер, сезон и дата установки." },
+  { id: "repairs", resource: "vehicle_repairs", label: "Ремонты", icon: Hammer, empty: "Добавьте ремонт или деталь: дата, название, стоимость." },
+  { id: "finance", resource: "vehicle_finance", label: "Финансы", icon: PiggyBank, empty: "Добавьте доход или расход по этой машине." },
+];
 
 function StatusModal({ v, onClose }: { v: Detail; onClose: () => void }) {
   const types = useVehicleTypes();
@@ -287,7 +299,12 @@ export function VehicleCard() {
   const nav = useNavigate();
   const qc = useQueryClient();
   const toast = useToast();
-  const [tab, setTab] = useState<TabId>("overview");
+  const { can } = useAuth();
+  const [sp, setSp] = useSearchParams();
+  const visibleTabs = SECTION_TABS.filter((t) => can(`${t.resource}.view`));
+  const wanted = sp.get("tab") as TabId | null;
+  const tab: TabId = wanted && (["overview", "readings", "history", "drivers", "requests", "waybills"].includes(wanted) || visibleTabs.some((t) => t.id === wanted)) ? wanted : "overview";
+  const setTab = (t: TabId) => setSp((old) => { const n = new URLSearchParams(old); t === "overview" ? n.delete("tab") : n.set("tab", t); return n; }, { replace: true });
   const [modal, setModal] = useState<"status" | "edit" | "archive" | null>(null);
   const q = useQuery({ queryKey: ["vehicle", vid], enabled: Number.isInteger(vid), queryFn: () => get<Detail>(`/vehicles/${vid}`) });
   const v = q.data;
@@ -317,6 +334,7 @@ export function VehicleCard() {
       <Tabs value={tab} onChange={setTab} tabs={[
         { id: "overview", label: "Обзор" }, { id: "readings", label: "Показания" }, { id: "history", label: "История статусов" },
         { id: "drivers", label: "Водители" }, { id: "requests", label: "Обращения" }, { id: "waybills", label: "Путевые листы" },
+        ...visibleTabs.map((t) => ({ id: t.id, label: t.label })),
       ]} />
       {tab === "overview" && (
         <div className="grid cols-2">
@@ -347,6 +365,9 @@ export function VehicleCard() {
       {tab === "drivers" && <DriversTab v={v} />}
       {tab === "requests" && <Card flush title="Обращения по этой машине"><RequestsTable vehicleId={v.id} /></Card>}
       {tab === "waybills" && <Card flush title="Путевые листы по этой машине"><WaybillsTable vehicleId={v.id} /></Card>}
+      {visibleTabs.filter((t) => t.id === tab).map((t) => (
+        <VehicleSection key={t.id} resource={t.resource} vehicleId={v.id} icon={t.icon} empty={t.empty} actions={t.resource === "maintenance" ? maintenanceActions : undefined} />
+      ))}
       {modal === "status" && <StatusModal v={v} onClose={() => setModal(null)} />}
       {modal === "edit" && <EditModal v={v} onClose={() => setModal(null)} />}
       {modal === "archive" && <ConfirmModal title="Отправить в архив?" danger confirmLabel="В архив" text="Машина пропадёт из обычных списков, но вся история сохранится. Из архива её можно вернуть."

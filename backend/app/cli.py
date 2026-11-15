@@ -6,6 +6,8 @@
   seed-demo       вымышленные данные для знакомства с системой (НЕ запускать на рабочей базе)
   backup          сделать копию и проверить её восстановлением
   verify <id>     проверить восстановлением ранее сделанную копию
+  import-old      перенос данных из старой программы (SQLite): без --apply только показывает, что получится
+  decrypt-backup  расшифровать копию, пришедшую вне сервера (Telegram или почта)
 """
 import argparse
 import datetime as dt
@@ -154,6 +156,33 @@ def cmd_seed_demo(args) -> int:
     return 0
 
 
+def cmd_import_old(args) -> int:
+    import os
+    from app.legacy_import import run_import
+    if not os.path.isfile(args.db):
+        print(f"Файл старой базы не найден: {args.db}")
+        return 2
+    with session_factory()() as db:
+        try:
+            report = run_import(db, args.db, apply=args.apply, default_entity=args.default_entity or "")
+        except Exception as exc:                                           # noqa: BLE001
+            db.rollback()
+            print(f"Перенос остановлен, в новой базе ничего не изменено: {exc}")
+            return 1
+    print(report.text())
+    if args.report:
+        with open(args.report, "w", encoding="utf-8") as fh:
+            fh.write(report.full_text() + "\n")
+        print(f"\nПолный отчёт: {args.report}")
+    print("\n" + ("ГОТОВО: данные записаны в новую базу." if args.apply else "ПРОБНЫЙ ЗАПУСК: в базу ничего не записано. Чтобы записать, запустите с --apply."))
+    return 0
+
+
+def cmd_decrypt_backup(args) -> int:
+    from app.services.offsite import decrypt_file
+    return decrypt_file(args.src, args.dst, args.password or None)
+
+
 def utcnow_minus(days: int) -> dt.datetime:
     return dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=days)
 
@@ -174,6 +203,17 @@ def main(argv=None) -> int:
     v = sub.add_parser("verify")
     v.add_argument("id", type=int)
     v.set_defaults(fn=cmd_verify)
+    i = sub.add_parser("import-old")
+    i.add_argument("--db", required=True, help="путь к файлу старой базы (SQLite)")
+    i.add_argument("--apply", action="store_true", help="записать в базу (без этого запуск пробный)")
+    i.add_argument("--default-entity", default="", help="название юрлица для данных без организации (по умолчанию первая организация)")
+    i.add_argument("--report", default="", help="куда сохранить полный отчёт")
+    i.set_defaults(fn=cmd_import_old)
+    x = sub.add_parser("decrypt-backup")
+    x.add_argument("--in", dest="src", required=True, help="зашифрованный файл копии (*.dump.enc)")
+    x.add_argument("--out", dest="dst", required=True, help="куда записать расшифрованный файл (*.dump)")
+    x.add_argument("--password", default="", help="пароль шифрования; если не указан, берётся OFFSITE_PASSWORD или спрашивается")
+    x.set_defaults(fn=cmd_decrypt_backup)
     args = parser.parse_args(argv)
     get_settings()
     return args.fn(args)

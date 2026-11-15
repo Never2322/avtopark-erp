@@ -2,8 +2,9 @@ import { FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { KeyRound, LogOut, ShieldCheck } from "lucide-react";
 import { useAuth } from "../auth";
-import { post } from "../api";
+import { ApiError, post } from "../api";
 import { Alert, Button, Card, Field, PageHeader, useForm, useToast } from "../ui";
+import { ChannelsCard } from "../components/ChannelsCard";
 
 function PasswordForm({ forced }: { forced?: boolean }) {
   const { refresh } = useAuth();
@@ -12,7 +13,7 @@ function PasswordForm({ forced }: { forced?: boolean }) {
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     f.clear();
-    if (f.values.new_password !== f.values.repeat) return f.fail({ field: "repeat", message: "Пароли не совпадают", fields: { repeat: "Пароли не совпадают" } });
+    if (f.values.new_password !== f.values.repeat) return f.fail(new ApiError(422, "validation", "Новый пароль и повтор не совпадают", "repeat", { repeat: "Пароли не совпадают" }));
     try {
       await post("/auth/password", { current_password: f.values.current_password, new_password: f.values.new_password });
       toast.success("Пароль изменён");
@@ -79,6 +80,7 @@ export function Profile() {
               )) : <span className="muted">нет</span>}</dd>
             </dl>
           </Card>
+          <ChannelsCard />
           <Card title="Входы">
             <p className="muted" style={{ marginBottom: 12 }}>Если входили с чужого или потерянного устройства, завершите все остальные входы.</p>
             <div className="row wrap">

@@ -7,16 +7,18 @@ from decimal import ROUND_HALF_UP, Decimal
 from sqlalchemy import and_, case, func, select
 
 from app.common import num
-from app.enums import (CALENDAR_COLORS, CALENDAR_REMIND_MAX, EMPLOYEE_EVENT_KINDS, EMPLOYEE_EVENT_MONEY_KINDS, REMINDER_LEAD_DAYS, PPE_SOON_DAYS, PPE_WEAR_MAX_MONTHS, PART_UNITS, CASH_ACCOUNT_KINDS, CASH_OP_KINDS, COUNTERPARTY_KINDS, DOC_FULL_NAMES, DOC_TYPES, ENTRY_LATE_DAYS, FINE_PAYERS,
+from app.enums import (MAINTENANCE_KINDS, TIRE_SEASONS, VEHICLE_FINANCE_KINDS, VEHICLE_REPAIR_KINDS, CALENDAR_COLORS, CALENDAR_REMIND_MAX, EMPLOYEE_EVENT_KINDS, EMPLOYEE_EVENT_MONEY_KINDS, REMINDER_LEAD_DAYS, PPE_SOON_DAYS, PPE_WEAR_MAX_MONTHS, PART_UNITS, CASH_ACCOUNT_KINDS, CASH_OP_KINDS, COUNTERPARTY_KINDS, DOC_FULL_NAMES, DOC_TYPES, ENTRY_LATE_DAYS, FINE_PAYERS,
                        FUEL_MAX_LITERS, JOB_DATE_WINDOW_DAYS, JOB_STATES, ORDER_STATUSES, PAYMENT_KINDS, RENTAL_DIRECTIONS, TARIFF_UNITS,
-                       VAT_RATES)
-from app.models import (CalendarEvent, EmployeeEvent, CashAccount, CashOp, Constant, Counterparty, Document, Employee, EmployeePayment, EntryPhoto, Fine, FuelCard,
-                        FuelFill, Job, JobPhoto, MiscExpense, Order, PartCatalog, PpeIssue, PpeNorm, Rental, Tariff, Trip, Vehicle)
+                       STOCK_UNITS, VAT_RATES)
+from app.models import (ControlEvent, MaintenanceItem, VehicleFinance, VehicleRepair, VehicleTire, CalendarEvent, EmployeeEvent, CashAccount, CashOp, Constant, Counterparty, Document, Employee, EmployeePayment, EntryPhoto, Fine, FuelCard,
+                        FuelFill, Job, JobPhoto, MiscExpense, Order, PartCatalog, PpeIssue, PpeNorm, Rental, StockItem, Tariff, Trip, Vehicle, Warehouse)
 from app.registry import MAX_MONEY, Col, F, Invalid, R, org_tz, register
 from app.parts_seed import norm as part_key
+from app.services import control as control_svc
 from app.services import fuel as fuel_calc
 from app.services import ppe as ppe_calc
 from app.services import notify as notify_svc
+from app.services import stock as stock_svc
 from app.services import reminders as rem
 from app.services.people import user_names
 from app.services.vehicles import current_driver_id
@@ -1114,4 +1116,238 @@ register(R(
     search=("title", "note"), states={"open": "Не выполнены", "done": "Выполнены"},
     state_filter=lambda q, state, today: q.where(CalendarEvent.done.is_(state == "done")),
     order=("-start_at", "-id"), prepare=_calendar_prepare,
+))
+
+
+# ================================================================ склад: склады и товары (этап 4-1)
+
+def _wh_computed(db, objs):
+    bal = stock_svc.balances(db)
+    count: dict[int, int] = {}
+    for (w, _i), q in bal.items():
+        if q > 0:
+            count[w] = count.get(w, 0) + 1
+    return {o.id: {"positions": count.get(o.id, 0)} for o in objs}
+
+
+def _wh_void(db, obj):
+    left = [(w, i) for (w, i), q in stock_svc.balances(db, warehouse_id=obj.id).items() if q != 0]
+    if left:
+        raise Invalid({"_": "На складе есть остатки: сначала спишите их или переместите на другой склад"})
+
+
+register(R(
+    key="warehouses", title="Склады", one="склад", model=Warehouse,
+    fields=[
+        F("name", "Название", required=True, max=120, hint="Например: Главный склад, Гараж, Контейнер"),
+        F("note", "Заметка", "textarea", list=False),
+    ],
+    cols=[Col("positions", "Позиций с остатком", "number")],
+    computed=_wh_computed, search=("name",), order=("name",), before_void=_wh_void,
+    unique_field="name", unique_text="Склад с таким названием в этом юрлице уже есть",
+))
+
+
+def _item_prepare(db, p, v, obj, m):
+    """Ключ для сравнения названий считает программа: «Фильтр масляный» и «фильтр  масляный!» — один товар."""
+    name = " ".join((m.get("name") or "").split())
+    key = part_key(name)
+    if not key:
+        raise Invalid({"name": "Впишите название буквами или цифрами"})
+    v["name"], v["name_key"] = name, key
+
+
+def _item_computed(db, objs):
+    ids = [o.id for o in objs]
+    total = stock_svc.totals(db, ids)
+    out = {}
+    for o in objs:
+        t = total.get(o.id, Decimal(0))
+        low = o.min_qty > 0 and t < o.min_qty and not o.archived_at
+        out[o.id] = {"total": float(t), "state": {"text": "Заканчивается", "tone": "warning"} if low else
+                     ({"text": "В наличии", "tone": "success"} if t > 0 else {"text": "Нет на складе", "tone": "neutral"})}
+    return out
+
+
+def _item_void(db, obj):
+    if stock_svc.totals(db, [obj.id]).get(obj.id, Decimal(0)) != 0:
+        raise Invalid({"_": "Этот товар ещё есть на складе: сначала спишите остаток"})
+
+
+register(R(
+    key="stock_items", title="Товары на складе", one="товар", model=StockItem,
+    fields=[
+        F("name", "Наименование", required=True, max=200, wide=True, hint="Например: Масло моторное 5W-40"),
+        F("sku", "Артикул", max=60),
+        F("unit", "Единица", "enum", options={u: u for u in STOCK_UNITS}, default="шт", required=True),
+        F("min_qty", "Минимальный остаток", "decimal", places=3, lo=Decimal(0), default=Decimal(0),
+          hint="Если общий остаток станет меньше, товар попадёт в список «Заканчивается»"),
+        F("note", "Заметка", "textarea", list=False),
+    ],
+    cols=[Col("total", "Остаток", "number"), Col("state", "Состояние", "badge")],
+    computed=_item_computed, search=("name", "sku"), order=("name",), prepare=_item_prepare, before_void=_item_void,
+    unique_field="name", unique_text="Такой товар в этом юрлице уже есть",
+))
+
+
+# ================================================================ вкладки техники: шины, ремонты, финансы, ТО, контроль
+
+def _vehicle_now(db, vehicle_ids):
+    """Текущий пробег и моточасы машин одним запросом: {id: (км, часы)}."""
+    if not vehicle_ids:
+        return {}
+    return {i: (km, h) for i, km, h in db.execute(select(Vehicle.id, Vehicle.current_km, Vehicle.current_hours).where(Vehicle.id.in_(list(vehicle_ids))))}
+
+
+def _tire_computed(db, objs):
+    now = _vehicle_now(db, {o.vehicle_id for o in objs})
+    out = {}
+    for t in objs:
+        cur = now.get(t.vehicle_id, (None, None))[0]
+        end = t.remove_km if t.remove_km is not None else (int(cur) if cur is not None and t.remove_date is None else None)
+        run = end - t.install_km if end is not None and t.install_km is not None and end >= t.install_km else None
+        out[t.id] = {"run_km": run, "state": {"text": "Снята", "tone": "neutral"} if t.remove_date else {"text": "На машине", "tone": "success"}}
+    return out
+
+
+def _tire_prepare(db, p, v, obj, m):
+    e: dict = {}
+    if m.get("install_km") is not None and m.get("remove_km") is not None and m["remove_km"] < m["install_km"]:
+        e["remove_km"] = "Пробег при снятии не может быть меньше пробега при установке"
+    for name, label in (("install_date", "Дата установки"), ("remove_date", "Дата снятия")):
+        _not_future(m, name, label, e)
+    if e:
+        raise Invalid(e)
+
+
+register(R(
+    key="tires", title="Шины", one="шину", model=VehicleTire, entity_from="vehicle",
+    fields=[
+        F("vehicle_id", "Техника", "ref", ref="vehicle", required=True, filter=True),
+        F("brand", "Марка", max=80, suggest=True),
+        F("model", "Модель", max=80),
+        F("size", "Размер", max=40, hint="Например: 315/80 R22.5", suggest=True),
+        F("season", "Сезон", "enum", options=TIRE_SEASONS, default="all", required=True, filter=True),
+        F("position", "Где стоит", max=60, hint="Например: передняя ось, левая", suggest=True),
+        F("serial", "Серийный номер", max=60, list=False),
+        F("install_date", "Установлена", "date"),
+        F("install_km", "Пробег при установке, км", "int", lo=Decimal(0), list=False),
+        F("remove_date", "Снята", "date", hint="Пусто, пока стоит на машине"),
+        F("remove_km", "Пробег при снятии, км", "int", lo=Decimal(0), list=False),
+        F("price", "Цена, ₽", "money", default="0", list=False),
+        F("wear_pct", "Износ, %", "int", lo=Decimal(0), hint="От 0 до 100", list=False),
+        F("note", "Заметка", "textarea", list=False),
+    ],
+    cols=[Col("run_km", "Пробег на шине, км", "number"), Col("state", "Состояние", "badge")],
+    search=("brand", "model", "size", "serial", "position", "note"), search_refs=(("vehicle_id", Vehicle, ("plate", "make", "model")),),
+    date="install_date", order=("-install_date", "-id"), prepare=_tire_prepare, computed=_tire_computed,
+    states={"mounted": "На машине", "removed": "Сняты"},
+    state_filter=lambda q, state, today: q.where(VehicleTire.remove_date.is_(None) if state == "mounted" else VehicleTire.remove_date.is_not(None)),
+))
+
+
+register(R(
+    key="vehicle_repairs", title="История ремонтов", one="запись о ремонте", model=VehicleRepair, entity_from="vehicle",
+    fields=[
+        F("vehicle_id", "Техника", "ref", ref="vehicle", required=True, filter=True),
+        F("repair_date", "Дата", "date", required=True),
+        F("kind", "Что это", "enum", options=VEHICLE_REPAIR_KINDS, default="repair", required=True, filter=True),
+        F("title", "Название", required=True, max=200, wide=True, hint="Что сделали или какую деталь поставили"),
+        F("part_number", "Артикул", max=60, list=False),
+        F("qty", "Количество", "decimal", default="1", lo=Decimal("0.001"), places=3, list=False),
+        F("cost", "Стоимость, ₽", "money", default="0", sum=True),
+        F("odometer", "Пробег, км", "int", lo=Decimal(0), list=False),
+        F("executor", "Кто делал", max=120, suggest=True, list=False),
+        F("note", "Заметка", "textarea", list=False),
+    ],
+    search=("title", "part_number", "executor", "note"), search_refs=(("vehicle_id", Vehicle, ("plate", "make", "model")),),
+    date="repair_date", order=("-repair_date", "-id"), prepare=_dated_prepare(("repair_date", "Дата")),
+))
+
+
+def _finance_computed(db, objs):
+    return {o.id: {"balance": float(o.amount if o.kind == "income" else -o.amount)} for o in objs}
+
+
+register(R(
+    key="vehicle_finance", title="Финансы по технике", one="операцию", model=VehicleFinance, entity_from="vehicle",
+    fields=[
+        F("vehicle_id", "Техника", "ref", ref="vehicle", required=True, filter=True),
+        F("op_date", "Дата", "date", required=True),
+        F("kind", "Вид", "enum", options=VEHICLE_FINANCE_KINDS, default="expense", required=True, filter=True),
+        F("category", "Статья", max=80, suggest=True, hint="Например: страховка, мойка, штраф-стоянка"),
+        F("amount", "Сумма, ₽", "money", required=True, lo=Decimal("0.01")),
+        F("description", "Описание", max=300, wide=True),
+        F("note", "Заметка", "textarea", list=False),
+    ],
+    cols=[Col("balance", "Доход минус расход, ₽", "money", sum=True)],
+    search=("category", "description", "note"), search_refs=(("vehicle_id", Vehicle, ("plate", "make", "model")),),
+    date="op_date", order=("-op_date", "-id"), prepare=_dated_prepare(("op_date", "Дата")), computed=_finance_computed,
+))
+
+
+def _control_computed(closed_of):
+    def computed(db, objs):
+        today = _today()
+        now = _vehicle_now(db, {o.vehicle_id for o in objs})
+        out = {}
+        for o in objs:
+            km, hours = now.get(o.vehicle_id, (None, None))
+            ev = control_svc.evaluate(due_date=o.due_date, due_km=o.due_km, due_hours=getattr(o, "due_hours", None), controlled=o.controlled,
+                                      closed=closed_of(o), today=today, cur_km=km, cur_hours=hours)
+            out[o.id] = {"state": control_svc.badge(ev), "left": control_svc.left_text(ev["left"]) if ev["level"] != "closed" else ""}
+        return out
+    return computed
+
+
+def _control_prepare(*, hours: bool):
+    def prepare(db, p, v, obj, m):
+        e: dict = {}
+        if m.get("due_km") is None and m.get("due_date") is None and (not hours or m.get("due_hours") is None):
+            e["due_date"] = "Укажите срок: дату" + (", пробег или моточасы" if hours else " или пробег")
+        if e:
+            raise Invalid(e)
+    return prepare
+
+
+register(R(
+    key="maintenance", title="Техобслуживание", one="запись о ТО", model=MaintenanceItem, entity_from="vehicle",
+    fields=[
+        F("vehicle_id", "Техника", "ref", ref="vehicle", required=True, filter=True),
+        F("kind", "Вид", "enum", options=MAINTENANCE_KINDS, default="to1", required=True, filter=True),
+        F("work", "Что сделать", max=300, wide=True),
+        F("due_date", "Срок по дате", "date"),
+        F("due_km", "Срок по пробегу, км", "int", lo=Decimal(0)),
+        F("interval_km", "Периодичность, км", "int", lo=Decimal(1), hint="Через сколько км повторять; по кнопке «Выполнено» создаётся следующая запись", list=False),
+        F("done_at", "Выполнено", "date"),
+        F("controlled", "На контроле", "bool", default="1", hint="Снимите, когда напоминать больше не нужно", list=False),
+        F("note", "Заметка", "textarea", list=False),
+    ],
+    cols=[Col("left", "Осталось"), Col("state", "Состояние", "badge")],
+    search=("work", "note"), search_refs=(("vehicle_id", Vehicle, ("plate", "make", "model")),),
+    order=("-id",), prepare=_control_prepare(hours=False), computed=_control_computed(lambda o: o.done_at is not None),
+    states={"open": "На контроле", "closed": "Выполнены или сняты"},
+    state_filter=lambda q, state, today: q.where(and_(MaintenanceItem.controlled.is_(True), MaintenanceItem.done_at.is_(None)) if state == "open"
+                                                    else (MaintenanceItem.controlled.is_(False) | MaintenanceItem.done_at.is_not(None))),
+))
+
+register(R(
+    key="vehicle_events", title="Контроль мероприятий", one="мероприятие", model=ControlEvent, entity_from="vehicle",
+    fields=[
+        F("vehicle_id", "Техника", "ref", ref="vehicle", required=True, filter=True),
+        F("event_type", "Тип", required=True, max=80, default="Другое", suggest=True, hint="Например: тахограф, поверка, замена ремня"),
+        F("title", "Что выполнить", required=True, max=200, wide=True),
+        F("unit", "Агрегат", max=80, list=False),
+        F("due_date", "Срок по дате", "date"),
+        F("due_km", "Срок по пробегу, км", "int", lo=Decimal(0)),
+        F("due_hours", "Срок по моточасам", "decimal", lo=Decimal(0), places=1),
+        F("interval_km", "Периодичность, км", "int", lo=Decimal(1), list=False),
+        F("controlled", "На контроле", "bool", default="1", list=False),
+        F("note", "Заметка", "textarea", list=False),
+    ],
+    cols=[Col("left", "Осталось"), Col("state", "Состояние", "badge")],
+    search=("event_type", "title", "unit", "note"), search_refs=(("vehicle_id", Vehicle, ("plate", "make", "model")),),
+    order=("-id",), prepare=_control_prepare(hours=True), computed=_control_computed(lambda o: False),
+    states={"open": "На контроле", "closed": "Сняты с контроля"},
+    state_filter=lambda q, state, today: q.where(ControlEvent.controlled.is_(state == "open")),
 ))

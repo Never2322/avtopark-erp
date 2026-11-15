@@ -8,6 +8,7 @@ import { useAuth } from "../auth";
 import { Alert, Badge, Button, Modal, QueryState, useToast } from "../ui";
 import { EntryPhotosButton } from "./Entries";
 import { ppeActions } from "./ppeActions";
+import { maintenanceActions } from "./maintenanceActions";
 import type { Row, RowActions } from "./Registry";
 
 const TYPES: { value: string; label: string }[] = [
@@ -84,5 +85,6 @@ export const tradeActions = (resource: string): RowActions | undefined => {
   if (resource === "trips") return (r) => ({ width: 1, node: <EntryPhotosButton kind="trip" id={r.id} count={r.photos} /> });
   if (resource === "fuel_fills") return (r) => ({ width: 1, node: <EntryPhotosButton kind="fuel" id={r.id} count={r.photos} /> });
   if (resource === "ppe") return ppeActions;
+  if (resource === "maintenance") return maintenanceActions;
   return undefined;
 };

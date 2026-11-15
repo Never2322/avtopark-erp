@@ -13,7 +13,7 @@ from app.config import get_settings
 from app.db import get_db
 from app.deps import Principal, require_global
 from app.models import BackupJob, User
-from app.services import backup
+from app.services import backup, channels, offsite
 
 router = APIRouter(prefix="/backups", tags=["Резервные копии"])
 STALE_AFTER = dt.timedelta(hours=36)
@@ -32,6 +32,7 @@ def out(job: BackupJob, who: str | None = None) -> dict:
         "restore_check": check,
         "verified": bool(check and check.get("ok")),
         "verifying": bool(check and check.get("state") == "running"),
+        "offsite": job.offsite or None,
     }
 
 
@@ -65,7 +66,8 @@ def list_backups(p: Principal = Depends(require_global("backups.manage")), db: S
         warnings.append("Самая свежая копия не проверена или проверка не прошла.")
     s = get_settings()
     return {"items": [out(j, who.get(j.initiated_by_id)) for j in jobs], "warnings": warnings,
-            "settings": {"keep": s.backup_keep, "schedule": s.backup_schedule, "hour": s.backup_hour, "timezone": s.org_timezone}}
+            "settings": {"keep": s.backup_keep, "schedule": s.backup_schedule, "hour": s.backup_hour, "timezone": s.org_timezone,
+                         "offsite": offsite.plan()}}
 
 
 @router.post("", status_code=202)
@@ -109,3 +111,20 @@ def download(bid: int, p: Principal = Depends(require_global("backups.manage")),
     audit.log(db, p, "backup.download", "backup", job.id, None, filename=job.filename)
     db.commit()
     return FileResponse(path, media_type="application/octet-stream", filename=job.filename)
+
+
+@router.post("/{bid}/send-offsite", status_code=202)
+def send_offsite(bid: int, tasks: BackgroundTasks, p: Principal = Depends(require_global("backups.manage")), db: Session = Depends(get_db)):
+    """Отправить готовую копию вне сервера (зашифрованной): в Telegram и/или на почту, как задано в настройках."""
+    job = get_job(db, bid)
+    if job.status != "ok" or not backup.file_path(job):
+        raise fail(409, "file_missing", "Отправлять можно только готовую копию, файл которой ещё есть")
+    if not channels.offsite_enabled():
+        raise fail(409, "offsite_off", "Копии вне сервера выключены: в настройках сервера не задан пароль шифрования OFFSITE_PASSWORD")
+    plan = offsite.plan()
+    if not (plan["telegram"] or plan["email"]):
+        raise fail(409, "offsite_no_target", "Некуда отправлять: подключите Telegram (право на копии) или укажите OFFSITE_EMAIL_TO")
+    audit.log(db, p, "backup.offsite", "backup", job.id, None)
+    db.commit()
+    tasks.add_task(offsite.send, job.id)
+    return out(job)

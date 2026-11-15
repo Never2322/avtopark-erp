@@ -34,9 +34,26 @@ services:
       TRUST_PROXY: "true"
       ORG_TIMEZONE: ${ORG_TIMEZONE:-Asia/Novosibirsk}
       DEFAULT_LEGAL_ENTITY: ${DEFAULT_LEGAL_ENTITY:-ООО «Основное»}
+      TWOGIS_KEY: ${TWOGIS_KEY:-}
+      MAP_CITY: ${MAP_CITY:-Новосибирск}
+      MAP_LON: ${MAP_LON:-82.92}
+      MAP_LAT: ${MAP_LAT:-55.03}
+      MAP_ZOOM: ${MAP_ZOOM:-11}
       DOCS_ENABLED: ${DOCS_ENABLED:-true}
       BACKUP_KEEP: ${BACKUP_KEEP:-14}
       BACKUP_HOUR: ${BACKUP_HOUR:-3}
+      PUBLIC_URL: ${PUBLIC_URL:-}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_SECURITY: ${SMTP_SECURITY:-starttls}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+      OFFSITE_PASSWORD: ${OFFSITE_PASSWORD:-}
+      OFFSITE_EMAIL_TO: ${OFFSITE_EMAIL_TO:-}
+      OFFSITE_TELEGRAM_CHAT_ID: ${OFFSITE_TELEGRAM_CHAT_ID:-}
+      OFFSITE_EMAIL_MAX_MB: ${OFFSITE_EMAIL_MAX_MB:-20}
     volumes:
       - backups:/backups
     healthcheck:

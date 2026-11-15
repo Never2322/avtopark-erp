@@ -27,6 +27,7 @@ PERMISSIONS: list[tuple[str, str, str]] = [
     ("readings.create_own", "Показания", "Вводить показания только своей техники"),
     ("readings.review", "Показания", "Проверять подозрительные показания"),
     ("readings.correct", "Показания", "Исправлять показания (с обязательной причиной)"),
+    ("readings.import", "Показания", "Загружать показания пробега и моточасов из файла"),
     ("requests.view", "Обращения и ремонты", "Видеть все обращения"),
     ("requests.view_own", "Обращения и ремонты", "Видеть только свои обращения"),
     ("requests.create", "Обращения и ремонты", "Создавать обращения"),
@@ -90,8 +91,20 @@ PERMISSIONS: list[tuple[str, str, str]] = [
     ("reminders.view", "Напоминания", "Видеть напоминания: только по тем разделам, на которые есть право"),
     *_crud("announcements", "Объявления", "объявления сотрудникам (кому адресованы, ответы, закрытие)"),
     ("announcements.read_own", "Объявления", "Читать адресованные себе объявления и отвечать на них"),
+    *_crud("warehouses", "Склад", "склады"),
+    *_crud("stock_items", "Склад", "товары на складе"),
+    *_crud("stock_moves", "Склад", "движения товара (поступление, расход, списание, перемещение)"),
     ("roster.view", "Водители и техника", "Видеть сводку: кто на какой машине и что с ней сейчас"),
     ("roster.export", "Водители и техника", "Выгружать сводку в Excel"),
+    ("reports.view", "Отчёты", "Открывать отчёты: пробег, топливо, простои и т. д. (по данным, на которые есть права)"),
+    ("reports.money", "Отчёты", "Видеть в отчётах деньги: затраты, доходы, суммы заказов"),
+    ("reports.export", "Отчёты", "Выгружать отчёты в Excel и CSV"),
+    *_crud("tires", "Транспорт", "шины техники"),
+    *_crud("vehicle_repairs", "Транспорт", "историю ремонтов техники"),
+    *_crud("vehicle_finance", "Транспорт", "доходы и расходы по технике"),
+    *_crud("maintenance", "Транспорт", "плановое ТО техники"),
+    *_crud("vehicle_events", "Транспорт", "контроль мероприятий по технике"),
+    ("map.view", "Карта", "Открывать карту 2ГИС: поиск адреса и адреса нарядов на карте"),
     ("legal_entities.view", "Организации", "Видеть юридические лица"),
     ("legal_entities.manage", "Организации", "Добавлять и менять юридические лица"),
     ("users.view", "Администрирование", "Видеть пользователей"),
@@ -204,4 +217,27 @@ ROLE_DEFAULTS["director"] += _all("announcements")
 ROLE_DEFAULTS["dispatcher"] += _all("announcements", only=_WORK)
 for _role in ("director", "mechanic", "dispatcher", "driver", "storekeeper", "accountant", "employee"):
     ROLE_DEFAULTS[_role] += ["announcements.read_own"]
+# Склад (этап 4-1). Допущения: склад ведёт кладовщик (без права убирать записи в архив), директор делает всё, механик видит остатки и
+# списывает детали на ремонт, бухгалтер смотрит. Диспетчеру и водителю склад закрыт.
+ROLE_DEFAULTS["director"] += _all("warehouses", "stock_items", "stock_moves")
+ROLE_DEFAULTS["storekeeper"] += _all("warehouses", "stock_items", "stock_moves", only=_WORK)
+ROLE_DEFAULTS["mechanic"] += _all("warehouses", "stock_items", only=_VIEW) + ["stock_moves.view", "stock_moves.create"]
+ROLE_DEFAULTS["accountant"] += _all("warehouses", "stock_items", "stock_moves", only=_VIEW)
+# Отчёты (этап 4-2). Допущения: директор и бухгалтер видят отчёты вместе с деньгами и выгружают; диспетчер видит отчёты без денег и выгружает;
+# механик видит отчёты без денег. Каждый столбец отчёта показывается только если есть право на раздел, из которого он взят.
+ROLE_DEFAULTS["director"] += ["reports.view", "reports.money", "reports.export"]
+ROLE_DEFAULTS["accountant"] += ["reports.view", "reports.money", "reports.export"]
+ROLE_DEFAULTS["dispatcher"] += ["reports.view", "reports.export"]
+ROLE_DEFAULTS["mechanic"] += ["reports.view"]
+ROLE_DEFAULTS["director"] += ["readings.import"]
+ROLE_DEFAULTS["dispatcher"] += ["readings.import"]
+# Карта 2ГИС (этап 4-4). Допущение: карту открывают те, кто работает с нарядами; список нарядов на ней берётся по их же правам.
+for _role in ("director", "dispatcher", "driver", "mechanic"):
+    ROLE_DEFAULTS[_role] += ["map.view"]
+# Вкладки техники (этап 5-2). Допущения: директор делает всё; механик ведёт шины, ремонты, ТО и контроль (без права убирать в архив),
+# финансы по технике видит; диспетчер видит шины, ремонты, ТО и контроль; бухгалтер видит ремонты и финансы; кладовщик и водитель их не видят.
+ROLE_DEFAULTS["director"] += _all("tires", "vehicle_repairs", "vehicle_finance", "maintenance", "vehicle_events")
+ROLE_DEFAULTS["mechanic"] += _all("tires", "vehicle_repairs", "maintenance", "vehicle_events", only=_WORK) + _all("vehicle_finance", only=_VIEW)
+ROLE_DEFAULTS["dispatcher"] += _all("tires", "vehicle_repairs", "maintenance", "vehicle_events", only=_VIEW)
+ROLE_DEFAULTS["accountant"] += _all("vehicle_repairs", "tires", only=_VIEW) + _all("vehicle_finance", only=_WORK)
 assert all(c in PERMISSION_CODES for codes in ROLE_DEFAULTS.values() for c in codes)

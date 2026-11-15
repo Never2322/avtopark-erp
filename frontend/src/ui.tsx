@@ -131,12 +131,12 @@ export function PageHeader({ title, sub, actions, crumb }: { title: ReactNode; s
   );
 }
 
-export function Card({ title, actions, children, flush, className = "" }: { title?: ReactNode; actions?: ReactNode; children: ReactNode; flush?: boolean; className?: string }) {
+export function Card({ title, icon: Icon, actions, children, flush, className = "" }: { title?: ReactNode; icon?: LucideIcon; actions?: ReactNode; children: ReactNode; flush?: boolean; className?: string }) {
   return (
     <section className={`card ${flush ? "flush" : ""} ${className}`}>
       {title && (
         <div className="card-head" style={flush ? { padding: "16px 18px 0" } : undefined}>
-          <h2>{title}</h2>
+          <h2>{Icon && <Icon size={18} aria-hidden className="card-icon" />}{title}</h2>
           {actions}
         </div>
       )}
@@ -146,8 +146,18 @@ export function Card({ title, actions, children, flush, className = "" }: { titl
 }
 
 export function Tabs<T extends string>({ tabs, value, onChange }: { tabs: { id: T; label: ReactNode }[]; value: T; onChange: (v: T) => void }) {
+  const box = useRef<HTMLDivElement>(null);
+  // выбранная вкладка может оказаться за краем экрана (ссылка с ?tab=…): подвигаем полосу, а не страницу
+  useEffect(() => {
+    const el = box.current?.querySelector<HTMLElement>('[aria-selected="true"]');
+    const bar = box.current;
+    if (!el || !bar) return;
+    const l = el.offsetLeft, r = l + el.offsetWidth;
+    if (l < bar.scrollLeft) bar.scrollLeft = l - 8;
+    else if (r > bar.scrollLeft + bar.clientWidth) bar.scrollLeft = r - bar.clientWidth + 8;
+  }, [value]);
   return (
-    <div className="tabs" role="tablist">
+    <div className="tabs" role="tablist" ref={box}>
       {tabs.map((t) => (
         <button key={t.id} role="tab" aria-selected={value === t.id} className="tab" onClick={() => onChange(t.id)}>
           {t.label}
@@ -309,7 +319,21 @@ export function Modal({ title, onClose, children, footer, wide }: { title: strin
     const prev = document.activeElement as HTMLElement | null;
     const first = ref.current?.querySelector<HTMLElement>("input:not([disabled]), select, textarea, button.primary");
     first?.focus();
-    const key = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    const key = (e: KeyboardEvent) => {
+      if (e.key === "Escape") return onClose();
+      if (e.key !== "Tab" || !ref.current) return;
+      // Tab ходит по кругу внутри верхнего окна и не уходит на страницу за ним
+      const all = document.querySelectorAll(".modal");
+      if (all[all.length - 1] !== ref.current) return;
+      const items = Array.from(ref.current.querySelectorAll<HTMLElement>(
+        'a[href], button:not([disabled]), input:not([disabled]):not([type=hidden]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'))
+        .filter((el) => el.getClientRects().length > 0);
+      if (!items.length) return;
+      const first = items[0], last = items[items.length - 1], now = document.activeElement as HTMLElement | null;
+      if (!now || !ref.current.contains(now)) { e.preventDefault(); first.focus(); }
+      else if (e.shiftKey && now === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && now === last) { e.preventDefault(); first.focus(); }
+    };
     document.addEventListener("keydown", key);
     document.body.style.overflow = "hidden";
     return () => {

@@ -19,9 +19,9 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, deferred, mapped_column, relationship
 
 from app.db import Base
-from app.enums import (ALL_DOC_KINDS, ANNOUNCEMENT_AUDIENCES, NOTIFICATION_KINDS, CALENDAR_COLORS, CALENDAR_REMIND_MAX, EMPLOYEE_EVENT_KINDS, BACKUP_STATUSES, BILL_KINDS, BILL_STATUSES, CASH_ACCOUNT_KINDS, CASH_OP_KINDS, COUNTERPARTY_KINDS, DOC_TYPES, FINE_PAYERS,
+from app.enums import (MAINTENANCE_KINDS, OUTBOX_CHANNELS, OUTBOX_STATES, TIRE_SEASONS, VEHICLE_FINANCE_KINDS, VEHICLE_REPAIR_KINDS, ALL_DOC_KINDS, ANNOUNCEMENT_AUDIENCES, NOTIFICATION_KINDS, CALENDAR_COLORS, CALENDAR_REMIND_MAX, EMPLOYEE_EVENT_KINDS, BACKUP_STATUSES, BILL_KINDS, BILL_STATUSES, CASH_ACCOUNT_KINDS, CASH_OP_KINDS, COUNTERPARTY_KINDS, DOC_TYPES, FINE_PAYERS,
                        JOB_STAGES, JOB_STATES, ORDER_STATUSES, VAT_RATES,
-                       PAYMENT_KINDS, RENTAL_DIRECTIONS, TARIFF_UNITS, TIMESHEET_CODES, READING_KINDS, READING_SOURCES, REQUEST_PRIORITIES, REQUEST_STATUSES,
+                       PAYMENT_KINDS, RENTAL_DIRECTIONS, TARIFF_UNITS, TIMESHEET_CODES, READING_KINDS, READING_SOURCES, REQUEST_PRIORITIES, REQUEST_STATUSES, STOCK_MOVE_KINDS,
                        REVIEW_STATES, VEHICLE_CATEGORIES, VEHICLE_STATUSES, WAYBILL_SHIFTS, WAYBILL_STATUSES, check_in)
 
 TS = DateTime(timezone=True)
@@ -421,6 +421,7 @@ class BackupJob(Base):
     file_deleted: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"))
     restore_checked_at: Mapped[dt.datetime | None] = mapped_column(TS)
     restore_check: Mapped[dict | None] = mapped_column(JSONB)
+    offsite: Mapped[dict] = mapped_column(JSONB, default=dict, server_default=sql_text("'{}'::jsonb"))   # отправка копии вне сервера: {"telegram": {...}, "email": {...}}
     __table_args__ = (CheckConstraint(check_in("status", BACKUP_STATUSES), name="status"),)
 
 
@@ -1110,3 +1111,237 @@ class AnnouncementReply(Base):
     created_at: Mapped[dt.datetime] = mapped_column(TS, server_default=func.now())
     __table_args__ = (CheckConstraint("length(btrim(text)) > 0", name="text"),
                       Index("ix_announcement_replies_thread", "announcement_id", "thread_user_id", "id"))
+
+
+# ---------------------------------------------------------------- склад (этап 4-1)
+
+class Warehouse(Audited, Voidable, Base):
+    """Склад юрлица: гараж, главный склад, контейнер. Остатки считаются по движениям."""
+    __tablename__ = "warehouses"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    legal_entity_id: Mapped[int] = mapped_column(ForeignKey("legal_entities.id"), index=True)
+    name: Mapped[str] = mapped_column(String(120))
+    note: Mapped[str] = mapped_column(Text, default="", server_default="")
+    __table_args__ = (
+        CheckConstraint("length(btrim(name)) > 0", name="name"),
+        Index("uq_warehouses_name_active", "legal_entity_id", text("lower(name)"), unique=True, postgresql_where=text("archived_at IS NULL")),
+    )
+
+
+class StockItem(Audited, Voidable, Base):
+    """Товар на складе: запчасть, масло, расходник. name_key нужен, чтобы деталь из обращения находила такой же товар."""
+    __tablename__ = "stock_items"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    legal_entity_id: Mapped[int] = mapped_column(ForeignKey("legal_entities.id"), index=True)
+    name: Mapped[str] = mapped_column(String(200))
+    name_key: Mapped[str] = mapped_column(String(200))
+    sku: Mapped[str] = mapped_column(String(60), default="", server_default="")
+    unit: Mapped[str] = mapped_column(String(12), default="шт", server_default="шт")
+    min_qty: Mapped[Decimal] = mapped_column(Numeric(12, 3), default=0, server_default="0")
+    note: Mapped[str] = mapped_column(Text, default="", server_default="")
+    __table_args__ = (
+        CheckConstraint("min_qty >= 0", name="min_qty"),
+        Index("uq_stock_items_key_active", "legal_entity_id", "name_key", unique=True, postgresql_where=text("archived_at IS NULL")),
+    )
+
+
+class StockMove(Audited, Voidable, Base):
+    """Движение товара. warehouse_id: куда (поступление) или откуда (расход, списание, перемещение). Запись не стирается: её убирают в архив
+    с причиной, и остаток пересчитывается без неё. Количество, вид, товар и склад после записи не меняют: ошибку исправляют архивом и новой записью."""
+    __tablename__ = "stock_moves"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    legal_entity_id: Mapped[int] = mapped_column(ForeignKey("legal_entities.id"), index=True)
+    move_date: Mapped[dt.date] = mapped_column(Date, index=True)
+    kind: Mapped[str] = mapped_column(String(8))
+    item_id: Mapped[int] = mapped_column(ForeignKey("stock_items.id"))
+    warehouse_id: Mapped[int] = mapped_column(ForeignKey("warehouses.id"))
+    to_warehouse_id: Mapped[int | None] = mapped_column(ForeignKey("warehouses.id"))
+    qty: Mapped[Decimal] = mapped_column(Numeric(12, 3))
+    price: Mapped[Decimal] = mapped_column(Money, default=0, server_default="0")         # за единицу
+    counterparty_id: Mapped[int | None] = mapped_column(ForeignKey("counterparties.id"))
+    vehicle_id: Mapped[int | None] = mapped_column(ForeignKey("vehicles.id"), index=True)
+    request_id: Mapped[int | None] = mapped_column(ForeignKey("service_requests.id"), index=True)
+    request_part_id: Mapped[int | None] = mapped_column(ForeignKey("request_parts.id"))
+    bill_id: Mapped[int | None] = mapped_column(ForeignKey("repair_bills.id"), index=True)
+    doc_number: Mapped[str] = mapped_column(String(60), default="", server_default="")
+    note: Mapped[str] = mapped_column(String(300), default="", server_default="")
+    __table_args__ = (
+        CheckConstraint(check_in("kind", STOCK_MOVE_KINDS), name="kind"),
+        CheckConstraint("qty > 0 AND price >= 0", name="values"),
+        CheckConstraint("(kind = 'transfer' AND to_warehouse_id IS NOT NULL AND to_warehouse_id <> warehouse_id) OR (kind <> 'transfer' AND to_warehouse_id IS NULL)",
+                        name="transfer"),
+        Index("ix_stock_moves_item", "item_id", "warehouse_id"),
+    )
+
+
+# ---------------------------------------------------------------- вкладки техники: шины, ремонты, финансы, ТО, контроль
+
+class VehicleTire(Audited, Voidable, Base):
+    """Комплект или отдельная шина на машине: где стоит, с какого пробега, сколько отходила."""
+    __tablename__ = "tires"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    legal_entity_id: Mapped[int] = mapped_column(ForeignKey("legal_entities.id"), index=True)
+    vehicle_id: Mapped[int] = mapped_column(ForeignKey("vehicles.id"), index=True)
+    brand: Mapped[str] = mapped_column(String(80), default="", server_default="")
+    model: Mapped[str] = mapped_column(String(80), default="", server_default="")
+    size: Mapped[str] = mapped_column(String(40), default="", server_default="")
+    season: Mapped[str] = mapped_column(String(6), default="all", server_default="all")
+    serial: Mapped[str] = mapped_column(String(60), default="", server_default="")
+    position: Mapped[str] = mapped_column(String(60), default="", server_default="")
+    install_date: Mapped[dt.date | None] = mapped_column(Date)
+    install_km: Mapped[int | None] = mapped_column(Integer)
+    remove_date: Mapped[dt.date | None] = mapped_column(Date)
+    remove_km: Mapped[int | None] = mapped_column(Integer)
+    price: Mapped[Decimal] = mapped_column(Money, default=0, server_default="0")
+    wear_pct: Mapped[int | None] = mapped_column(Integer)
+    note: Mapped[str] = mapped_column(Text, default="", server_default="")
+    __table_args__ = (
+        CheckConstraint(check_in("season", TIRE_SEASONS), name="season"),
+        CheckConstraint("wear_pct IS NULL OR wear_pct BETWEEN 0 AND 100", name="wear"),
+        CheckConstraint("price >= 0", name="price"),
+        CheckConstraint("install_km IS NULL OR install_km >= 0", name="install_km"),
+        CheckConstraint("remove_km IS NULL OR remove_km >= 0", name="remove_km"),
+        CheckConstraint("remove_date IS NULL OR install_date IS NULL OR remove_date >= install_date", name="dates"),
+    )
+
+
+class VehicleRepair(Audited, Voidable, Base):
+    """История ремонта машины: что сделали или какую деталь поставили, сколько стоило, кто делал."""
+    __tablename__ = "vehicle_repairs"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    legal_entity_id: Mapped[int] = mapped_column(ForeignKey("legal_entities.id"), index=True)
+    vehicle_id: Mapped[int] = mapped_column(ForeignKey("vehicles.id"), index=True)
+    repair_date: Mapped[dt.date] = mapped_column(Date, index=True)
+    odometer: Mapped[int | None] = mapped_column(Integer)
+    kind: Mapped[str] = mapped_column(String(10), default="repair", server_default="repair")
+    title: Mapped[str] = mapped_column(String(200))
+    part_number: Mapped[str] = mapped_column(String(60), default="", server_default="")
+    qty: Mapped[Decimal] = mapped_column(Numeric(12, 3), default=1, server_default="1")
+    cost: Mapped[Decimal] = mapped_column(Money, default=0, server_default="0")
+    executor: Mapped[str] = mapped_column(String(120), default="", server_default="")
+    note: Mapped[str] = mapped_column(Text, default="", server_default="")
+    __table_args__ = (
+        CheckConstraint(check_in("kind", VEHICLE_REPAIR_KINDS), name="kind"),
+        CheckConstraint("qty > 0", name="qty"),
+        CheckConstraint("cost >= 0", name="cost"),
+        CheckConstraint("odometer IS NULL OR odometer >= 0", name="odometer"),
+    )
+
+
+class VehicleFinance(Audited, Voidable, Base):
+    """Доходы и расходы по конкретной машине (то, что не попало в другие разделы)."""
+    __tablename__ = "vehicle_finance"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    legal_entity_id: Mapped[int] = mapped_column(ForeignKey("legal_entities.id"), index=True)
+    vehicle_id: Mapped[int] = mapped_column(ForeignKey("vehicles.id"), index=True)
+    op_date: Mapped[dt.date] = mapped_column(Date, index=True)
+    kind: Mapped[str] = mapped_column(String(8), default="expense", server_default="expense")
+    category: Mapped[str] = mapped_column(String(80), default="", server_default="")
+    amount: Mapped[Decimal] = mapped_column(Money)
+    description: Mapped[str] = mapped_column(String(300), default="", server_default="")
+    note: Mapped[str] = mapped_column(Text, default="", server_default="")
+    __table_args__ = (
+        CheckConstraint(check_in("kind", VEHICLE_FINANCE_KINDS), name="kind"),
+        CheckConstraint("amount >= 0", name="amount"),
+    )
+
+
+class MaintenanceItem(Audited, Voidable, Base):
+    """Плановое обслуживание (СО, ТО-1, ТО-2 и другое): срок по дате или пробегу, напоминание до наступления."""
+    __tablename__ = "maintenance_items"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    legal_entity_id: Mapped[int] = mapped_column(ForeignKey("legal_entities.id"), index=True)
+    vehicle_id: Mapped[int] = mapped_column(ForeignKey("vehicles.id"), index=True)
+    kind: Mapped[str] = mapped_column(String(6), default="to1", server_default="to1")
+    work: Mapped[str] = mapped_column(String(300), default="", server_default="")
+    interval_km: Mapped[int | None] = mapped_column(Integer)
+    due_km: Mapped[int | None] = mapped_column(Integer)
+    due_date: Mapped[dt.date | None] = mapped_column(Date)
+    done_at: Mapped[dt.date | None] = mapped_column(Date)
+    controlled: Mapped[bool] = mapped_column(Boolean, default=True, server_default=text("true"))
+    note: Mapped[str] = mapped_column(Text, default="", server_default="")
+    __table_args__ = (
+        CheckConstraint(check_in("kind", MAINTENANCE_KINDS), name="kind"),
+        CheckConstraint("interval_km IS NULL OR interval_km > 0", name="interval"),
+        CheckConstraint("due_km IS NULL OR due_km >= 0", name="due_km"),
+        CheckConstraint("due_km IS NOT NULL OR due_date IS NOT NULL", name="threshold"),
+    )
+
+
+class ControlEvent(Audited, Voidable, Base):
+    """Контроль мероприятий по машине: любой срок по дате, пробегу или моточасам (тахограф, поверка, замена ремня и т. п.)."""
+    __tablename__ = "vehicle_events"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    legal_entity_id: Mapped[int] = mapped_column(ForeignKey("legal_entities.id"), index=True)
+    vehicle_id: Mapped[int] = mapped_column(ForeignKey("vehicles.id"), index=True)
+    event_type: Mapped[str] = mapped_column(String(80), default="Другое", server_default="Другое")
+    title: Mapped[str] = mapped_column(String(200))
+    unit: Mapped[str] = mapped_column(String(80), default="", server_default="")
+    interval_km: Mapped[int | None] = mapped_column(Integer)
+    due_km: Mapped[int | None] = mapped_column(Integer)
+    due_date: Mapped[dt.date | None] = mapped_column(Date)
+    due_hours: Mapped[Decimal | None] = mapped_column(Numeric(10, 1))
+    controlled: Mapped[bool] = mapped_column(Boolean, default=True, server_default=text("true"))
+    note: Mapped[str] = mapped_column(Text, default="", server_default="")
+    __table_args__ = (
+        CheckConstraint("interval_km IS NULL OR interval_km > 0", name="interval"),
+        CheckConstraint("due_km IS NULL OR due_km >= 0", name="due_km"),
+        CheckConstraint("due_hours IS NULL OR due_hours >= 0", name="due_hours"),
+        CheckConstraint("due_km IS NOT NULL OR due_date IS NOT NULL OR due_hours IS NOT NULL", name="threshold"),
+    )
+
+
+# ---------------------------------------------------------------- перенос из старой программы
+
+class LegacyId(Base):
+    """Соответствие «таблица и номер записи в старой базе → номер в новой». Нужна, чтобы повторный перенос не плодил дубликаты."""
+    __tablename__ = "legacy_ids"
+    src_table: Mapped[str] = mapped_column(String(40), primary_key=True)
+    old_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    new_id: Mapped[int] = mapped_column(BigInteger)
+    imported_at: Mapped[dt.datetime] = mapped_column(TS, server_default=func.now())
+
+
+# ---------------------------------------------------------------- уведомления вне сайта
+
+class NotifyChannel(Base):
+    """Куда, кроме сайта, присылать человеку уведомления: Telegram и почта. Строка есть только у тех, кто что-то настроил.
+    Telegram привязывается одноразовым кодом: человек отправляет его боту, адрес чата руками не вводится."""
+    __tablename__ = "notify_channels"
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    email: Mapped[str] = mapped_column(String(120), default="", server_default="")
+    email_on: Mapped[bool] = mapped_column(Boolean, default=False, server_default=sql_text("false"))
+    telegram_chat_id: Mapped[int | None] = mapped_column(BigInteger)
+    telegram_name: Mapped[str] = mapped_column(String(80), default="", server_default="")
+    telegram_on: Mapped[bool] = mapped_column(Boolean, default=True, server_default=sql_text("true"))
+    link_code: Mapped[str | None] = mapped_column(String(16))
+    link_expires_at: Mapped[dt.datetime | None] = mapped_column(TS)
+    updated_at: Mapped[dt.datetime] = mapped_column(TS, server_default=func.now(), onupdate=func.now())
+    __table_args__ = (
+        Index("uq_notify_channels_chat", "telegram_chat_id", unique=True, postgresql_where=sql_text("telegram_chat_id IS NOT NULL")),
+        Index("uq_notify_channels_code", "link_code", unique=True, postgresql_where=sql_text("link_code IS NOT NULL")),
+    )
+
+
+class Outbox(Base):
+    """Очередь отправки: сообщение сначала записывается сюда (в одной транзакции с уведомлением), потом уходит в фоне.
+    Сбой Telegram или почты не мешает самому действию; неудачные отправки повторяются с нарастающей паузой."""
+    __tablename__ = "outbox"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    channel: Mapped[str] = mapped_column(String(10))
+    address: Mapped[str] = mapped_column(String(200))                      # адрес почты или номер чата на момент постановки в очередь
+    title: Mapped[str] = mapped_column(String(200))
+    text: Mapped[str] = mapped_column(String(1000), default="", server_default="")
+    url: Mapped[str] = mapped_column(String(200), default="", server_default="")
+    state: Mapped[str] = mapped_column(String(8), default="new", server_default="new")
+    attempts: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    next_try_at: Mapped[dt.datetime] = mapped_column(TS, server_default=func.now())
+    last_error: Mapped[str] = mapped_column(String(300), default="", server_default="")
+    created_at: Mapped[dt.datetime] = mapped_column(TS, server_default=func.now())
+    sent_at: Mapped[dt.datetime | None] = mapped_column(TS)
+    __table_args__ = (
+        CheckConstraint(check_in("channel", OUTBOX_CHANNELS), name="channel"),
+        CheckConstraint(check_in("state", OUTBOX_STATES), name="state"),
+        Index("ix_outbox_due", "state", "next_try_at"),
+    )

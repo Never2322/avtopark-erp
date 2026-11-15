@@ -2,10 +2,12 @@
 import { useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Archive, ArchiveRestore, ArrowLeft, Banknote, FileText, Paperclip, Pencil, Printer, Trash2 } from "lucide-react";
+import { Archive, ArchiveRestore, ArrowLeft, Banknote, FileText, PackagePlus, Paperclip, Pencil, Printer, Trash2 } from "lucide-react";
 import { api, get, post } from "../api";
 import { fmtDate, fmtDateTime, fmtMoney, fmtSize, todayIso } from "../format";
 import { Alert, Badge, Button, Card, ConfirmModal, Field, Modal, NotFound, PageHeader, QueryState, Spinner, Table, useForm, useToast } from "../ui";
+import { useAuth } from "../auth";
+import { ReceiveBillModal } from "../components/stock";
 import { BillStatus } from "./Bills";
 
 interface Item { pos: number; name: string; article: string; qty_text: string; unit: string; price: number; amount: number; vat: number }
@@ -49,7 +51,8 @@ export function BillCard() {
   const nav = useNavigate();
   const qc = useQueryClient();
   const toast = useToast();
-  const [modal, setModal] = useState<"pay" | "void" | null>(null);
+  const { can } = useAuth();
+  const [modal, setModal] = useState<"pay" | "void" | "stock" | null>(null);
   const [rmFile, setRmFile] = useState<FileRow | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const q = useQuery({ queryKey: ["bill", bid], enabled: Number.isInteger(bid), queryFn: () => get<Detail>(`/bills/${bid}`) });
@@ -74,6 +77,7 @@ export function BillCard() {
         title={<span className="row wrap" style={{ gap: 12 }}>Счёт № {b.number}<BillStatus code={b.status} label={b.status_label} />{b.archived && <Badge>в архиве</Badge>}</span>}
         sub={`от ${fmtDate(b.bill_date)} · ${b.kind_label} · ${b.legal_entity}`}
         actions={<>
+          {!b.archived && b.status !== "cancelled" && b.items.length > 0 && can("stock_moves.create", b.legal_entity_id) && <Button icon={PackagePlus} onClick={() => setModal("stock")}>Принять на склад</Button>}
           {b.can.print && <Button icon={Printer} onClick={() => nav(`/print/bills/${b.id}`)}>Печать</Button>}
           {b.can.pay && <Button variant={b.status === "unpaid" ? "primary" : "default"} icon={Banknote} onClick={() => setModal("pay")}>{b.status === "unpaid" ? "Отметить оплату" : "Оплата"}</Button>}
           {b.can.edit && <Button icon={Pencil} onClick={() => nav(`/bills/${b.id}/edit`)}>Изменить</Button>}
@@ -140,6 +144,7 @@ export function BillCard() {
         </div>
       </div>
       {modal === "pay" && <PayModal b={b} onClose={() => setModal(null)} />}
+      {modal === "stock" && <ReceiveBillModal billId={b.id} onClose={() => setModal(null)} />}
       {modal === "void" && (
         <ConfirmModal title="Убрать счёт в архив?" danger confirmLabel="В архив" reasonLabel="Причина" text="Счёт не стирается: его можно вернуть. В архиве он не входит в итоги расходов на ремонт."
           onConfirm={async (reason) => { await post(`/bills/${b.id}/void`, { reason }); qc.invalidateQueries(); toast.success("Счёт убран в архив"); }} onClose={() => setModal(null)} />

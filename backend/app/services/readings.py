@@ -56,7 +56,8 @@ def _check_order(prev, nxt, value: Decimal, kind: str):
 
 
 def add_reading(db: Session, who, vehicle: Vehicle, kind: str, value: Decimal, *, recorded_at: dt.datetime | None = None,
-                source: str = "manual", note: str = "", waybill_id: int | None = None) -> VehicleReading:
+                source: str = "manual", note: str = "", waybill_id: int | None = None, recompute: bool = True) -> VehicleReading:
+    """recompute=False нужен загрузке из файла: текущие показания машины пересчитываются один раз в конце, а не на каждой строке."""
     if kind not in READING_KINDS:
         raise fail(422, "bad_kind", "Неизвестный вид показания", "kind")
     if vehicle.archived_at:
@@ -77,7 +78,8 @@ def add_reading(db: Session, who, vehicle: Vehicle, kind: str, value: Decimal, *
         is_anomaly=anomaly, review_state="pending" if anomaly else "ok")
     db.add(reading)
     db.flush()
-    recompute_current(db, vehicle)
+    if recompute:
+        recompute_current(db, vehicle)
     audit.log(db, who, "reading.create", "vehicle", vehicle.id, vehicle.legal_entity_id, reading_id=reading.id,
               kind=kind, value=str(value), source=source, needs_review=anomaly)
     return reading

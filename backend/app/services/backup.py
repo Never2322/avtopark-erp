@@ -163,6 +163,11 @@ def run_job(job_id: int, verify: bool = True) -> None:
     if verify:
         verify_job(job_id)
     rotate()
+    try:
+        from app.services import offsite                       # копия вне сервера: только если задан пароль шифрования
+        offsite.send(job_id)
+    except Exception:                                          # noqa: BLE001 — сама копия уже сделана, сбой отправки её не отменяет
+        log.exception("Копия %s сделана, но вне сервера не отправлена", job_id)
 
 
 # ---------------------------------------------------------------- проверка восстановления

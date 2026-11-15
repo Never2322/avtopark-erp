@@ -3,7 +3,7 @@ import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import {
   BellRing, Building2, CalendarCheck, CalendarClock, CalendarDays, ChevronDown, ClipboardList, DatabaseBackup, Gauge, LayoutDashboard, LogOut, Menu, ScrollText, Search, ShieldCheck,
-  Truck, User as UserIcon, UserCog, UserSquare2, Users, UsersRound, Wrench, FolderOpen, Fuel, NotebookPen, ShoppingCart, ReceiptText, Megaphone, Newspaper, type LucideIcon,
+  Truck, User as UserIcon, UserCog, UserSquare2, Users, UsersRound, Wrench, FolderOpen, Fuel, NotebookPen, ShoppingCart, ReceiptText, Megaphone, Newspaper, Boxes, ArrowLeftRight, BarChart3, FileUp, MapPin, Send, type LucideIcon,
 } from "lucide-react";
 import { ConnectionBar, useOutboxSync } from "./Outbox";
 import { BellMenu, useNotifSummary } from "./Bell";
@@ -24,7 +24,8 @@ const NAV: { title: string; items: Item[] }[] = [
       { to: "/vehicles", label: "Транспорт", icon: Truck, any: ["vehicles.view", "vehicles.view_own"] },
       { to: "/requests", label: "Обращения и ремонты", icon: Wrench, any: ["requests.view", "requests.view_own"] },
       { to: "/waybills", label: "Путевые листы", icon: ClipboardList, any: ["waybills.view", "waybills.view_own"] },
-      { to: "/readings", label: "Показания на проверке", icon: Gauge, any: ["readings.review"], badge: "pending" },
+      { to: "/readings", label: "Показания на проверке", icon: Gauge, any: ["readings.review"], badge: "pending", end: true },
+      { to: "/readings/import", label: "Загрузка показаний", icon: FileUp, any: ["readings.import"] },
       { to: "/calendar", label: "Календарь", icon: CalendarClock, any: ["calendar.view"] },
       { to: "/reminders", label: "Напоминания", icon: BellRing, any: ["reminders.view"], badge: "reminders" },
       { to: "/announcements", label: "Объявления", icon: Megaphone, any: ["announcements.view"], badge: "news" },
@@ -45,7 +46,7 @@ const NAV: { title: string; items: Item[] }[] = [
     items: [
       { to: "/roster", label: "Водители и техника", icon: UsersRound, any: ["roster.view"] },
       { to: "/dossier/vehicles", label: "Личные дела техники", icon: FolderOpen, any: ["vehicle_files.view"] },
-      ...sectionItems("fuel_cards", "fines", "rentals"),
+      ...sectionItems("maintenance", "vehicle_events", "tires", "vehicle_repairs", "vehicle_finance", "fuel_cards", "fines", "rentals"),
     ],
   },
   {
@@ -57,10 +58,19 @@ const NAV: { title: string; items: Item[] }[] = [
     ],
   },
   {
+    title: "Склад",
+    items: [
+      { to: "/stock", label: "Остатки", icon: Boxes, any: ["stock_items.view"], end: true },
+      { to: "/stock/moves", label: "Движение товара", icon: ArrowLeftRight, any: ["stock_moves.view"] },
+      ...sectionItems("stock_items", "warehouses"),
+    ],
+  },
+  {
     title: "Наряды",
     items: [
       { to: "/jobs", label: "Наряды на день", icon: CalendarCheck, any: ["jobs.view"], end: true },
       { to: "/jobs/mine", label: "Мои наряды", icon: CalendarCheck, any: ["jobs.view_own"], unless: ["jobs.view"] },
+      { to: "/map", label: "Карта", icon: MapPin, any: ["map.view"] },
       ...sectionItems("jobs"),
     ],
   },
@@ -74,6 +84,10 @@ const NAV: { title: string; items: Item[] }[] = [
   },
   { title: "Заказы", items: sectionItems("orders", "documents") },
   { title: "Деньги", items: sectionItems("cash", "cash_accounts", "expenses", "payments") },
+  {
+    title: "Отчёты",
+    items: [{ to: "/reports", label: "Отчёты", icon: BarChart3, any: ["reports.view"] }],
+  },
   { title: "Справочники", items: [{ to: "/entities", label: "Юридические лица", icon: Building2, any: ["legal_entities.view"] }, ...sectionItems("counterparties", "tariffs", "constants")] },
   {
     title: "Служебное",
@@ -82,6 +96,7 @@ const NAV: { title: string; items: Item[] }[] = [
       { to: "/roles", label: "Роли и права", icon: ShieldCheck, any: ["users.view"] },
       { to: "/audit", label: "Журнал действий", icon: ScrollText, any: ["audit.view"] },
       { to: "/backups", label: "Резервные копии", icon: DatabaseBackup, any: ["backups.manage"] },
+      { to: "/channels", label: "Telegram и почта", icon: Send, any: ["users.view"] },
     ],
   },
 ];
@@ -99,8 +114,14 @@ export function Shell() {
   useEffect(() => setOpen(false), [loc.pathname]);
   useEffect(() => {
     const close = (e: MouseEvent) => menuRef.current && !menuRef.current.contains(e.target as Node) && setMenu(false);
+    const esc = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || !menuRef.current?.querySelector(".menu")) return;
+      setMenu(false);
+      menuRef.current.querySelector<HTMLElement>("button")?.focus();   // фокус возвращается на кнопку меню
+    };
     document.addEventListener("mousedown", close);
-    return () => document.removeEventListener("mousedown", close);
+    document.addEventListener("keydown", esc);
+    return () => { document.removeEventListener("mousedown", close); document.removeEventListener("keydown", esc); };
   }, []);
 
   const pending = useQuery({
@@ -171,7 +192,8 @@ export function Shell() {
             </select>
           )}
           <div className="user-menu" ref={menuRef}>
-            <button className="btn" onClick={() => setMenu((v) => !v)} aria-expanded={menu} aria-haspopup="menu">
+            <button className="btn" onClick={() => setMenu((v) => !v)} aria-expanded={menu} aria-haspopup="menu"
+              aria-label={`Меню пользователя: ${me!.display_name || me!.login}`}>
               <UserIcon size={16} aria-hidden />
               <span className="hide-sm">{me!.display_name || me!.login}</span>
               <ChevronDown size={14} aria-hidden />

@@ -14,6 +14,10 @@ from app.models import AuditLog
 router = APIRouter(prefix="/audit", tags=["Журнал действий"])
 
 ACTIONS = {
+    "stock.receipt": "Склад: поступление", "stock.issue": "Склад: расход", "stock.writeoff": "Склад: списание", "stock.transfer": "Склад: перемещение",
+    "stock.issue_request": "Деталь взята со склада на обращение", "stock.receive_bill": "Товар принят на склад по счёту",
+    "stock.export": "Выгрузка данных склада", "stock_moves.update": "Изменено описание движения склада",
+    "stock_moves.void": "Движение склада убрано в архив", "stock_moves.restore": "Движение склада возвращено из архива",
     "announcement.create": "Написано объявление", "announcement.answer": "Ответ на объявление", "announcement.reply": "Ответ адресата на объявление",
     "announcement.close": "Объявление закрыто", "announcement.reopen": "Объявление показано снова", "announcement.void": "Объявление в архиве",
     "announcement.restore": "Объявление возвращено из архива",
@@ -29,7 +33,7 @@ ACTIONS = {
     "vehicle.create": "Добавлена техника", "vehicle.update": "Изменена техника", "vehicle.archive": "Техника в архиве",
     "vehicle.restore": "Техника возвращена", "vehicle.status": "Сменён статус техники", "vehicle.assign": "Водитель закреплён",
     "vehicle.unassign": "Закрепление снято", "vehicle.export": "Выгрузка списка техники",
-    "reading.create": "Введено показание", "reading.correct": "Показание исправлено", "reading.review": "Показание проверено",
+    "reading.create": "Введено показание", "reading.correct": "Показание исправлено", "reading.review": "Показание проверено", "readings.import": "Загрузка показаний из файла",
     "request.create": "Создано обращение", "request.update": "Изменено обращение", "request.transition": "Смена статуса обращения",
     "request.comment": "Комментарий к обращению",
     "waybill.create": "Создан путевой лист", "waybill.update": "Изменён путевой лист", "waybill.open": "Путевой лист открыт",
@@ -40,6 +44,9 @@ ACTIONS = {
     "dossier.file.view": "Просмотр скана документа", "vehicle.specs": "Изменены данные в личном деле техники",
     "backup.start": "Запущена копия", "backup.done": "Копия готова", "backup.failed": "Копия не удалась",
     "backup.verify_request": "Запрошена проверка копии", "backup.verify": "Проверка копии завершена",
+    "channels.update": "Изменены настройки уведомлений вне сайта", "channels.telegram_code": "Запрошен код для подключения Telegram",
+    "channels.telegram_unlink": "Telegram отключён", "channels.test": "Проба уведомлений вне сайта",
+    "backup.offsite": "Копия отправлена вне сервера",
     "backup.download": "Скачана копия", "backup.rotate": "Удалены старые копии",
     "jobs.arrive": "Наряд: водитель приехал на объект", "jobs.finish": "Наряд выполнен", "jobs.state": "Состояние наряда изменено вручную",
     "jobs.copy": "Наряд повторён на следующий день", "jobs.photo.add": "Добавлены фото к наряду", "jobs.photo.remove": "Фото убрано из наряда",
@@ -54,9 +61,10 @@ ACTIONS = {
     "bill.void": "Счёт на ремонт в архиве", "bill.restore": "Счёт на ремонт возвращён", "bill.file.add": "Добавлен файл к счёту",
     "bill.file.remove": "Файл убран из счёта", "bill.export": "Выгрузка счетов на ремонт",
     "ppe.replace": "СИЗ заменено: старая вещь возвращена, выдана новая",
+    "maintenance.done": "ТО отмечено выполненным",
     "timesheet.save": "Табель: изменены отметки", "timesheet.fill": "Табель: месяц заполнен автоматически",
     "timesheet.export": "Выгрузка табеля",
-    "reminders.export": "Выгрузка напоминаний",
+    "reminders.export": "Выгрузка напоминаний", "reports.export": "Выгрузка отчёта",
 }
 
 

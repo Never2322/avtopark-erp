@@ -170,7 +170,7 @@ BILL_UNPAID_DAYS = 7                     # счёт на ремонт, не оп
 # ---------------------------------------------------------------- уведомления и объявления (этап 3в)
 NOTIFICATION_KINDS = {
     "request": "Обращение", "reply": "Ответ", "announce": "Объявление", "job": "Наряд", "parts": "Куплено", "reminder": "Напоминание",
-    "info": "Сообщение",
+    "stock": "Склад", "info": "Сообщение",
 }
 NOTIFICATION_KEEP_DAYS = 120             # прочитанные уведомления хранятся столько дней
 NOTIFICATION_KEYED_KEEP_DAYS = 400       # уведомления-напоминания хранятся дольше: по ним программа знает, что уже сообщала
@@ -179,3 +179,27 @@ ANNOUNCEMENT_AUDIENCES = {"drivers": "Всем водителям", "all": "Вс
 ANNOUNCEMENT_TITLE_MAX = 120
 ANNOUNCEMENT_BODY_MAX = 3000
 ANNOUNCEMENT_REPLY_MAX = 1000
+
+
+# ---------------------------------------------------------------- склад (этап 4-1)
+STOCK_MOVE_KINDS = {"receipt": "Поступление", "issue": "Расход", "writeoff": "Списание", "transfer": "Перемещение"}
+STOCK_MAX_QTY = 1_000_000                # одним движением не больше
+STOCK_UNITS = PART_UNITS
+
+# ---------------------------------------------------------------- вкладки техники: шины, ремонты, финансы, ТО, контроль
+TIRE_SEASONS = {"summer": "Лето", "winter": "Зима", "all": "Всесезонные"}
+VEHICLE_REPAIR_KINDS = {"repair": "Работа", "part": "Деталь", "material": "Материал"}
+VEHICLE_FINANCE_KINDS = {"expense": "Расход", "income": "Доход"}
+MAINTENANCE_KINDS = {"so": "СО", "to1": "ТО-1", "to2": "ТО-2", "other": "Другое"}
+# «Скоро» для контроля сроков по технике: за сколько дней, километров и моточасов до порога (как в старой программе)
+CONTROL_LEAD_DAYS = 14
+CONTROL_LEAD_KM = 500
+CONTROL_LEAD_HOURS = 10
+
+# Уведомления вне сайта (Telegram и почта): очередь отправки и её состояния
+OUTBOX_CHANNELS = ("telegram", "email")
+OUTBOX_STATES = ("new", "sent", "failed", "skipped")
+OUTBOX_MAX_ATTEMPTS = 5
+OUTBOX_RETRY_MINUTES = (1, 5, 15, 60)           # через сколько повторять после неудачи (дальше последнее значение)
+OUTBOX_KEEP_DAYS = 14                           # отправленное хранится столько дней
+OUTBOX_FAILED_KEEP_DAYS = 60

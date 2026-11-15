@@ -22,7 +22,7 @@ export interface Meta {
 export type Row = Record<string, any> & { id: number; can_edit: boolean; can_void: boolean; archived: boolean; archive_reason: string; legal_entity?: string; legal_entity_id?: number };
 interface Listing extends Page<Row> { totals: Record<string, number> }
 
-function cell(f: { name: string; kind: string; options?: FieldMeta["options"] }, r: Row) {
+export function cell(f: { name: string; kind: string; options?: FieldMeta["options"] }, r: Row) {
   const v = r[f.name];
   if (v === null || v === undefined || v === "") return <span className="muted">—</span>;
   switch (f.kind) {
@@ -225,7 +225,7 @@ function RefSelect({ f, value, onChange, entityId, row, error, disabled }: { f: 
   );
 }
 
-export function RecordModal({ meta, row, onClose, onSaved, defaults }: { meta: Meta; row: Row | null; onClose: () => void; onSaved: (warnings: string[]) => void; defaults?: Record<string, string> }) {
+export function RecordModal({ meta, row, onClose, onSaved, defaults, hide }: { meta: Meta; row: Row | null; onClose: () => void; onSaved: (warnings: string[]) => void; defaults?: Record<string, string>; hide?: string[] }) {
   const { entityId } = useAuth();
   const editing = !!row;
   const readOnly = editing && !row!.can_edit;
@@ -272,7 +272,7 @@ export function RecordModal({ meta, row, onClose, onSaved, defaults }: { meta: M
               )}
             </Field>
           )}
-          {meta.fields.filter((f) => !f.show_if || String(values[f.show_if[0]]) === f.show_if[1]).map((f) => {
+          {meta.fields.filter((f) => !hide?.includes(f.name) && (!f.show_if || String(values[f.show_if[0]]) === f.show_if[1])).map((f) => {
             const disabled = readOnly || !!row?.archived || (editing && f.locked);
             const err = errors[f.name];
             const label = f.required ? <>{f.label} <span style={{ color: "var(--error)" }} aria-hidden>*</span></> : f.label;

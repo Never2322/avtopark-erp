@@ -1,5 +1,5 @@
 // Разделы, которые рисует общий экран Registry. Поля и правила каждого приходят с сервера.
-import { CalendarCheck, CalendarPlus, ClipboardCheck, ClipboardList, HardHat, ListChecks, CreditCard, FileText, FileWarning, Fuel, Handshake, HandCoins, KeyRound, Landmark, Package, Receipt, Route, Sigma, Tag, Wallet, type LucideIcon } from "lucide-react";
+import { CalendarCheck, CalendarPlus, Disc3, Hammer, PiggyBank, Timer, ClipboardCheck, ClipboardList, HardHat, ListChecks, CreditCard, FileText, FileWarning, Fuel, Handshake, HandCoins, KeyRound, Landmark, Boxes, Package, Receipt, Route, Sigma, Tag, Wallet, Warehouse, Wrench, type LucideIcon } from "lucide-react";
 
 export interface Section { key: string; path: string; label: string; icon: LucideIcon; sub: string; empty?: string }
 
@@ -15,11 +15,18 @@ export const SECTIONS: Section[] = [
   { key: "fuel_cards", path: "/fuel-cards", label: "Топливные карты", icon: CreditCard, sub: "Карты заправок: за какой техникой закреплены, лимит и срок действия" },
   { key: "fines", path: "/fines", label: "Штрафы", icon: FileWarning, sub: "Штрафы по технике и водителям. Сроки оплаты и скидки считаются автоматически" },
   { key: "rentals", path: "/rentals", label: "Аренда техники", icon: KeyRound, sub: "Сдаём технику в аренду или берём у других. Одну машину нельзя отдать дважды на одни дни" },
+  { key: "maintenance", path: "/maintenance", label: "Техобслуживание", icon: Wrench, sub: "СО, ТО-1, ТО-2 по каждой машине: срок по дате и по пробегу. Когда срок подходит, приходит напоминание. Кнопка «Выполнено» закрывает ТО и создаёт следующее", empty: "Добавьте плановое ТО: вид, что сделать и срок по дате или пробегу." },
+  { key: "vehicle_events", path: "/vehicle-events", label: "Контроль мероприятий", icon: Timer, sub: "Всё, что нужно не пропустить по технике: тахограф, поверка, замена ремня. Срок по дате, пробегу или моточасам", empty: "Добавьте мероприятие и срок: напомним заранее." },
+  { key: "tires", path: "/tires", label: "Шины", icon: Disc3, sub: "Какие шины стоят на технике и какие сняты: сезон, размер, пробег на шине", empty: "Добавьте шины: марка, размер, сезон и дата установки." },
+  { key: "vehicle_repairs", path: "/vehicle-repairs", label: "История ремонтов", icon: Hammer, sub: "Что делали с техникой и какие детали ставили, со стоимостью", empty: "Добавьте ремонт или деталь: дата, название, стоимость." },
+  { key: "vehicle_finance", path: "/vehicle-finance", label: "Финансы по технике", icon: PiggyBank, sub: "Доходы и расходы по каждой машине. Итог показывает, сколько техника принесла или стоила", empty: "Добавьте доход или расход по машине." },
   { key: "expenses", path: "/expenses", label: "Расходы", icon: Receipt, sub: "Прочие расходы компании: стоянка, мойка, связь и т. д." },
   { key: "payments", path: "/payments", label: "Выплаты сотрудникам", icon: HandCoins, sub: "Зарплата, авансы, премии и удержания" },
   { key: "cash_accounts", path: "/cash-accounts", label: "Счета и кассы", icon: Landmark, sub: "Где лежат деньги: касса, расчётный счёт, депозит. Остаток считается по операциям", empty: "Сначала создайте кассу или счёт, потом можно вести операции." },
   { key: "cash", path: "/cash", label: "Касса и банк", icon: Wallet, sub: "Приходы, расходы и переводы между счетами. Каждой операции присваивается номер ПКО, РКО или ПЕР" },
   { key: "parts", path: "/parts", label: "Каталог деталей", icon: Package, sub: "Названия и артикулы запчастей. Из каталога подсказываются детали при вводе, частые идут первыми. Новые названия добавляются сами, когда их вписывают в обращения", empty: "Каталог пока пуст. Он наполняется, когда в обращения и счета вписывают детали." },
+  { key: "warehouses", path: "/warehouses", label: "Склады", icon: Warehouse, sub: "Где лежат запчасти и материалы: главный склад, гараж, контейнер. Склад с остатком в архив убрать нельзя", empty: "Добавьте хотя бы один склад: без него нельзя оформить приход." },
+  { key: "stock_items", path: "/stock-items", label: "Товары на складе", icon: Boxes, sub: "Что хранится на складах: название, артикул, единица и минимальный остаток. Когда остаток станет меньше минимального, ответственным придёт уведомление", empty: "Добавьте товары, которые храните: масло, фильтры, ремни. Потом оформите приход." },
   { key: "ppe", path: "/ppe", label: "Выдача СИЗ", icon: HardHat, sub: "Что и кому выдано. Срок замены считается сам по нормам, кнопка со стрелками заменяет вещь одним нажатием", empty: "Выдач пока нет. Сначала заполните «Нормы СИЗ», потом записывайте выдачу сотрудникам." },
   { key: "ppe_norms", path: "/ppe-norms", label: "Нормы СИЗ", icon: ListChecks, sub: "Что выдаём и на сколько месяцев хватает. По сроку считается, когда пора менять", empty: "Добавьте, что вы выдаёте: куртка, перчатки, каска… и на сколько месяцев это хватает." },
   { key: "employee_events", path: "/employee-events", label: "События сотрудников", icon: ClipboardList, sub: "Медосмотры, права, инструктажи, нарушения, ДТП, премии и штрафы. Если указан следующий срок, за 30 дней появится напоминание", empty: "Событий пока нет. Добавьте первое: например, медосмотр с датой следующего." },

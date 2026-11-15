@@ -11,7 +11,7 @@ export interface Notice { id: number; kind: string; kind_label: string; title: s
 export interface NoticeList { items: Notice[]; total: number; page: number; page_size: number; unread: number }
 export interface NotifSummary { unread: number; news_unread: number }
 
-export const KIND_TONE: Record<string, Tone> = { request: "info", reply: "mint", announce: "warning", job: "success", parts: "success", reminder: "error", info: "neutral" };
+export const KIND_TONE: Record<string, Tone> = { request: "info", reply: "mint", announce: "warning", job: "success", parts: "success", reminder: "error", stock: "warning", info: "neutral" };
 
 /** Сколько непрочитанных уведомлений и объявлений. Обновляется раз в минуту и при возврате на вкладку. */
 export function useNotifSummary() {

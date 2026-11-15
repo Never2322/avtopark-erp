@@ -1,12 +1,12 @@
 // Блоки обращения: «Детали для ремонта» и «Счета по обращению».
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { CheckCircle2, FilePlus2, History, Package, Plus, ReceiptText, ShoppingCart, Trash2, Upload } from "lucide-react";
-import { api, ApiError } from "../api";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Boxes, CheckCircle2, FilePlus2, History, Package, Plus, ReceiptText, ShoppingCart, Trash2, Upload } from "lucide-react";
+import { api, ApiError, get, post } from "../api";
 import { useAuth } from "../auth";
 import { fmtDate, fmtMoney } from "../format";
-import { Badge, Button, Card, ConfirmModal, Modal, useForm, useToast } from "../ui";
+import { Alert, Badge, Button, Card, ConfirmModal, Modal, useForm, useToast } from "../ui";
 import { emptyPart, filledParts, PartsEditor, type PartRow } from "./PartsEditor";
 
 export interface PartItem {
@@ -41,12 +41,52 @@ function AddParts({ requestId, onClose }: { requestId: number; onClose: () => vo
   );
 }
 
+
+interface StockLine {
+  part_id: number; name: string; qty_text: string; unit: string; item: { id: number; name: string; unit: string } | null; unit_ok: boolean;
+  places: { warehouse_id: number; warehouse: string; qty: number; qty_text: string; enough: boolean }[]; can_issue: boolean;
+}
+
+/** Взять деталь для ремонта со склада: остаток уменьшается, деталь в обращении отмечается полученной. */
+function IssueFromStock({ line, onClose }: { line: StockLine; onClose: () => void }) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const ok = line.places.filter((p) => p.enough);
+  const [wid, setWid] = useState(String(ok[0]?.warehouse_id ?? ""));
+  const [error, setError] = useState("");
+  const m = useMutation({
+    mutationFn: () => post<{ advanced: boolean; left_total: string }>("/stock/issue-to-request", { part_id: line.part_id, item_id: line.item!.id, warehouse_id: Number(wid) }),
+    onSuccess: (r) => { qc.invalidateQueries(); toast.success(`Деталь взята со склада. Осталось ${r.left_total} ${line.unit}${r.advanced ? ". Все детали получены: обращение снова в работе" : ""}`); onClose(); },
+    onError: (e: any) => setError(e.message),
+  });
+  return (
+    <Modal title="Взять деталь со склада" onClose={onClose} footer={<><Button onClick={onClose}>Отмена</Button><Button variant="primary" loading={m.isPending} disabled={!wid} onClick={() => { setError(""); m.mutate(); }}>Взять со склада</Button></>}>
+      <div className="stack">
+        <div><strong>{line.name}</strong> — {line.qty_text} {line.unit}{line.item && line.item.name !== line.name && <div className="muted small">на складе: «{line.item.name}»</div>}</div>
+        <label className="field"><span className="label">Откуда взять</span>
+          <select className="input" value={wid} onChange={(e) => setWid(e.target.value)}>
+            {ok.map((p) => <option key={p.warehouse_id} value={p.warehouse_id}>{p.warehouse} — {p.qty_text} {line.unit}</option>)}
+          </select>
+        </label>
+        <div className="muted small">Деталь спишется со склада по средней закупочной цене и запишется на машину из обращения. В «Что купить» она больше не попадёт.</div>
+        {error && <Alert tone="error">{error}</Alert>}
+      </div>
+    </Modal>
+  );
+}
+
 export function RequestParts({ requestId, parts, open }: { requestId: number; parts: PartsBlock; open: boolean }) {
   const { can } = useAuth();
   const qc = useQueryClient();
   const toast = useToast();
   const [adding, setAdding] = useState(false);
   const [removing, setRemoving] = useState<PartItem | null>(null);
+  const [taking, setTaking] = useState<StockLine | null>(null);
+  const stock = useQuery({
+    queryKey: ["stock-for-request", requestId], enabled: open && parts.to_buy > 0 && can("stock_moves.create") && can("purchases.mark") && can("stock_items.view"),
+    queryFn: () => get<{ allowed: boolean; closed: boolean; items: StockLine[] }>(`/stock/for-request/${requestId}`),
+  });
+  const onStock = new Map((stock.data?.allowed ? stock.data.items : []).map((x) => [x.part_id, x]));
   const rm = useMutation({
     mutationFn: (id: number) => api("DELETE", `/requests/${requestId}/parts/${id}`),
     onSuccess: () => { qc.invalidateQueries(); toast.success("Деталь убрана из списка"); },
@@ -75,7 +115,14 @@ export function RequestParts({ requestId, parts, open }: { requestId: number; pa
                   {x.bought && <> · куплено {fmtDate(x.bought_at)}{x.bought_by ? `, ${x.bought_by}` : ""}</>}
                 </div>
                 {x.hint && <div className={`part-hint ${x.hint_open ? "open" : ""}`}><History size={13} aria-hidden /> {x.hint}</div>}
+                {!x.bought && onStock.get(x.id)?.item && (() => {
+                  const l = onStock.get(x.id)!;
+                  return !l.unit_ok ? <div className="part-hint"><Boxes size={13} aria-hidden /> Похожий товар есть на складе, но в другой единице («{l.item!.unit}»)</div>
+                    : l.places.length === 0 ? <div className="part-hint"><Boxes size={13} aria-hidden /> На складе нет</div>
+                    : <div className="part-hint stock"><Boxes size={13} aria-hidden /> На складе: {l.places.map((p) => `${p.warehouse} — ${p.qty_text} ${l.unit}`).join(" · ")}</div>;
+                })()}
               </div>
+              {!x.bought && onStock.get(x.id)?.can_issue && <Button size="sm" icon={Boxes} onClick={() => setTaking(onStock.get(x.id)!)}>Со склада</Button>}
               {x.bought ? <Badge tone="success" icon={CheckCircle2}>куплено</Badge> : <Badge tone="warning" icon={Package}>купить</Badge>}
               {x.can_remove && <Button variant="ghost" size="sm" icon={Trash2} aria-label={`Убрать «${x.name}» из списка`} onClick={() => setRemoving(x)} />}
             </li>
@@ -83,6 +130,7 @@ export function RequestParts({ requestId, parts, open }: { requestId: number; pa
         </ul>
       )}
       {!open && parts.items.length > 0 && <div className="muted small" style={{ marginTop: 8 }}>Обращение выполнено или закрыто: список деталей уже не меняется.</div>}
+      {taking && <IssueFromStock line={taking} onClose={() => setTaking(null)} />}
       {adding && <AddParts requestId={requestId} onClose={() => setAdding(false)} />}
       {removing && (
         <ConfirmModal title="Убрать деталь из списка?" danger confirmLabel="Убрать" text={<>«{removing.name}» — {removing.qty_text} {removing.unit}. Её можно будет добавить заново.</>}

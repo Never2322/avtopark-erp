@@ -13,7 +13,7 @@ from app.common import csv_text, fail, like, norm_plate, page_of, utcnow
 from app.db import get_db
 from app.deps import Principal, current, entity_filter, require
 from app.enums import READING_KINDS, REQUEST_OPEN, VEHICLE_CATEGORIES, VEHICLE_STATUSES
-from app.models import (Department, Employee, LegalEntity, ServiceRequest, User, Vehicle, VehicleAssignment, VehicleStatusHistory,
+from app.models import (Department, Employee, LegalEntity, MaintenanceItem, ServiceRequest, User, Vehicle, VehicleAssignment, VehicleStatusHistory,
                         VehicleType, Waybill)
 from app.services import access, readings as readings_svc
 from app.services.vehicles import active_assignment_filter, change_status, employee_in_entity
@@ -164,6 +164,27 @@ def filtered(db: Session, p: Principal, *, q, status, type_id, category, legal_e
     return query
 
 
+def next_service(db: Session, p: Principal, ids: list[int]) -> dict[int, str]:
+    """Ближайший срок планового ТО по дате для каждой машины списка. Только тем, у кого есть право видеть ТО."""
+    scope = p.scope("maintenance.view")
+    if not scope or not ids:
+        return {}
+    rows = db.execute(select(MaintenanceItem.vehicle_id, func.min(MaintenanceItem.due_date))
+                      .where(MaintenanceItem.vehicle_id.in_(ids), MaintenanceItem.archived_at.is_(None), MaintenanceItem.controlled.is_(True),
+                             MaintenanceItem.done_at.is_(None), MaintenanceItem.due_date.is_not(None), scope.cond(MaintenanceItem.legal_entity_id))
+                      .group_by(MaintenanceItem.vehicle_id)).all()
+    return {vid: day.isoformat() for vid, day in rows}
+
+
+def facets(db: Session, p: Principal, flt: dict) -> dict:
+    """Сколько машин в каждой категории и в каждом статусе при текущем поиске. Категории не зависят от выбранной категории, статусы от выбранного статуса."""
+    def count_by(col, **override):
+        ids = filtered(db, p, **{**flt, **override}).with_only_columns(Vehicle.id)
+        q = select(col, func.count()).select_from(Vehicle).join(VehicleType, VehicleType.id == Vehicle.type_id).where(Vehicle.id.in_(ids)).group_by(col)
+        return {k: n for k, n in db.execute(q).all()}
+    return {"categories": count_by(VehicleType.category, category=""), "statuses": count_by(Vehicle.status, status="")}
+
+
 FILTER_PARAMS = dict(q="", status="", type_id=None, category="", legal_entity_id=None, department_id=None, driver_id=None, archived=False)
 
 
@@ -204,7 +225,11 @@ def list_vehicles(q: str = "", status: str = "", type_id: int | None = None, cat
     rows, total = page_of(db, query, page, page_size)
     vehicles = [r[0] for r in rows]
     drivers = drivers_of(db, [v.id for v in vehicles])
-    return {"items": [out(db, p, v, drivers) for v in vehicles], "total": total, "page": page, "page_size": page_size}
+    flt = dict(q=q, status=status, type_id=type_id, category=category, legal_entity_id=legal_entity_id,
+               department_id=department_id, driver_id=driver_id, archived=archived)
+    nxt = next_service(db, p, [v.id for v in vehicles])
+    return {"items": [{**out(db, p, v, drivers), "next_service": nxt.get(v.id)} for v in vehicles], "total": total, "page": page, "page_size": page_size,
+            "facets": facets(db, p, flt)}
 
 
 @router.get("/export.csv")

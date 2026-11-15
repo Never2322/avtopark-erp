@@ -9,7 +9,9 @@ import { shrinkAll } from "../images";
 import { enqueue, isOffline, outboxAvailable } from "../outbox";
 import { OutboxList, useJobPending } from "../components/Outbox";
 import { fmtDateLong, fmtDateTime, fmtSize, plural, todayIso } from "../format";
+import { useAuth } from "../auth";
 import { useEntityParam } from "../hooks";
+import { twogisSearch } from "../maps";
 import { Alert, Badge, Button, Card, ConfirmModal, Empty, Field, Modal, PageHeader, QueryState, Tone, useToast } from "../ui";
 import { RecordModal, type Meta, type Row } from "./Registry";
 
@@ -32,7 +34,6 @@ const photoUrl = (id: number, thumb = false) => `/api/jobs/photos/${id}${thumb ?
 const hhmm = (iso: string | null) => (iso ? fmtDateTime(iso) : "");
 const weekday = (iso: string) => new Date(iso + "T12:00:00").toLocaleDateString("ru-RU", { weekday: "long" });
 const shift = (iso: string, days: number) => { const d = new Date(iso + "T12:00:00"); d.setDate(d.getDate() + days); return d.toISOString().slice(0, 10); };
-const mapLink = (address: string) => `https://yandex.ru/maps/?text=${encodeURIComponent(address)}`;
 
 /** Всё, что меняет наряд, обновляет и доску, и «Мои наряды», и счётчики на главной. */
 export function useRefresh() {
@@ -181,7 +182,7 @@ export function JobCard({ job, driver, onEdit, onChanged }: { job: Job; driver: 
         {job.customer && <div className="job-customer">{job.customer}</div>}
         <div className="row" style={{ alignItems: "flex-start", gap: 6 }}>
           <MapPin size={15} aria-hidden style={{ flex: "none", marginTop: 3, color: "var(--mint)" }} />
-          <span>{job.address} <a href={mapLink(job.address)} target="_blank" rel="noreferrer" className="small">на карте</a></span>
+          <span>{job.address} <a href={twogisSearch(job.address)} target="_blank" rel="noreferrer" className="small">на карте</a></span>
         </div>
         {job.task && <div className="job-task">{job.task}</div>}
         {(job.arrived_at || job.finished_at) && (
@@ -235,6 +236,7 @@ export function JobCard({ job, driver, onEdit, onChanged }: { job: Job; driver: 
 
 export function JobsBoard() {
   const entity = useEntityParam();
+  const { can } = useAuth();
   const [sp, setSp] = useSearchParams();
   const date = sp.get("date") || todayIso();
   const setDate = (d: string) => setSp((old) => { const n = new URLSearchParams(old); d && d !== todayIso() ? n.set("date", d) : n.delete("date"); return n; }, { replace: true });
@@ -253,6 +255,7 @@ export function JobsBoard() {
     <>
       <PageHeader title="Наряды на день" sub="Куда едет каждая машина: адрес, задача, отметки «приехал» и «закончил», фото до и после"
         actions={<>
+          {can("map.view") && <Link className="btn" to={date === todayIso() ? "/map" : `/map?date=${date}`}><MapPin size={16} aria-hidden /> На карте</Link>}
           <Link className="btn" to="/jobs/list">Журнал</Link>
           {d?.can_create && <Button variant="primary" icon={Plus} onClick={() => setEdit("new")}>Новый наряд</Button>}
         </>} />

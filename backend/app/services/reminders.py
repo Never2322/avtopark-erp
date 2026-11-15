@@ -14,10 +14,12 @@ from sqlalchemy import and_, exists, select
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
+from app.enums import MAINTENANCE_KINDS
+from app.services import control as control_svc
 from app.deps import Principal, Scope
 from app.enums import (BILL_UNPAID_DAYS, DOC_EXPIRING_DAYS, DOC_KINDS_NO_EXPIRY, EMPLOYEE_DOC_KINDS, EMPLOYEE_EVENT_KINDS,
                        EMPLOYEE_SENSITIVE_KINDS, PPE_SOON_DAYS, REMINDER_LEAD_DAYS, RENTAL_DIRECTIONS, VEHICLE_DOC_KINDS)
-from app.models import (CalendarEvent, DossierDoc, Employee, EmployeeEvent, EmploymentAssignment, Fine, FuelCard, PpeIssue, PpeNorm,
+from app.models import (ControlEvent, MaintenanceItem, CalendarEvent, DossierDoc, Employee, EmployeeEvent, EmploymentAssignment, Fine, FuelCard, PpeIssue, PpeNorm,
                         Rental, RepairBill, Vehicle)
 
 FINE_SOON_DAYS = 7          # как в разделе «Штрафы»: «скоро срок»
@@ -32,6 +34,8 @@ SOURCES = {
     "rental": "Аренда",
     "fuel_card": "Топливные карты",
     "bill": "Счета на ремонт",
+    "maintenance": "Техобслуживание",
+    "vehicle_event": "Контроль мероприятий",
     "calendar": "Свои события",
     "birthday": "Дни рождения",
 }
@@ -97,6 +101,7 @@ class Item:
     done: bool = False              # свои события: отмечено выполненным
     end: str = ""                   # свои события: когда заканчивается (по часам организации)
     all_day: bool = False
+    text: str = ""                  # «осталось …», если срок не по дате (пробег, моточасы)
 
 
 @dataclass
@@ -259,6 +264,38 @@ def _bills(c: Ctx) -> list[Item]:
                  f"/bills/{b.id}", b.legal_entity_id, ref_id=b.id) for b in c.db.scalars(q)]
 
 
+def _controls(c: Ctx) -> list[Item]:
+    """Плановое ТО и контроль мероприятий. В напоминаниях: порог наступил или близко (по дате, пробегу, моточасам).
+    В календаре: только записи со сроком по дате. День у записи без даты — день последней правки: он не меняется, и уведомление не повторяется каждые сутки."""
+    out: list[Item] = []
+    for perm, model, source, title in (("maintenance.view", MaintenanceItem, "maintenance", None), ("vehicle_events.view", ControlEvent, "vehicle_event", None)):
+        scope = c.scope(perm)
+        if not scope:
+            continue
+        q = (select(model, Vehicle).join(Vehicle, Vehicle.id == model.vehicle_id)
+             .where(model.archived_at.is_(None), Vehicle.archived_at.is_(None), model.controlled.is_(True), scope.cond(model.legal_entity_id)))
+        if source == "maintenance":
+            q = q.where(model.done_at.is_(None))
+        if not c.reminders:
+            q = q.where(_between(model.due_date, c.lo, c.hi))
+        for row, v in c.db.execute(q.order_by(model.id)):
+            if source == "maintenance":
+                what = MAINTENANCE_KINDS.get(row.kind, row.kind) + (f": {row.work}" if row.work else "")
+                head, url = f"Пора на ТО: {what}", f"/vehicles/{v.id}?tab=maintenance"
+            else:
+                head, url = f"Контроль: {row.title}", f"/vehicles/{v.id}?tab=events"
+            if not c.reminders:
+                out.append(Item(source, row.due_date, head, vehicle_label(v), url, row.legal_entity_id, ref_id=row.id))
+                continue
+            ev = control_svc.evaluate(due_date=row.due_date, due_km=row.due_km, due_hours=getattr(row, "due_hours", None), controlled=True, closed=False,
+                                      today=c.today, cur_km=v.current_km, cur_hours=v.current_hours)
+            if ev["level"] not in ("due", "soon"):
+                continue
+            day = row.due_date or local_day(row.updated_at)
+            out.append(Item(source, day, head, vehicle_label(v), url, row.legal_entity_id, level=ev["level"], ref_id=row.id, text=control_svc.left_text(ev["left"])))
+    return out
+
+
 def _own_events(c: Ctx) -> list[Item]:
     scope = c.scope("calendar_events.view")
     if not scope:
@@ -309,7 +346,7 @@ def _birthdays(c: Ctx) -> list[Item]:
     return out
 
 
-COLLECTORS = (_employee_docs, _vehicle_docs, _employee_events, _ppe, _fines, _rentals, _fuel_cards, _bills, _own_events, _birthdays)
+COLLECTORS = (_employee_docs, _vehicle_docs, _employee_events, _ppe, _fines, _rentals, _fuel_cards, _bills, _controls, _own_events, _birthdays)
 
 
 def collect(db: Session, p: Principal, *, entity_id: int | None = None, lo: dt.date | None = None, hi: dt.date | None = None,
@@ -332,7 +369,7 @@ def reminder_out(i: Item, today: dt.date) -> dict:
     left = (i.day - today).days
     level = i.level or level_of(i.day, today, soon)
     return {"source": i.source, "source_label": SOURCES[i.source], "level": level, "tone": tone_of(level), "day": i.day.isoformat(), "left": left,
-            "left_text": left_text(left), "title": i.title, "subject": i.subject, "url": i.url, "entity_id": i.entity_id, "ref_id": i.ref_id}
+            "left_text": i.text or left_text(left), "title": i.title, "subject": i.subject, "url": i.url, "entity_id": i.entity_id, "ref_id": i.ref_id}
 
 
 def reminders(db: Session, p: Principal, entity_id: int | None = None) -> list[dict]:

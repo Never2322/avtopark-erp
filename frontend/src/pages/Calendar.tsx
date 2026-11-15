@@ -94,12 +94,12 @@ export function Calendar() {
   const shown = (d: string) => byDay.get(d) ?? [];
 
   const dayNumber = (c: Cell) => (
-    <button type="button" className="cal-num" onClick={() => goDay(c.d)} aria-label={`Открыть день ${c.d}`}>{c.n}</button>
+    <button type="button" className="cal-num" onClick={() => goDay(c.d)} aria-label={`${c.n}. Открыть день ${c.d.split("-").reverse().join(".")}`}>{c.n}</button>
   );
 
   const monthGrid = (weeks: Cell[][]) => (
     <div className="cal-month" role="grid">
-      <div className="cal-head" role="row">{WEEKDAYS.map((w, i) => <span key={w} className={i > 4 ? "off" : ""}>{w}</span>)}</div>
+      <div className="cal-head" role="row">{WEEKDAYS.map((w, i) => <span key={w} role="columnheader" className={i > 4 ? "off" : ""}>{w}</span>)}</div>
       {weeks.map((w, wi) => (
         <div className="cal-week" role="row" key={wi}>
           {w.map((c) => {

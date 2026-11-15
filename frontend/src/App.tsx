@@ -12,12 +12,14 @@ import { RequestCard } from "./pages/RequestCard";
 import { Waybills } from "./pages/Waybills";
 import { WaybillCard } from "./pages/WaybillCard";
 import { ReadingsReview } from "./pages/ReadingsReview";
+import { ReadingsImport } from "./pages/ReadingsImport";
 import { Employees } from "./pages/Employees";
 import { Entities } from "./pages/Entities";
 import { Users } from "./pages/Users";
 import { Roles } from "./pages/Roles";
 import { Audit } from "./pages/Audit";
 import { Backups } from "./pages/Backups";
+import { ChannelsStatus } from "./pages/ChannelsStatus";
 import { SearchX } from "lucide-react";
 import { DriverFile, DriverFiles } from "./pages/dossier/DriverFiles";
 import { VehicleFile, VehicleFiles } from "./pages/dossier/VehicleFiles";
@@ -33,6 +35,7 @@ import { News, NewsCard } from "./pages/News";
 import { Timesheet } from "./pages/Timesheet";
 import { TimesheetPrint } from "./pages/TimesheetPrint";
 import { JobsBoard, MyJobs } from "./pages/Jobs";
+import { MapPage } from "./pages/MapPage";
 import { DriverEntries, EntriesFeed } from "./pages/Entries";
 import { Roster } from "./pages/Roster";
 import { DriverHome } from "./pages/DriverHome";
@@ -41,10 +44,21 @@ import { Purchases } from "./pages/Purchases";
 import { Bills } from "./pages/Bills";
 import { BillForm } from "./pages/BillForm";
 import { BillCard } from "./pages/BillCard";
+import { Stock } from "./pages/Stock";
+import { StockMoves } from "./pages/StockMoves";
+import { ReportsIndex, ReportView } from "./pages/Reports";
 
 const VEH = ["vehicles.view", "vehicles.view_own"];
 const REQ = ["requests.view", "requests.view_own"];
 const WB = ["waybills.view", "waybills.view_own"];
+
+/** После входа возвращает на страницу, которую человек открывал (например, по ссылке из уведомления); иначе на главную. */
+function AfterLogin() {
+  const loc = useLocation();
+  const from = (loc.state as { from?: string } | null)?.from;
+  const safe = from && from.startsWith("/") && !from.startsWith("//") && !from.startsWith("/login") ? from : "/";
+  return <Navigate to={safe} replace />;
+}
 
 export function App() {
   const { me, loading, canAny } = useAuth();
@@ -59,7 +73,7 @@ export function App() {
 
   return (
     <Routes>
-      <Route path="/login" element={<Navigate to="/" replace />} />
+      <Route path="/login" element={<AfterLogin />} />
       <Route path="/print/timesheet" element={<Guard any={["timesheet.view"]}><TimesheetPrint /></Guard>} />
       <Route path="/print/:kind/:id" element={<PrintPage />} />
       <Route element={<Shell />}>
@@ -71,12 +85,18 @@ export function App() {
         <Route path="waybills" element={<Guard any={WB}><Waybills /></Guard>} />
         <Route path="waybills/:id" element={<Guard any={WB}><WaybillCard /></Guard>} />
         <Route path="readings" element={<Guard any={["readings.review"]}><ReadingsReview /></Guard>} />
+        <Route path="readings/import" element={<Guard any={["readings.import"]}><ReadingsImport /></Guard>} />
         <Route path="jobs" element={<Guard any={["jobs.view"]}><JobsBoard /></Guard>} />
+        <Route path="map" element={<Guard any={["map.view"]}><MapPage /></Guard>} />
         <Route path="jobs/mine" element={<Guard any={["jobs.view_own"]}><MyJobs /></Guard>} />
         <Route path="entries" element={<Guard any={["trips.view_own", "fuel_fills.view_own"]}><DriverEntries /></Guard>} />
         <Route path="entries/feed" element={<Guard any={["trips.view", "fuel_fills.view"]}><EntriesFeed /></Guard>} />
         <Route path="timesheet" element={<Guard any={["timesheet.view"]}><Timesheet /></Guard>} />
         <Route path="purchases" element={<Guard any={["purchases.view"]}><Purchases /></Guard>} />
+        <Route path="stock" element={<Guard any={["stock_items.view"]}><Stock /></Guard>} />
+        <Route path="stock/moves" element={<Guard any={["stock_moves.view"]}><StockMoves /></Guard>} />
+        <Route path="reports" element={<Guard any={["reports.view"]}><ReportsIndex /></Guard>} />
+        <Route path="reports/:name" element={<Guard any={["reports.view"]}><ReportView /></Guard>} />
         <Route path="bills" element={<Guard any={["bills.view"]}><Bills /></Guard>} />
         <Route path="bills/new" element={<Guard any={["bills.create"]}><BillForm /></Guard>} />
         <Route path="bills/:id" element={<Guard any={["bills.view"]}><BillCard /></Guard>} />
@@ -103,6 +123,7 @@ export function App() {
         <Route path="roles" element={<Guard any={["users.view"]}><Roles /></Guard>} />
         <Route path="audit" element={<Guard any={["audit.view"]}><Audit /></Guard>} />
         <Route path="backups" element={<Guard any={["backups.manage"]}><Backups /></Guard>} />
+        <Route path="channels" element={<Guard any={["users.view"]}><ChannelsStatus /></Guard>} />
         <Route path="profile" element={<Profile />} />
         <Route path="*" element={<Empty icon={SearchX} title="Страница не найдена">Проверьте адрес или выберите раздел в меню слева.</Empty>} />
       </Route>

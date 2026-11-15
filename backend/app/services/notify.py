@@ -13,16 +13,20 @@ import datetime as dt
 import functools
 import hashlib
 import logging
+from decimal import Decimal
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import delete, or_, select, text
 from sqlalchemy.orm import Session
 
 from app.common import utcnow
+from app.config import get_settings
 from app.db import engine, session_factory
 from app.deps import Principal, load_grants
 from app.enums import (NOTIFICATION_DIGEST_FROM, NOTIFICATION_KEEP_DAYS, NOTIFICATION_KEYED_KEEP_DAYS, NOTIFICATION_KINDS,
                        REQUEST_STATUSES)
 from app.models import (Employee, Notification, Permission, RolePermission, ServiceRequest, User, UserRole, VehicleAssignment)
+from app.services import channels
 from app.services.vehicles import active_assignment_filter
 
 log = logging.getLogger("erp.notify")
@@ -70,6 +74,7 @@ def push(db: Session, user_ids, kind: str, title: str, text_: str = "", url: str
     ids = sorted({i for i in user_ids if i and i != actor_id})
     kind = kind if kind in NOTIFICATION_KINDS else "info"
     made = 0
+    created: list[int] = []
     for uid in ids:
         try:
             with db.begin_nested():
@@ -79,8 +84,15 @@ def push(db: Session, user_ids, kind: str, title: str, text_: str = "", url: str
                                     legal_entity_id=entity_id, key=key, read_at=utcnow() if read else None))
                 db.flush()
                 made += 1
+                created.append(uid)
         except Exception:                                   # noqa: BLE001
             log.exception("Не удалось создать уведомление «%s» для пользователя %s", title, uid)
+    if created and not read:                                # «прочитанное сразу» — это части общего напоминания: наружу уходит только общее
+        try:
+            with db.begin_nested():
+                channels.enqueue(db, created, short(title, 160), short(text_, 500), url[:200])
+        except Exception:                                   # noqa: BLE001
+            log.exception("Не удалось поставить в очередь отправку «%s» в Telegram и почту", title)
     return made
 
 
@@ -141,6 +153,22 @@ def on_request_assigned(db: Session, r: ServiceRequest, user_id: int, actor_id: 
 def on_parts_bought(db: Session, r: ServiceRequest, names: list[str], actor_id: int | None) -> None:
     push(db, _request_people(r), "parts", f"Куплено для обращения № {r.number}", short("; ".join(names), 300), f"/requests/{r.id}",
          r.legal_entity_id, actor_id)
+
+
+@safe
+def on_parts_from_stock(db: Session, r: ServiceRequest, name: str, actor_id: int | None) -> None:
+    push(db, _request_people(r), "parts", f"Деталь со склада для обращения № {r.number}", short(name, 300), f"/requests/{r.id}",
+         r.legal_entity_id, actor_id)
+
+
+@safe
+def on_stock_low(db: Session, item, left, actor_id: int | None) -> None:
+    """Товар заканчивается: тем, кто может менять товары юрлица. На один товар не чаще раза в день."""
+    day = dt.datetime.now(ZoneInfo(get_settings().org_timezone)).strftime("%Y%m%d")
+    q = format(Decimal(str(left)).normalize(), "f").replace(".", ",")
+    m = format(Decimal(str(item.min_qty)).normalize(), "f").replace(".", ",")
+    push(db, users_with(db, "stock_items.edit", item.legal_entity_id), "stock", f"Заканчивается: {item.name}",
+         f"Осталось {q} {item.unit}, минимум {m}", "/stock?low=1", item.legal_entity_id, actor_id, key=f"low:{item.id}:{day}")
 
 
 @safe
