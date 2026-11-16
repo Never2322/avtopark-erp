@@ -12,8 +12,8 @@ from app import audit
 from app.common import csv_text, fail, like, norm_plate, org_today, page_of, utcnow
 from app.db import get_db
 from app.deps import Principal, current, entity_filter, require
-from app.enums import READING_KINDS, REQUEST_OPEN, VEHICLE_CATEGORIES, VEHICLE_STATUSES
-from app.models import (Department, Employee, LegalEntity, MaintenanceItem, ServiceRequest, User, Vehicle, VehicleAssignment, VehicleStatusHistory,
+from app.enums import READING_KINDS, REQUEST_OPEN, VEHICLE_CATEGORIES, VEHICLE_DOC_KINDS, VEHICLE_STATUSES
+from app.models import (Department, DossierDoc, Employee, LegalEntity, MaintenanceItem, ServiceRequest, User, Vehicle, VehicleAssignment, VehicleStatusHistory,
                         VehicleType, Waybill)
 from app.services import access, readings as readings_svc
 from app.services.vehicles import active_assignment_filter, change_status, employee_in_entity
@@ -176,6 +176,29 @@ def next_service(db: Session, p: Principal, ids: list[int]) -> dict[int, str]:
     return {vid: day.isoformat() for vid, day in rows}
 
 
+INSURANCE_KINDS = ("osago", "kasko")
+
+
+def insurance_until(db: Session, p: Principal, ids: list[int]) -> dict[int, list[dict]]:
+    """Страховки машин списка: по каждому виду (ОСАГО, КАСКО) берётся полис с самой поздней датой окончания,
+    чтобы заменённый старый полис не показывался просроченным. Первым идёт тот, что кончается раньше.
+    Только тем, у кого есть право видеть личные дела техники."""
+    scope = p.scope("vehicle_files.view")
+    if not scope or not ids:
+        return {}
+    rows = db.execute(select(DossierDoc.vehicle_id, DossierDoc.kind, func.max(DossierDoc.valid_until))
+                      .join(Vehicle, Vehicle.id == DossierDoc.vehicle_id)
+                      .where(DossierDoc.vehicle_id.in_(ids), DossierDoc.kind.in_(INSURANCE_KINDS), DossierDoc.archived_at.is_(None),
+                             DossierDoc.valid_until.is_not(None), scope.cond(Vehicle.legal_entity_id))
+                      .group_by(DossierDoc.vehicle_id, DossierDoc.kind)).all()
+    out: dict[int, list[dict]] = {}
+    for vid, kind, day in rows:
+        out.setdefault(vid, []).append({"kind": kind, "label": VEHICLE_DOC_KINDS[kind], "until": day.isoformat()})
+    for items in out.values():
+        items.sort(key=lambda x: (x["until"], x["kind"]))
+    return out
+
+
 def facets(db: Session, p: Principal, flt: dict) -> dict:
     """Сколько машин в каждой категории и в каждом статусе при текущем поиске. Категории не зависят от выбранной категории, статусы от выбранного статуса."""
     def count_by(col, **override):
@@ -228,7 +251,8 @@ def list_vehicles(q: str = "", status: str = "", type_id: int | None = None, cat
     flt = dict(q=q, status=status, type_id=type_id, category=category, legal_entity_id=legal_entity_id,
                department_id=department_id, driver_id=driver_id, archived=archived)
     nxt = next_service(db, p, [v.id for v in vehicles])
-    return {"items": [{**out(db, p, v, drivers), "next_service": nxt.get(v.id)} for v in vehicles], "total": total, "page": page, "page_size": page_size,
+    ins = insurance_until(db, p, [v.id for v in vehicles])
+    return {"items": [{**out(db, p, v, drivers), "next_service": nxt.get(v.id), "insurance": ins.get(v.id)} for v in vehicles], "total": total, "page": page, "page_size": page_size,
             "facets": facets(db, p, flt)}
 
 

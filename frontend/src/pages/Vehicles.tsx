@@ -9,10 +9,12 @@ import { Page, useDebounced, useEntityParam, useUrlState, useVehicleTypes } from
 import { fmtDate, fmtNum, todayIso } from "../format";
 import { Alert, Button, Card, Empty, Field, FilterChips, Modal, numOrNull, PageHeader, Pagination, QueryState, Table, useForm, useToast, VehicleStatus } from "../ui";
 
+export interface Insurance { kind: string; label: string; until: string }
+
 export interface VehicleRow {
   id: number; legal_entity_id: number; legal_entity: string; plate: string; internal_no: string; make: string; model: string;
   vin: string | null; year: number | null; status: string; status_label: string; current_km: number | null; current_hours: number | null;
-  archived: boolean; driver: { id: number; name: string } | null; next_service?: string | null;
+  archived: boolean; driver: { id: number; name: string } | null; next_service?: string | null; insurance?: Insurance[] | null;
   type: { id: number; name: string; category: string; primary_reading: string };
 }
 
@@ -26,6 +28,19 @@ function NextService({ day }: { day?: string | null }) {
   if (!day) return <span className="muted">—</span>;
   const left = Math.round((Date.parse(day) - Date.parse(todayIso())) / 86_400_000);
   return <span className={left < 0 ? "due-bad" : left <= 14 ? "due-soon" : ""} title={left < 0 ? "Срок прошёл" : left <= 14 ? "Скоро" : undefined}>{fmtDate(day)}</span>;
+}
+
+/** Конец страховки (ОСАГО, КАСКО) из личного дела техники: показана та, что кончается раньше. Просрочена — красным, меньше 30 дней — жёлтым. */
+function InsuranceUntil({ items }: { items?: Insurance[] | null }) {
+  if (!items || items.length === 0) return <span className="muted" title="Страховка не внесена в личное дело техники">—</span>;
+  const first = items[0];
+  const left = Math.round((Date.parse(first.until) - Date.parse(todayIso())) / 86_400_000);
+  const all = items.map((i) => `${i.label} до ${fmtDate(i.until)}`).join("; ");
+  return (
+    <span title={all}>
+      <span className={left < 0 ? "due-bad" : left <= 30 ? "due-soon" : ""}>{fmtDate(first.until)}</span> <span className="muted">{first.label}</span>
+    </span>
+  );
 }
 
 export function reading(v: Pick<VehicleRow, "current_km" | "current_hours" | "type">): string {
@@ -164,6 +179,7 @@ export function Vehicles() {
                   { key: "status", header: "Статус", sortKey: "status", render: (v) => <VehicleStatus code={v.status} label={v.status_label} /> },
                   { key: "reading", header: "Пробег / моточасы", num: true, sortKey: s.sort === "current_hours" ? "current_hours" : "current_km", render: (v) => reading(v) },
                   { key: "driver", header: "Водитель", hideSm: true, render: (v) => v.driver?.name ?? <span className="muted">не закреплён</span> },
+                  ...(can("vehicle_files.view") ? [{ key: "ins", header: "Страховка до", hideSm: true, render: (v: VehicleRow) => <InsuranceUntil items={v.insurance} /> }] : []),
                   ...(can("maintenance.view") ? [{ key: "next", header: "Следующее ТО", hideSm: true, render: (v: VehicleRow) => <NextService day={v.next_service} /> }] : []),
                   ...(multi ? [{ key: "entity", header: "Юрлицо", hideSm: true, render: (v: VehicleRow) => v.legal_entity }] : []),
                 ]} />
