@@ -104,7 +104,7 @@ export function Roles() {
                     ))}
                   </div>
                 ))}
-                <div className="perm-row" style={{ position: "sticky", bottom: 0, background: "#101b21", borderTop: "1px solid var(--border)" }}>
+                <div className="perm-row" style={{ position: "sticky", bottom: 0, background: "var(--surface)", borderTop: "1px solid var(--border)" }}>
                   <div className="muted small">{manage ? "Сохраняйте каждую роль отдельно" : "Менять права может только администратор"}</div>
                   {items.map((r) => (
                     <div className="c" key={r.id}>

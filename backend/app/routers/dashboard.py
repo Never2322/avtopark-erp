@@ -23,7 +23,7 @@ router = APIRouter(prefix="/dashboard", tags=["Главная"])
 
 
 def jobs_summary(db: Session, p: Principal, legal_entity_id: int | None) -> dict:
-    """Наряды на сегодня: сколько всего, сколько ещё не закончено, и сколько не закрыто за прошлые дни. Водителю только по своей технике."""
+    """Задания на сегодня: сколько всего, сколько ещё не закончено, и сколько не закрыто за прошлые дни. Водителю только по своей технике."""
     from app.models import Job
     from app.resources import job_today
     from app.routers.jobs import OPEN_STATES, mine
@@ -128,7 +128,7 @@ def dashboard(legal_entity_id: int | None = None, p: Principal = Depends(current
         by = dict(db.execute(select(Vehicle.status, func.count()).where(cond).group_by(Vehicle.status)).all())
         data["vehicles"] = {"total": sum(by.values()),
                             "by_status": [{"code": k, "label": v, "count": by.get(k, 0)} for k, v in VEHICLE_STATUSES.items()],
-                            "attention": by.get("in_repair", 0) + by.get("awaiting_repair", 0)}
+                            "attention": by.get("in_repair", 0)}
 
     if p.can("requests.view") or p.can("requests.view_own"):
         cond = req_router.visible_condition(p)

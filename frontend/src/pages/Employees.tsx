@@ -7,6 +7,7 @@ import { fmtDate, todayIso } from "../format";
 import { Page, useDebounced, useEntityParam, useUrlState } from "../hooks";
 import { EmployeeEvents } from "../components/EmployeeEvents";
 import { EmployeePpe } from "../components/EmployeePpe";
+import { EmployeePay, type PayInfo } from "../components/EmployeePay";
 import { Alert, Badge, Button, Card, ConfirmModal, Empty, Field, FilterChips, Modal, PageHeader, Pagination, QueryState, Table, useForm, useToast } from "../ui";
 
 interface Employee {
@@ -15,6 +16,7 @@ interface Employee {
   sensitive_hidden: boolean; phone: string | null; email: string | null; birth_date: string | null;
   note?: string; user_login?: string | null; vehicles?: { id: number; plate: string; name: string }[];
   assignments?: { id: number; legal_entity_id: number; legal_entity: string; position: string; started_on: string | null; ended_on: string | null }[];
+  pay?: PayInfo;
 }
 
 const nul = (s: string) => (s.trim() === "" ? null : s);
@@ -175,6 +177,7 @@ function EmployeeDialog({ id, onClose }: { id: number; onClose: () => void }) {
             </dl>
             {can("employee_events.view") && <EmployeeEvents employeeId={e.id} entityIds={e.legal_entities.map((x) => x.id)} />}
             {can("ppe.view") && <EmployeePpe employeeId={e.id} />}
+            {e.pay && <EmployeePay employeeId={e.id} pay={e.pay} archived={e.archived} />}
             <h3 style={{ margin: "6px 0 0", fontSize: 14 }}>Где работает</h3>
             <Table rows={e.assignments ?? []} rowKey={(a) => a.id}
               columns={[

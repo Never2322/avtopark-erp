@@ -95,7 +95,7 @@ export function BellMenu() {
           </div>
           <div className="bell-list">
             {list.isLoading && <Spinner />}
-            {list.data && list.data.items.length === 0 && <div className="bell-empty muted">Пока уведомлений нет. Здесь появятся новые обращения, ответы, наряды и напоминания.</div>}
+            {list.data && list.data.items.length === 0 && <div className="bell-empty muted">Пока уведомлений нет. Здесь появятся новые обращения, ответы, задания и напоминания.</div>}
             {list.data?.items.map((n) => <NoticeRow key={n.id} n={n} onOpen={() => open1(n, () => setOpen(false))} />)}
           </div>
           <div className="bell-foot"><Link to="/notifications" onClick={() => setOpen(false)}>Все уведомления</Link></div>

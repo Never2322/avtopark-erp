@@ -3,10 +3,11 @@ import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import {
   BellRing, Building2, CalendarCheck, CalendarClock, CalendarDays, ChevronDown, ClipboardList, DatabaseBackup, Gauge, LayoutDashboard, LogOut, Menu, ScrollText, Search, ShieldCheck,
-  Truck, User as UserIcon, UserCog, UserSquare2, Users, UsersRound, Wrench, FolderOpen, Fuel, NotebookPen, ShoppingCart, ReceiptText, Megaphone, Newspaper, Boxes, ArrowLeftRight, BarChart3, FileUp, MapPin, Send, type LucideIcon,
+  Truck, User as UserIcon, UserCheck, UserCog, UserSquare2, Users, UsersRound, Wrench, FolderOpen, Fuel, NotebookPen, ShoppingCart, ReceiptText, Megaphone, Newspaper, Boxes, ArrowLeftRight, BarChart3, FileUp, Hourglass, MapPin, Send, type LucideIcon,
 } from "lucide-react";
 import { ConnectionBar, useOutboxSync } from "./Outbox";
 import { BellMenu, useNotifSummary } from "./Bell";
+import { ThemeToggle } from "./ThemeToggle";
 import { useAuth } from "../auth";
 import { get } from "../api";
 import { SECTIONS } from "../sections";
@@ -38,7 +39,9 @@ const NAV: { title: string; items: Item[] }[] = [
       { to: "/employees", label: "Сотрудники", icon: Users, any: ["employees.view"] },
       { to: "/dossier/employees", label: "Личные дела водителей", icon: UserSquare2, any: ["employee_files.view"] },
       { to: "/timesheet", label: "Табель", icon: CalendarDays, any: ["timesheet.view"] },
-      ...sectionItems("employee_events", "ppe", "ppe_norms"),
+      { to: "/my-time", label: "Мои часы", icon: Hourglass, any: ["worklog.view_own", "worklog.create_own"], unless: ["worklog.view"] },
+      { to: "/attendance", label: "Выход на работу", icon: UserCheck, any: ["attendance.view", "attendance.mark_own"] },
+      ...sectionItems("worklog", "employee_events", "ppe", "ppe_norms"),
     ],
   },
   {
@@ -66,10 +69,10 @@ const NAV: { title: string; items: Item[] }[] = [
     ],
   },
   {
-    title: "Наряды",
+    title: "Задания",
     items: [
-      { to: "/jobs", label: "Наряды на день", icon: CalendarCheck, any: ["jobs.view"], end: true },
-      { to: "/jobs/mine", label: "Мои наряды", icon: CalendarCheck, any: ["jobs.view_own"], unless: ["jobs.view"] },
+      { to: "/jobs", label: "Технические задания", icon: CalendarCheck, any: ["jobs.view"], end: true },
+      { to: "/jobs/mine", label: "Мои задания", icon: CalendarCheck, any: ["jobs.view_own"], unless: ["jobs.view"] },
       { to: "/map", label: "Карта", icon: MapPin, any: ["map.view"] },
       ...sectionItems("jobs"),
     ],
@@ -184,6 +187,7 @@ export function Shell() {
             </form>
           )}
           <span className="spacer" />
+          <ThemeToggle />
           <BellMenu />
           {me!.legal_entities.length > 1 && (
             <select className="input compact" aria-label="Юридическое лицо" value={entityId ?? ""} onChange={(e) => setEntityId(e.target.value ? Number(e.target.value) : null)}>

@@ -1,7 +1,7 @@
 import { ButtonHTMLAttributes, createContext, ReactNode, useCallback, useContext, useEffect, useRef, useState } from "react";
 import {
-  AlertTriangle, ArrowDown, ArrowUp, Ban, CheckCircle2, ChevronLeft, ChevronRight, Clock, Flame, Hourglass, Inbox, Info, Loader2,
-  Lock, Minus, Moon, Package, Pause, Play, Search, Wrench, X, XCircle, Key, FileText, type LucideIcon,
+  AlertTriangle, ArrowDown, ArrowUp, CheckCircle2, ChevronLeft, ChevronRight, Flame, Hourglass, Inbox, Info, Loader2,
+  Lock, Minus, Package, Play, Search, Wrench, X, XCircle, FileText, type LucideIcon,
 } from "lucide-react";
 import { ApiError, errorText } from "./api";
 
@@ -36,8 +36,7 @@ export function Badge({ tone = "neutral", icon: Icon, children }: { tone?: Tone;
 }
 
 const VEHICLE: Record<string, [Tone, LucideIcon]> = {
-  in_work: ["success", CheckCircle2], in_repair: ["error", Wrench], awaiting_repair: ["warning", Clock], parked: ["neutral", Pause],
-  day_off: ["neutral", Moon], rented: ["info", Key], unused: ["neutral", Pause], written_off: ["neutral", Ban],
+  in_work: ["success", CheckCircle2], in_repair: ["error", Wrench],
 };
 const REQUEST: Record<string, [Tone, LucideIcon]> = {
   new: ["info", Inbox], diagnostics: ["info", Search], approval: ["warning", Hourglass], in_progress: ["mint", Wrench],

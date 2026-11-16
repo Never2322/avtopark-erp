@@ -19,6 +19,6 @@
   "shortcuts": [
     { "name": "Рейс или заправка", "short_name": "Записи", "url": "/entries", "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png" }] },
     { "name": "Мои наряды", "short_name": "Наряды", "url": "/jobs/mine", "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png" }] },
-    { "name": "Написать обращение", "short_name": "Обращение", "url": "/requests?new=1", "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png" }] }
+    { "name": "Запрос на деталь", "short_name": "Запрос", "url": "/requests?new=1", "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png" }] }
   ]
 }

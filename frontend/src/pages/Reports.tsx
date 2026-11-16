@@ -1,14 +1,15 @@
 // Отчёты: список доступных и сам отчёт (период, диаграмма, таблица с итогами, дополнительные таблицы, выгрузка в Excel и CSV).
 // Что показывать, решает сервер: столбцы без права доступа сюда не приходят, а в «hidden» сказано, чего не хватает.
+import { useState, type ReactNode } from "react";
 import { Link, useParams } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { BarChart3, ChevronLeft, ChevronRight, FileSpreadsheet, FileText } from "lucide-react";
-import { get, qs, ApiError } from "../api";
+import { get, post, qs, errorText, ApiError } from "../api";
 import { fmtDate, fmtDateTime, fmtMoney, fmtNum, todayIso } from "../format";
 import { useEntityParam, useUrlState } from "../hooks";
-import { Alert, Button, Card, Empty, PageHeader, QueryState } from "../ui";
+import { Alert, Button, Card, Empty, Field, Modal, PageHeader, QueryState, useToast } from "../ui";
 
-interface ReportItem { name: string; title: string; period: "month" | "range" | "year12"; money: boolean; desc: string }
+interface ReportItem { name: string; title: string; period: "month" | "range" | "year12" | "day"; money: boolean; desc: string }
 interface Cell { key: string; label: string; kind: string }
 type Value = string | number | null;
 interface Tbl { columns: Cell[]; rows: Value[][]; totals: Value[] | null }
@@ -16,8 +17,9 @@ interface Extra extends Tbl { title: string }
 interface ChartData { labels: string[]; values: number[]; unit: string; titles: string[] }
 interface ReportData {
   name: string; title: string; note: string; money: boolean; hidden: string[]; legal_entity_id: number | null;
-  period: { kind: "month" | "range" | "year12"; from: string; to: string; month: string };
+  period: { kind: "month" | "range" | "year12" | "day"; from: string; to: string; month: string };
   table: Tbl; chart: ChartData | null; extras: Extra[]; can: { export: boolean };
+  day_rows?: { employee_id: number | null; can_edit: boolean; kind: string }[];
 }
 
 /* ---------------- даты ---------------- */
@@ -105,7 +107,7 @@ function BarChart({ chart }: { chart: ChartData }) {
 
 /* ---------------- таблица ---------------- */
 
-function DataTable({ t, empty }: { t: Tbl; empty: string }) {
+function DataTable({ t, empty, cell }: { t: Tbl; empty: string; cell?: (c: Cell, row: number) => ReactNode | null }) {
   if (t.rows.length === 0) return <Empty icon={BarChart3} title="Нет данных">{empty}</Empty>;
   return (
     <div className="table-wrap">
@@ -116,7 +118,7 @@ function DataTable({ t, empty }: { t: Tbl; empty: string }) {
         <tbody>
           {t.rows.map((r, i) => (
             <tr key={i}>
-              {t.columns.map((c, j) => <td key={c.key} className={isNumeric(c.kind) ? "num" : ""}>{show(c.kind, c.key, r[j])}</td>)}
+              {t.columns.map((c, j) => <td key={c.key} className={isNumeric(c.kind) ? "num" : ""}>{cell?.(c, i) ?? show(c.kind, c.key, r[j])}</td>)}
             </tr>
           ))}
         </tbody>
@@ -135,9 +137,54 @@ function DataTable({ t, empty }: { t: Tbl; empty: string }) {
   );
 }
 
+/* ---------------- тип занятости за день: ручной выбор ---------------- */
+
+const KIND_TEXT: Record<string, string> = { work: "Работа", repair: "Ремонт", both: "Работа и ремонт" };
+
+interface KindPreview { changed: number; hours: number; before: number; after: number; no_rate: boolean; need_description: boolean }
+
+function KindDialog({ who, employeeId, date, kind, onClose }: { who: string; employeeId: number; date: string; kind: "work" | "repair"; onClose: () => void }) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const [note, setNote] = useState("");
+  const body = { employee_id: employeeId, work_date: date, kind };
+  const pre = useQuery({ queryKey: ["day-kind-preview", employeeId, date, kind], queryFn: () => post<KindPreview>("/payroll/day-kind", { ...body, dry_run: true }), retry: false, gcTime: 0, staleTime: 0 });
+  const m = useMutation({
+    mutationFn: () => post<KindPreview>("/payroll/day-kind", { ...body, description: note.trim() }),
+    onSuccess: () => { qc.invalidateQueries(); toast.success(`Часы переведены: «${KIND_TEXT[kind]}»`); onClose(); },
+  });
+  const p = pre.data;
+  const needNote = !!p?.need_description;
+  const ready = !!p && p.changed > 0 && (!needNote || note.trim().length >= 3);
+  return (
+    <Modal title={`Тип занятости: ${KIND_TEXT[kind]}`} onClose={onClose} footer={<>
+      <Button onClick={onClose}>Отмена</Button>
+      <Button variant="primary" loading={m.isPending} disabled={!ready} onClick={() => m.mutate()}>Перевести часы</Button>
+    </>}>
+      <div className="stack">
+        <p>{who}, {fmtDate(date)}. Все часы этого человека за день станут «{KIND_TEXT[kind]}», ставка возьмётся из его тарифа на {kind === "repair" ? "ремонт" : "работу"}.</p>
+        {pre.isPending && <p className="muted">Считаю, как изменится сумма…</p>}
+        {pre.isError && <Alert tone="error">{errorText(pre.error)}</Alert>}
+        {p && p.changed === 0 && <Alert tone="info">Все часы за этот день уже в типе «{KIND_TEXT[kind]}».</Alert>}
+        {p && p.changed > 0 && (
+          <p>Переносится {fmtNum(p.hours, 1)} ч. Сумма за день: <strong>{fmtMoney(p.before)} ₽ → {fmtMoney(p.after)} ₽</strong>.</p>
+        )}
+        {p && p.changed > 0 && p.no_rate && <Alert tone="warning">У сотрудника не назначен тариф на {kind === "repair" ? "ремонт" : "работу"}: переведённые часы пока дадут 0 ₽. Сумма появится, когда директор назначит тариф.</Alert>}
+        {needNote && (
+          <Field label="Что делали на ремонте" hint="Обязательно: хотя бы несколько слов. Впишется в записи без описания.">
+            <textarea className="input" value={note} maxLength={500} onChange={(e) => setNote(e.target.value)} />
+          </Field>
+        )}
+        {m.isError && <Alert tone="error">{errorText(m.error)}</Alert>}
+      </div>
+    </Modal>
+  );
+}
+
 /* ---------------- список отчётов ---------------- */
 
-const PERIOD_TEXT = { month: "За месяц", range: "За выбранные даты", year12: "12 месяцев" };
+const PERIOD_TEXT = { month: "За месяц", range: "За выбранные даты", year12: "12 месяцев", day: "За один день" };
+const shiftDay = (iso: string, n: number) => { const d = new Date(`${iso}T00:00:00Z`); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
 
 export function ReportsIndex() {
   const q = useQuery({ queryKey: ["reports"], queryFn: () => get<{ items: ReportItem[]; can: { export: boolean; money: boolean } }>("/reports") });
@@ -181,10 +228,25 @@ export function ReportView() {
   const d = q.data;
   const kind = d?.period.kind ?? list.data?.items.find((r) => r.name === name)?.period ?? "month";
   const month = s.month || d?.period.month || today.slice(0, 7);
-  const from = s.from || d?.period.from || `${today.slice(0, 4)}-01-01`;
+  const from = s.from || d?.period.from || (kind === "day" ? today : `${today.slice(0, 4)}-01-01`);
   const to = s.to || d?.period.to || today;
-  const exportParams = d ? { legal_entity_id: entity, ...(d.period.kind === "range" ? { from: d.period.from, to: d.period.to } : { month: d.period.month }) } : {};
+  const exportParams = d ? { legal_entity_id: entity, ...(d.period.kind === "range" ? { from: d.period.from, to: d.period.to } : d.period.kind === "day" ? { from: d.period.from } : { month: d.period.month }) } : {};
   const badPeriod = q.error instanceof ApiError && q.error.code === "bad_period";
+  const [pend, setPend] = useState<{ row: number; kind: "work" | "repair" } | null>(null);
+  const dayCell = (c: Cell, i: number): ReactNode | null => {
+    const meta = d?.day_rows?.[i];
+    if (c.key !== "kind" || !meta?.can_edit || meta.employee_id === null) return null;
+    const who = String(d?.table.rows[i]?.[0] ?? "");
+    return (
+      <select className="input compact kind-select" aria-label={`Тип занятости: ${who}`} value={meta.kind}
+        onChange={(e) => { if (e.target.value === "work" || e.target.value === "repair") setPend({ row: i, kind: e.target.value }); }}>
+        {meta.kind === "both" && <option value="both">Работа и ремонт</option>}
+        <option value="work">Работа</option>
+        <option value="repair">Ремонт</option>
+      </select>
+    );
+  };
+  const pendMeta = pend ? d?.day_rows?.[pend.row] : undefined;
 
   return (
     <>
@@ -196,7 +258,16 @@ export function ReportView() {
           </div>) : undefined} />
       <div className="stack">
         <div className="toolbar report-period">
-          {kind === "range" ? (
+          {kind === "day" ? (
+            <>
+              <Button size="sm" icon={ChevronLeft} aria-label="Предыдущий день" onClick={() => setS({ from: shiftDay(from, -1) })} />
+              <label className="row" style={{ gap: 6 }}><span className="muted small">День</span>
+                <input className="input compact" type="date" aria-label="День" value={from} max={today} onChange={(e) => e.target.value && setS({ from: e.target.value })} /></label>
+              <Button size="sm" icon={ChevronRight} aria-label="Следующий день" disabled={from >= today} onClick={() => setS({ from: shiftDay(from, 1) })} />
+              <Button size="sm" onClick={() => setS({ from: today })}>Сегодня</Button>
+              <Button size="sm" onClick={() => setS({ from: shiftDay(today, -1) })}>Вчера</Button>
+            </>
+          ) : kind === "range" ? (
             <>
               <label className="row" style={{ gap: 6 }}><span className="muted small">С</span>
                 <input className="input compact" type="date" aria-label="Дата с" value={from} onChange={(e) => setS({ from: e.target.value, to })} /></label>
@@ -228,10 +299,13 @@ export function ReportView() {
                   </Alert>
                 )}
                 {d.chart && <Card title="Диаграмма"><BarChart chart={d.chart} /></Card>}
-                <Card flush><DataTable t={d.table} empty="За выбранный период по доступным вам данным ничего нет. Измените период или юридическое лицо." /></Card>
+                <Card flush className={d.table.columns.length > 9 ? "report-wide" : ""}><DataTable t={d.table} cell={d.day_rows ? dayCell : undefined} empty="За выбранный период по доступным вам данным ничего нет. Измените период или юридическое лицо." /></Card>
                 {d.extras.map((e) => (
                   <Card key={e.title} title={e.title} flush><DataTable t={e} empty="Нет записей" /></Card>
                 ))}
+                {pend && pendMeta?.employee_id != null && (
+                  <KindDialog who={String(d.table.rows[pend.row]?.[0] ?? "")} employeeId={pendMeta.employee_id} date={d.period.from} kind={pend.kind} onClose={() => setPend(null)} />
+                )}
                 <p className="muted small">Данные обновляются при каждом открытии. Записи в архиве в отчёты не попадают.</p>
               </>
             )}

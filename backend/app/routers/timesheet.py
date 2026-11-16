@@ -18,9 +18,10 @@ from app.common import csv_text, fail
 from app.db import get_db
 from app.deps import Principal, current, require
 from app.enums import TIMESHEET_CODES, TIMESHEET_FILL_MODES
-from app.models import Employee, EmploymentAssignment, LegalEntity, TimesheetMark, Waybill
+from app.models import Employee, EmploymentAssignment, LegalEntity, TimesheetMark, Waybill, WorkLog
 from app.registry import allowed_entities
 from app.resources import job_today
+from app.services import payroll as pay
 from app.services import timesheet as ts
 
 router = APIRouter(prefix="/timesheet", tags=["Табель"])
@@ -54,8 +55,10 @@ def _entity(db: Session, p: Principal, code: str, legal_entity_id: int | None) -
 
 def _people(db: Session, ent_id: int, first: dt.date, last: dt.date) -> list[tuple[Employee, list[EmploymentAssignment]]]:
     """Кто в сетке: работает в юрлице в этом месяце или уже отмечен в нём."""
-    has_marks = select(TimesheetMark.id).where(TimesheetMark.employee_id == Employee.id, TimesheetMark.legal_entity_id == ent_id,
-                                               TimesheetMark.work_date >= first, TimesheetMark.work_date <= last).exists()
+    has_marks = or_(select(TimesheetMark.id).where(TimesheetMark.employee_id == Employee.id, TimesheetMark.legal_entity_id == ent_id,
+                                                   TimesheetMark.work_date >= first, TimesheetMark.work_date <= last).exists(),
+                    select(WorkLog.id).where(WorkLog.employee_id == Employee.id, WorkLog.legal_entity_id == ent_id, WorkLog.archived_at.is_(None),
+                                             WorkLog.work_date >= first, WorkLog.work_date <= last).exists())
     works = select(EmploymentAssignment.id).where(
         EmploymentAssignment.employee_id == Employee.id, EmploymentAssignment.legal_entity_id == ent_id,
         or_(EmploymentAssignment.started_on.is_(None), EmploymentAssignment.started_on <= last),
@@ -99,15 +102,28 @@ def build(db: Session, p: Principal, ent: LegalEntity, first: dt.date, code: str
     days = [{"n": d, "wd": ts.WEEKDAYS[dt.date(first.year, first.month, d).weekday()], "off": dt.date(first.year, first.month, d).weekday() >= 5,
              "today": dt.date(first.year, first.month, d) == today} for d in range(1, last.day + 1)]
     rows = []
+    pay_on = p.can("worklog.view", ent.id)
+    paid = pay.month_pay(db, ent.id, first, last, [e.id for e, _ in people]) if pay_on else {}
+    day_sums: dict[int, float] = {}
+    grand = {k: 0.0 for k in ("work_h", "repair_h", "work", "repair", "total")}
     for e, assigns in people:
         mine = marks.get(e.id, {})
         d, h, a = ts.sums((m.code, m.hours) for m in mine.values())
-        rows.append({
+        row = {
             "employee_id": e.id, "name": _name(e), "position": next((x.position for x in assigns if x.position), "") or e.position,
             "archived": e.archived_at is not None,
             "marks": {str(n): {"code": m.code, "hours": float(m.hours) if m.hours is not None else None, "text": ts.cell_text(m.code, m.hours)} for n, m in sorted(mine.items())},
             "days": d, "hours": h, "absent": a,
-        })
+        }
+        if pay_on:
+            cells = paid.get(e.id, {})
+            tot = pay.totals(cells)
+            row["pay"] = {"days": {str(n): {k: pay.num(v) for k, v in c.items()} for n, c in sorted(cells.items())}, "totals": {k: pay.num(v) for k, v in tot.items()}}
+            for n, c in cells.items():
+                day_sums[n] = day_sums.get(n, 0.0) + pay.num(c["total"])
+            for k in grand:
+                grand[k] += pay.num(tot[k])
+        rows.append(row)
     return {
         "month": first.strftime("%Y-%m"), "title": f"{ts.MONTHS[first.month - 1]} {first.year}", "month_gen": ts.MONTHS_GEN[first.month - 1],
         "legal_entity": {"id": ent.id, "name": ent.short_name or ent.name, "full_name": ent.name},
@@ -115,6 +131,9 @@ def build(db: Session, p: Principal, ent: LegalEntity, first: dt.date, code: str
         "codes": [{"code": c, "label": t, "kind": ts.code_kind(c), "hours": c in ts.HOURS_CODES} for c, t in TIMESHEET_CODES.items()],
         "default_hours": 8, "fill_modes": [{"value": k, "label": v} for k, v in TIMESHEET_FILL_MODES.items()],
         "can_edit": p.can("timesheet.edit", ent.id), "can_export": p.can("timesheet.export", ent.id),
+        # заработок: суммы за день и за месяц по часам работы и ремонта; видят те, у кого есть право на часы
+        "pay": {"enabled": pay_on, "day_totals": {str(n): round(v, 2) for n, v in sorted(day_sums.items())}, "totals": {k: round(v, 2) for k, v in grand.items()},
+                "can_add": p.can("worklog.create", ent.id)} if pay_on else {"enabled": False},
     }
 
 
@@ -255,11 +274,25 @@ def export(month: str = "", legal_entity_id: int | None = None, p: Principal = D
     first = _month(month)
     data = build(db, p, ent, first, "timesheet.export")
     n = len(data["days"])
-    rows: list[list] = [["№", "ФИО", "Должность"] + list(range(1, n + 1)) + ["Дней", "Часов", "Неявок, дней"]]
+    pay_on = data["pay"]["enabled"]
+    head = ["№", "ФИО", "Должность"] + list(range(1, n + 1)) + ["Дней", "Часов", "Неявок, дней"]
+    if pay_on:
+        head += ["Работа, ч", "Ремонт, ч", "Работа, ₽", "Ремонт, ₽", "Итого, ₽"]
+    rows: list[list] = [head]
     for i, r in enumerate(data["rows"], 1):
-        rows.append([i, r["name"], r["position"]] + [r["marks"].get(str(d), {}).get("text", "") for d in range(1, n + 1)]
-                    + [r["days"], ts.hours_text(r["hours"]), r["absent"]])
-    audit.log(db, p, "timesheet.export", "timesheet", None, ent.id, month=data["month"], rows=len(rows) - 1)
+        line = ([i, r["name"], r["position"]] + [r["marks"].get(str(d), {}).get("text", "") for d in range(1, n + 1)]
+                + [r["days"], ts.hours_text(r["hours"]), r["absent"]])
+        if pay_on:
+            t = r["pay"]["totals"]
+            fmt = lambda x: f"{x:.2f}".replace(".", ",")
+            line += [fmt(t["work_h"]), fmt(t["repair_h"]), fmt(t["work"]), fmt(t["repair"]), fmt(t["total"])]
+        rows.append(line)
+    if pay_on:
+        t = data["pay"]["totals"]
+        fmt = lambda x: f"{x:.2f}".replace(".", ",")
+        rows.append(["", "Итого", ""] + [fmt(data["pay"]["day_totals"].get(str(d), 0)) if data["pay"]["day_totals"].get(str(d)) else "" for d in range(1, n + 1)]
+                    + ["", "", ""] + [fmt(t["work_h"]), fmt(t["repair_h"]), fmt(t["work"]), fmt(t["repair"]), fmt(t["total"])])
+    audit.log(db, p, "timesheet.export", "timesheet", None, ent.id, month=data["month"], rows=len(data["rows"]))
     db.commit()
     name = f"timesheet-{data['month']}.csv"
     return Response(csv_text(rows), media_type="text/csv; charset=utf-8", headers={"Content-Disposition": f'attachment; filename="{name}"'})

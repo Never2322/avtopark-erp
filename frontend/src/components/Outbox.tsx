@@ -33,7 +33,7 @@ export function useOutboxSync() {
     if (!me) return;
     const go = () => { void flush(); };
     const visible = () => { if (document.visibilityState === "visible") go(); };
-    const sent = () => qc.invalidateQueries();             // после отправки списки, наряды и счётчики показывают новое
+    const sent = () => qc.invalidateQueries();             // после отправки списки, задания и счётчики показывают новое
     window.addEventListener("online", go);
     document.addEventListener("visibilitychange", visible);
     window.addEventListener("outbox:sent", sent);
@@ -108,7 +108,7 @@ export function OutboxList({ title = "Ждут отправки", always }: { ti
   );
 }
 
-/** Для страниц: есть ли в очереди отметки по этому наряду. */
+/** Для страниц: есть ли в очереди отметки по этому заданию. */
 export function useJobPending(jobId: number) {
   const { items } = useOutbox();
   const mine = items.filter((i) => i.job_id === jobId && !i.error);

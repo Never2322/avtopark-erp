@@ -17,9 +17,10 @@ from sqlalchemy.orm import Session, aliased
 
 from app.common import fail
 from app.deps import Principal, Scope
-from app.enums import EFFECTIVE_STATES, FINE_PAYERS, REQUEST_STATUSES, VEHICLE_STATUSES
-from app.models import (Counterparty, Fine, FuelFill, MiscExpense, Order, Rental, RepairBill, ServiceRequest, StockMove, Trip, Vehicle,
-                        VehicleReading, VehicleStatusHistory, VehicleType, Waybill)
+from app.enums import EFFECTIVE_STATES, FINE_PAYERS, REQUEST_STATUSES, VEHICLE_STATUSES, status_now
+from app.models import (Counterparty, Employee, Fine, FuelFill, MiscExpense, Order, Rental, RepairBill, ServiceRequest, StockMove, Trip, Vehicle,
+                        VehicleReading, VehicleStatusHistory, VehicleType, Waybill, WorkLog)
+from app.services import payroll as pay
 from app.registry import _vehicle_label
 from app.services.fuel import norms, segments
 from app.services.reminders import day_start, local_day
@@ -27,7 +28,7 @@ from app.services.reminders import day_start, local_day
 MONTHS_SHORT = ["", "янв", "фев", "мар", "апр", "май", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"]
 MAX_SPAN_DAYS = 1830            # диапазон дат в отчёте не длиннее пяти лет
 EXTRA_LIMIT = 500               # строк в дополнительной таблице итогов месяца
-STATE_COLUMNS = ["in_work", "in_repair", "awaiting_repair", "parked", "day_off", "rented", "unused"]
+STATE_COLUMNS = ["in_work", "in_repair"]
 
 
 
@@ -142,8 +143,8 @@ def short(text: str, n: int = 14) -> str:
 
 
 def active(row: dict, v: Vehicle, keys: list[str]) -> bool:
-    """Списанная машина без движения за период в отчёт не попадает."""
-    if v.status != "written_off":
+    """Машина в архиве без движения за период в отчёт не попадает."""
+    if not v.archived_at:
         return True
     return any(isinstance(row.get(k), (int, float)) and row.get(k) for k in keys)
 
@@ -395,17 +396,17 @@ def downtime_data(c: Ctx, vehicles: list[Vehicle]) -> dict[int, dict]:
         if begin >= w_end:
             out[v.id] = {"days": days, "episodes": episodes}
             continue
-        state = (events[0].from_status or "in_work") if events else v.status
+        state = status_now(events[0].from_status or "in_work") if events else status_now(v.status)
         ep = {"start": None, "reason": "", "days": 0.0} if state == "in_repair" else None
         i = 0
         while i < len(events) and events[i].changed_at <= begin:
-            if events[i].status != state:
-                state = events[i].status
+            if status_now(events[i].status) != state:
+                state = status_now(events[i].status)
                 ep = {"start": events[i].changed_at, "reason": events[i].reason, "days": 0.0} if state == "in_repair" else None
             i += 1
         cursor = begin
         for h in events[i:]:
-            if h.status == state:
+            if status_now(h.status) == state:
                 continue
             span = (h.changed_at - cursor).total_seconds() / 86400
             days[state] += span
@@ -413,7 +414,7 @@ def downtime_data(c: Ctx, vehicles: list[Vehicle]) -> dict[int, dict]:
                 ep["days"] += span
                 ep["end"] = h.changed_at
                 episodes.append(ep)
-            cursor, state = h.changed_at, h.status
+            cursor, state = h.changed_at, status_now(h.status)
             ep = {"start": h.changed_at, "reason": h.reason, "days": 0.0} if state == "in_repair" else None
         span = (w_end - cursor).total_seconds() / 86400
         days[state] += span
@@ -451,7 +452,7 @@ def report_downtime(c: Ctx) -> dict:
     ch = chart([short(r["name"].split(" · ")[0]) for r in rows], [r["in_repair"] for r in rows], "сут.", [r["name"] for r in rows])
     return {"title": "Простои", "table": table(cols, rows), "chart": ch, "extras": extras,
             "note": "По истории статусов техники: сколько суток машина была в каждом статусе. Считается с даты добавления машины в программу и "
-                    "не дальше текущего момента. Готовность — доля суток «В работе» от всех суток без списания. "
+                    "не дальше текущего момента. Готовность — доля суток «На линии» от всех суток. "
                     "«Начало ремонта до учёта» значит, что ремонт начался раньше выбранных дат."}
 
 
@@ -482,7 +483,7 @@ def report_waybill_fuel(c: Ctx) -> dict:
     for v in vehicles:
         a = agg.get(v.id)
         if not a:
-            if v.status != "written_off":
+            if not v.archived_at:
                 rows.append({"name": label(v), "n": 0, "km": 0.0, "fact": 0.0, "plan": 0.0, "diff": 0.0, "per100": None})
             continue
         rows.append({"name": label(v), "n": a["n"], "km": round(a["km"], 1), "fact": round(a["fact"], 1), "plan": round(a["plan"], 1),
@@ -649,6 +650,102 @@ def report_month(c: Ctx) -> dict:
 
 # ---------------------------------------------------------------- перечень отчётов
 
+# ---------------------------------------------------------------- отчёт за день
+
+def _num_text(v) -> str:
+    x = float(v)
+    return (f"{x:,.0f}" if x == int(x) else f"{x:,.1f}").replace(",", " ").replace(".", ",")
+
+
+def _spedo(w: Waybill) -> str:
+    """Показание счётчика по путевому листу: километры, а у техники на моточасах моточасы."""
+    parts = []
+    for a, b, unit in ((w.start_km, w.end_km, "км"), (w.start_hours, w.end_hours, "м/ч")):
+        if a is None and b is None:
+            continue
+        parts.append(f"{_num_text(a)} → {_num_text(b)} {unit}" if a is not None and b is not None else f"{_num_text(a if a is not None else b)} {unit}")
+    return "; ".join(parts)
+
+
+def _tariff_text(t) -> str:
+    return "" if t is None else _num_text(t.rate) + (" ₽/ч" if t.unit == "hour" else " ₽/день")
+
+
+def report_day(c: Ctx) -> dict:
+    """По водителям за один день: техника, путевой лист, спидометр, топливо, ставки, часы и заработок. Каждая группа столбцов
+    показывается только при праве на свой раздел (часы и деньги, путевые листы, заправки)."""
+    day, db = c.d_from, c.db
+    sc_log, sc_way, sc_fuel, sc_edit = c.sc("worklog.view"), c.sc("waybills.view"), c.sc("fuel_fills.view"), c.sc("worklog.edit")
+    if not sc_log:
+        c.hide("Часы, ставки и суммы: нет права видеть часы работы и ремонта")
+    if not sc_way:
+        c.hide("Путевой лист и спидометр: нет права видеть путевые листы")
+    if not sc_fuel:
+        c.hide("Топливо: нет права видеть заправки")
+    acc: dict[int | None, dict] = {}
+
+    def of(eid: int | None) -> dict:
+        return acc.setdefault(eid, {"vehicles": set(), "waybills": [], "odo": [], "fuel": 0.0, "kinds": {}, "work_h": 0.0, "repair_h": 0.0, "work": 0.0,
+                                    "repair": 0.0, "rate": {}, "ents": set()})
+
+    car_of_driver: dict[int, int] = {}
+    if sc_log:
+        logs = list(db.scalars(select(WorkLog).where(WorkLog.work_date == day, WorkLog.archived_at.is_(None), sc_log.cond(WorkLog.legal_entity_id))
+                               .order_by(WorkLog.id)))
+        amt = pay.amounts(db, logs)
+        for l in logs:
+            a = of(l.employee_id)
+            a[f"{l.kind}_h"] += float(l.hours)
+            a[l.kind] += float(amt[l.id])
+            a["kinds"][l.kind] = True
+            a["ents"].add(l.legal_entity_id)
+            a["rate"].setdefault(l.kind, pay.rate_text(l).replace("₽/час", "₽/ч"))
+            if l.vehicle_id:
+                a["vehicles"].add(l.vehicle_id)
+    if sc_way:
+        for w in db.scalars(select(Waybill).where(Waybill.work_date == day, Waybill.status != "cancelled", sc_way.cond(Waybill.legal_entity_id))
+                            .order_by(Waybill.id)):
+            a = of(w.driver_id)
+            a["vehicles"].add(w.vehicle_id)
+            a["waybills"].append(f"{w.year}-{w.number:04d}")
+            if _spedo(w):
+                a["odo"].append(_spedo(w))
+            car_of_driver.setdefault(w.vehicle_id, w.driver_id)
+    if sc_fuel:
+        for f in db.scalars(select(FuelFill).where(FuelFill.fill_date == day, FuelFill.archived_at.is_(None), sc_fuel.cond(FuelFill.legal_entity_id))):
+            who = f.driver_id if f.driver_id is not None else car_of_driver.get(f.vehicle_id)
+            a = of(who)
+            a["fuel"] += float(f.liters)
+            a["vehicles"].add(f.vehicle_id)
+    emps = {e.id: e for e in db.scalars(select(Employee).where(Employee.id.in_([k for k in acc if k is not None])))} if acc else {}
+    plates = {v.id: v.plate for v in db.scalars(select(Vehicle).where(Vehicle.id.in_({v for a in acc.values() for v in a["vehicles"]})))} if acc else {}
+    kind_names = {("work",): "Работа", ("repair",): "Ремонт", ("repair", "work"): "Работа и ремонт"}
+    rows, meta = [], []
+    for eid, a in acc.items():
+        e = emps.get(eid)
+        name = (e.last_name + "".join(f" {x[0]}." for x in (e.first_name, e.middle_name) if x)) if e else "Без водителя"
+        rate = dict(a["rate"])
+        if e is not None and sc_log:                    # часов этого вида нет: показываем тариф, который назначен сейчас
+            for k in ("work", "repair"):
+                rate.setdefault(k, _tariff_text(pay.pay_tariff(db, e, k)))
+        rows.append({
+            "name": name, "vehicle": ", ".join(sorted(plates.get(v, "") for v in a["vehicles"])), "waybill": ", ".join(a["waybills"]),
+            "odo": "; ".join(a["odo"]), "fuel": round(a["fuel"], 1), "rate_work": rate.get("work", ""), "rate_repair": rate.get("repair", ""),
+            "kind": kind_names.get(tuple(sorted(a["kinds"])), ""), "work_h": round(a["work_h"], 1), "repair_h": round(a["repair_h"], 1),
+            "work": round(a["work"], 2), "repair": round(a["repair"], 2), "total": round(a["work"] + a["repair"], 2),
+            "_eid": eid if a["ents"] else None, "_edit": bool(sc_log and sc_edit and a["ents"] and all(sc_edit.allows(x) for x in a["ents"])),
+            "_kind": "both" if len(a["kinds"]) == 2 else next(iter(a["kinds"]), "")})
+    rows.sort(key=lambda r: (r["name"] == "Без водителя", r["name"]))
+    meta = [{"employee_id": r["_eid"], "can_edit": r["_edit"], "kind": r["_kind"]} for r in rows]
+    cols = [Col("name", "Водитель"), Col("vehicle", "Техника"), Col("waybill", "Путевой лист", show=bool(sc_way)), Col("odo", "Спидометр", show=bool(sc_way)),
+            Col("fuel", "Топливо, л", "dec", True, bool(sc_fuel)), Col("rate_work", "Ставка", show=bool(sc_log)), Col("rate_repair", "Ставка ремонта", show=bool(sc_log)),
+            Col("kind", "Тип занятости", show=bool(sc_log)), Col("work_h", "Часы работы", "dec", True, bool(sc_log)), Col("repair_h", "Часы ремонта", "dec", True, bool(sc_log)),
+            Col("work", "Работа, ₽", "money", True, bool(sc_log)), Col("repair", "Ремонт, ₽", "money", True, bool(sc_log)), Col("total", "Всего, ₽", "money", True, bool(sc_log))]
+    return {"title": f"Отчёт за {day.strftime('%d.%m.%Y')}", "table": table(cols, rows), "chart": None, "extras": [], "day_rows": meta,
+            "note": "В отчёте водители, у которых за этот день есть часы работы или ремонта, путевой лист или заправка. Тип занятости показывается по внесённым часам: "
+                    "«Работа», «Ремонт» или «Работа и ремонт»; кто может менять часы, меняет тип вручную прямо в таблице. Суммы считаются по ставкам, которые действовали, когда вносили часы."}
+
+
 @dataclass
 class Report:
     name: str
@@ -669,6 +766,8 @@ REPORTS: dict[str, Report] = {r.name: r for r in (
     Report("waybill_fuel", "Расход по путевым листам", "range", ("waybills.view",), report_waybill_fuel, desc="Расход топлива по закрытым листам и перерасход"),
     Report("downtime", "Простои", "range", ("vehicles.view",), report_downtime, desc="Сколько суток машина в работе, на ремонте, в отпуске"),
     Report("orders", "Заказы по заказчикам", "range", ("orders.view",), report_orders, desc="Заказы и выручка по заказчикам"),
+    Report("day", "Отчёт за день", "day", ("worklog.view", "waybills.view", "fuel_fills.view"), report_day,
+           desc="По водителям за один день: техника, путевой лист, спидометр, топливо, часы и заработок"),
 )}
 
 
@@ -692,6 +791,15 @@ def month_period(text: str | None, today: dt.date) -> tuple[dt.date, dt.date]:
     return month_bounds(y, m)
 
 
+def single_day(text: str | None, today: dt.date) -> dt.date:
+    if not text:
+        return today
+    try:
+        return dt.date.fromisoformat(text)
+    except ValueError:
+        raise fail(422, "bad_period", "Дата указана неверно: нужен вид ГГГГ-ММ-ДД", "from") from None
+
+
 def range_period(frm: str | None, to: str | None, today: dt.date) -> tuple[dt.date, dt.date]:
     def one(text, default, field_name):
         if not text:
@@ -710,7 +818,9 @@ def range_period(frm: str | None, to: str | None, today: dt.date) -> tuple[dt.da
 
 def run(db: Session, p: Principal, rep: Report, *, legal_entity_id: int | None, month: str | None, frm: str | None, to: str | None,
         today: dt.date, now: dt.datetime) -> tuple[dict, Ctx]:
-    if rep.period == "range":
+    if rep.period == "day":
+        d_from = d_to = single_day(frm, today)
+    elif rep.period == "range":
         d_from, d_to = range_period(frm, to, today)
     elif rep.period == "month":
         d_from, d_to = month_period(month, today)

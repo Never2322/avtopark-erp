@@ -103,7 +103,7 @@ def info_sheet(db: Session, res: dict, fmt_time: str) -> list[list]:
 
 def file_stem(name: str, res: dict) -> str:
     pr = res["period"]
-    tail = pr["month"] if pr["kind"] != "range" else f"{pr['from']}_{pr['to']}"
+    tail = f"{pr['from']}_{pr['to']}" if pr["kind"] == "range" else pr["from"] if pr["kind"] == "day" else pr["month"]
     return re.sub(r"[^A-Za-z0-9_.-]", "", f"report-{name}-{tail}")
 
 

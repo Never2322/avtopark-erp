@@ -102,7 +102,7 @@ def seed_may(world):
 
 def test_list_depends_on_rights(make_client, world):
     names = lambda who: {x["name"] for x in make_client(who).get("/reports").json()["items"]}          # noqa: E731
-    assert names("dir_a") == {"month", "mileage", "fuel", "costs", "repairs", "waybill_fuel", "downtime", "orders"}
+    assert names("dir_a") == {"month", "mileage", "fuel", "costs", "repairs", "waybill_fuel", "downtime", "orders", "day"}
     assert names("acc_a") >= {"costs", "repairs", "orders", "mileage"}
     disp = names("disp_a")
     assert {"month", "mileage", "fuel", "downtime", "orders"} <= disp and not ({"costs", "repairs"} & disp)
@@ -225,7 +225,7 @@ def test_downtime(make_client, world):
     res = rep(make_client("dir_a"), "downtime", "from=2026-03-01&to=2026-03-31")
     row = row_of(res, "Д321")
     assert row["in_repair"] == 5.0 and row["repairs"] == 1 and row["longest"] == 5.0
-    assert row["in_work"] == 25.7 and row["now"] == "В работе"                      # 9,5 суток до ремонта и 16,2 после
+    assert row["in_work"] == 25.7 and row["now"] == "На линии"                      # 9,5 суток до ремонта и 16,2 после
     assert row["ready"] == 83.7
     assert res["extras"][0]["title"] == "Периоды ремонта"
     ep = [r for r in res["extras"][0]["rows"] if r[0].startswith("Д321")][0]
@@ -244,7 +244,7 @@ def test_open_repair_has_no_end(make_client, world):
         db.commit()
     res = rep(make_client("dir_a"), "downtime", "from=2026-03-01&to=2026-03-31")
     row = row_of(res, "О100")
-    assert row["now"] == "На ремонте" and row["in_repair"] > 10 and row["repairs"] == 1
+    assert row["now"] == "В ремонте" and row["in_repair"] > 10 and row["repairs"] == 1
     ep = [r for r in res["extras"][0]["rows"] if r[0].startswith("О100")][0]
     assert ep[2] is None and ep[4] == "Ждём деталь"                                  # конец не задан: ремонт идёт
 

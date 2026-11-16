@@ -60,9 +60,9 @@ def test_only_token_hash_is_stored(make_client, world):
 
 def test_csrf_is_required_for_changes(make_client, world):
     c = make_client("dir_a")
-    r = c.call("POST", "/vehicles/%d/status" % world.va1, json={"status": "parked"}, headers={"X-CSRF-Token": "wrong"})
+    r = c.call("POST", "/vehicles/%d/status" % world.va1, json={"status": "in_repair", "reason": "Поломка"}, headers={"X-CSRF-Token": "wrong"})
     assert r.status_code == 403 and r.json()["code"] == "csrf"
-    r = c.http.post("/api/vehicles/%d/status" % world.va1, json={"status": "parked"})   # вообще без заголовка
+    r = c.http.post("/api/vehicles/%d/status" % world.va1, json={"status": "in_repair", "reason": "Поломка"})   # вообще без заголовка
     assert r.status_code == 403 and r.json()["code"] == "csrf"
 
 

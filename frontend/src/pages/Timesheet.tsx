@@ -1,24 +1,27 @@
 // Табель: сетка месяца по сотрудникам юрлица. В клетку пишут код («Я», «Я 6», «Б», «ОТ»), итоги по строке считаются сразу.
 // Отметки сохраняются одной кнопкой; быстрое заполнение расставляет выходные, будни или дни по путевым листам.
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronLeft, ChevronRight, Download, Printer, Save, Undo2, Wand2 } from "lucide-react";
+import { ChevronLeft, ChevronRight, Download, Printer, Save, Undo2, Wallet, Wand2 } from "lucide-react";
 import { ApiError, get, post, put, qs } from "../api";
 import { useAuth } from "../auth";
 import { useUrlState } from "../hooks";
-import { plural, todayIso } from "../format";
+import { fmtMoney, fmtNum, plural, todayIso } from "../format";
 import { Alert, Button, Card, ConfirmModal, Empty, PageHeader, QueryState, useToast } from "../ui";
 
 export interface Code { code: string; label: string; kind: "day" | "absence" | "other"; hours: boolean }
+export interface PayCell { work_h: number; repair_h: number; work: number; repair: number; total: number }
 export interface SheetRow {
   employee_id: number; name: string; position: string; archived: boolean;
   marks: Record<string, { code: string; hours: number | null; text: string }>; days: number; hours: number; absent: number;
+  pay?: { days: Record<string, PayCell>; totals: PayCell };
 }
 export interface Sheet {
   month: string; title: string; month_gen: string; legal_entity: { id: number; name: string; full_name: string }; entities: { id: number; name: string }[];
   days: { n: number; wd: string; off: boolean; today: boolean }[]; rows: SheetRow[]; codes: Code[]; default_hours: number;
   fill_modes: { value: string; label: string }[]; can_edit: boolean; can_export: boolean;
+  pay?: { enabled: boolean; day_totals?: Record<string, number>; totals?: PayCell; can_add?: boolean };
 }
 
 const LOOKALIKE: Record<string, string> = { A: "А", B: "В", C: "С", E: "Е", H: "Н", K: "К", M: "М", O: "О", P: "Р", T: "Т", X: "Х", Y: "У" };
@@ -59,6 +62,9 @@ export function sums(cells: { code: string | null; hours: number | null }[], cod
 }
 
 export const fmtH = (h: number) => String(h).replace(".", ",");
+/** Сумма в узкой клетке дня: 850 → «850», 4500 → «4,5к». Точная сумма всегда в подсказке и в итогах. */
+export const shortMoney = (v: number) => (!v ? "" : v >= 1000 ? `${fmtNum(Math.round(v / 100) / 10, 1)}к` : fmtNum(Math.round(v), 0));
+const payHint = (c: PayCell) => [c.work_h ? `Работа ${fmtH(c.work_h)} ч — ${fmtMoney(c.work)} ₽` : "", c.repair_h ? `Ремонт ${fmtH(c.repair_h)} ч — ${fmtMoney(c.repair)} ₽` : ""].filter(Boolean).join("; ");
 export const currentMonth = () => todayIso().slice(0, 7);
 export const shiftMonth = (m: string, delta: number) => { const [y, mo] = m.split("-").map(Number); const n = y * 12 + mo - 1 + delta; return `${Math.floor(n / 12)}-${String((n % 12) + 1).padStart(2, "0")}`; };
 
@@ -154,6 +160,7 @@ export function Timesheet() {
       <PageHeader title="Табель" sub="Учёт рабочего времени по сотрудникам. В клетку пишут код: Я — явка, Б — больничный, ОТ — отпуск, В — выходной; после кода можно часы: «Я 6»"
         actions={sheet && (
           <>
+            {sheet.pay?.enabled && <Link className="btn" to="/worklog"><Wallet size={16} aria-hidden /> Часы работы и ремонта</Link>}
             {sheet.can_export && <a className="btn" href={`/api/timesheet/export.csv${qs({ month, legal_entity_id: entity })}`} download><Download size={16} aria-hidden /> В Excel</a>}
             <Link className="btn" to={`/print/timesheet${qs({ month, entity })}`} target="_blank"><Printer size={16} aria-hidden /> Печать</Link>
           </>
@@ -189,6 +196,13 @@ export function Timesheet() {
               <div className="stack">
                 {Object.keys(bad).length > 0 && <Alert tone="error">Не сохранено, проверьте клетки: {Object.values(bad).join("; ")}</Alert>}
                 {!sheet.can_edit && <Alert tone="info">У вас право только смотреть табель.</Alert>}
+                {sheet.pay?.enabled && sheet.pay.totals && (
+                  <div className="grid cols-3 pay-kpis" aria-label="Заработок за месяц">
+                    <Card><span className="muted small">Работа</span><span className="pay-big">{fmtMoney(sheet.pay.totals.work)} ₽</span><span className="muted small">{fmtH(sheet.pay.totals.work_h)} ч</span></Card>
+                    <Card><span className="muted small">Ремонт</span><span className="pay-big">{fmtMoney(sheet.pay.totals.repair)} ₽</span><span className="muted small">{fmtH(sheet.pay.totals.repair_h)} ч</span></Card>
+                    <Card><span className="muted small">Всего за месяц</span><span className="pay-big">{fmtMoney(sheet.pay.totals.total)} ₽</span><span className="muted small">по часам из раздела «Часы работы и ремонта»</span></Card>
+                  </div>
+                )}
                 <Card flush title={<>{sheet.title}, {sheet.legal_entity.name}</>}>
                   {sheet.rows.length === 0 ? (
                     <Empty title="В этом месяце в юрлице никто не работает">Сотрудников добавляют в разделе «Сотрудники»: карточка → «Принять в юрлицо».</Empty>
@@ -206,7 +220,8 @@ export function Timesheet() {
                           {sheet.rows.map((r, ri) => {
                             const t = live.get(r.employee_id) ?? { days: r.days, hours: r.hours, absent: r.absent };
                             return (
-                              <tr key={r.employee_id}>
+                              <Fragment key={r.employee_id}>
+                              <tr>
                                 <th className="ts-name" scope="row"><strong>{r.name}</strong>{r.position && <small>{r.position}</small>}</th>
                                 {sheet.days.map((d) => {
                                   const v = valueOf(r, d.n);
@@ -231,9 +246,29 @@ export function Timesheet() {
                                 })}
                                 <td className="ts-sum num">{t.days}</td><td className="ts-sum num">{fmtH(t.hours)}</td><td className="ts-sum num">{t.absent}</td>
                               </tr>
+                              {sheet.pay?.enabled && r.pay && (
+                                <tr className="ts-pay-row">
+                                  <th className="ts-name" scope="row"><small>Заработок, ₽</small></th>
+                                  {sheet.days.map((d) => {
+                                    const c = r.pay!.days[String(d.n)];
+                                    return <td key={d.n} className={`ts-money ${d.off ? "off" : ""}`} title={c ? payHint(c) : undefined}>{c ? shortMoney(c.total) : ""}</td>;
+                                  })}
+                                  <td className="ts-sum num" colSpan={3} title={payHint(r.pay.totals)}><strong>{fmtMoney(r.pay.totals.total)} ₽</strong></td>
+                                </tr>
+                              )}
+                              </Fragment>
                             );
                           })}
                         </tbody>
+                        {sheet.pay?.enabled && sheet.pay.totals && (
+                          <tfoot>
+                            <tr className="ts-pay-row ts-pay-total">
+                              <th className="ts-name" scope="row"><strong>Итого за день, ₽</strong></th>
+                              {sheet.days.map((d) => { const v = sheet.pay?.day_totals?.[String(d.n)] ?? 0; return <td key={d.n} className={`ts-money ${d.off ? "off" : ""}`} title={v ? `${fmtMoney(v)} ₽` : undefined}>{shortMoney(v)}</td>; })}
+                              <td className="ts-sum num" colSpan={3}><strong>{fmtMoney(sheet.pay.totals.total)} ₽</strong></td>
+                            </tr>
+                          </tfoot>
+                        )}
                       </table>
                     </div>
                   )}
@@ -249,6 +284,7 @@ export function Timesheet() {
                   <p className="muted small" style={{ marginTop: 10 }}>
                     Явка («Я», «Н», «РВ», «К») без часов считается за {sheet.default_hours} ч. Часы пишут через пробел: «Я 6», «С 2». Стрелки и Enter переходят между клетками.
                     Праздничные дни программа не знает: отметьте их вручную. Пустая клетка — день не отмечен.
+                    {sheet.pay?.enabled && " Строка «Заработок» считается из раздела «Часы работы и ремонта» по тарифам сотрудника; наведите на сумму, чтобы увидеть работу и ремонт отдельно."}
                   </p>
                 </Card>
               </div>

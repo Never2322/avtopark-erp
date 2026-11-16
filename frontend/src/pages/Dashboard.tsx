@@ -25,8 +25,7 @@ interface Dash {
 }
 
 const STATUS_COLOR: Record<string, string> = {
-  in_work: "var(--success)", in_repair: "var(--error)", awaiting_repair: "var(--warning)", parked: "#6f858d", day_off: "#6f858d",
-  rented: "var(--info)", unused: "#4a626a", written_off: "#4a626a",
+  in_work: "var(--success)", in_repair: "var(--error)",
 };
 const SERIES = [
   { key: "fuel" as const, label: "Топливо", color: "var(--mint)" },
@@ -121,7 +120,7 @@ function Donut({ parts, total, centre, sub }: { parts: { code: string; label: st
   let acc = 0;
   return (
     <svg viewBox="0 0 140 140" className="donut" role="img" aria-label={`${centre} ${sub}`}>
-      <circle cx="70" cy="70" r={R} fill="none" stroke="#0f181d" strokeWidth="16" />
+      <circle cx="70" cy="70" r={R} fill="none" stroke="var(--field)" strokeWidth="16" />
       {parts.filter((s) => s.count > 0).map((s) => {
         const len = (s.count / total) * C;
         const el = <circle key={s.code} cx="70" cy="70" r={R} fill="none" stroke={STATUS_COLOR[s.code] ?? "#4a626a"} strokeWidth="16" strokeDasharray={`${Math.max(0, len - 2)} ${C}`} strokeDashoffset={-acc} transform="rotate(-90 70 70)"><title>{`${s.label}: ${s.count}`}</title></circle>;
@@ -207,13 +206,13 @@ export function Dashboard() {
               <Alert tone="warning">Путевых листов, открытых дольше суток: {d.waybills.forgotten}. Возможно, их забыли закрыть. <Link to="/waybills?status=open">Открыть список</Link></Alert>
             )}
             {d.jobs && d.jobs.stale > 0 && (
-              <Alert tone="warning">Нарядов, не закрытых за прошлые дни: {d.jobs.stale}. Их нужно закрыть или отменить. <Link to={d.jobs.own ? "/jobs/mine" : "/jobs"}>Открыть наряды</Link></Alert>
+              <Alert tone="warning">Заданий, не закрытых за прошлые дни: {d.jobs.stale}. Их нужно закрыть или отменить. <Link to={d.jobs.own ? "/jobs/mine" : "/jobs"}>Открыть задания</Link></Alert>
             )}
 
             <div className="stat-row">
               {d.vehicles && <Stat to="/vehicles" icon={Truck} tone="mint" value={String(total)} label="Всего техники" />}
-              {d.vehicles && total > 0 && <Stat to="/vehicles?status=in_work" icon={CheckCircle2} tone="success" value={String(inWork)} label="В работе" bar={pct(inWork)} foot={`${pct(inWork)}%`} />}
-              {d.vehicles && total > 0 && <Stat to="/vehicles?status=in_repair" icon={Wrench} tone="error" value={String(d.vehicles.attention)} label="На ремонте или ждут" bar={pct(d.vehicles.attention)} foot={`${pct(d.vehicles.attention)}%`} />}
+              {d.vehicles && total > 0 && <Stat to="/vehicles?status=in_work" icon={CheckCircle2} tone="success" value={String(inWork)} label="На линии" bar={pct(inWork)} foot={`${pct(inWork)}%`} />}
+              {d.vehicles && total > 0 && <Stat to="/vehicles?status=in_repair" icon={Wrench} tone="error" value={String(d.vehicles.attention)} label="В ремонте" bar={pct(d.vehicles.attention)} foot={`${pct(d.vehicles.attention)}%`} />}
               {d.maintenance && <Stat to="/reminders" icon={CalendarCheck} tone="warning" value={String(d.maintenance.soon)} label="ТО скоро" />}
               {exp && (
                 <Stat to="/reports/costs" icon={Wallet} tone="info" value={exp.month_total >= 1_000_000 ? `${fmtNum(exp.month_total / 1_000_000, 1)}\u00a0млн\u00a0₽` : rub(exp.month_total)} label="Расходы за месяц"
@@ -225,8 +224,8 @@ export function Dashboard() {
             </div>
 
             <div className="grid cols-4">
-              {d.jobs && <Kpi to={d.jobs.own ? "/jobs/mine" : "/jobs"} icon={CalendarCheck} label="Наряды на сегодня" value={d.jobs.today}
-                hint={d.jobs.today ? `Не закончено: ${d.jobs.open} · выполнено: ${d.jobs.done}` : "На сегодня нарядов нет"} tone={d.jobs.stale ? "warning" : undefined} />}
+              {d.jobs && <Kpi to={d.jobs.own ? "/jobs/mine" : "/jobs"} icon={CalendarCheck} label="Задания на сегодня" value={d.jobs.today}
+                hint={d.jobs.today ? `Не закончено: ${d.jobs.open} · выполнено: ${d.jobs.done}` : "На сегодня заданий нет"} tone={d.jobs.stale ? "warning" : undefined} />}
               {d.requests && <Kpi to="/requests?status=open" icon={Wrench} label="Открытые обращения" value={d.requests.open}
                 hint={[d.requests.urgent && `срочных: ${d.requests.urgent}`, d.requests.overdue && `просрочено: ${d.requests.overdue}`, d.requests.awaiting_approval && `ждут согласования: ${d.requests.awaiting_approval}`].filter(Boolean).join(" · ") || "Срочных нет"}
                 tone={d.requests.overdue ? "error" : d.requests.urgent ? "warning" : undefined} />}

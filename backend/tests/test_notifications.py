@@ -154,11 +154,11 @@ def test_job_notifications_go_to_drivers_of_the_vehicle_and_to_dispatchers(make_
     assert r.status_code == 201, r.text
     jid = r.json()["id"]
     got = inbox("drv1", kind="job")
-    assert len(got) == 1 and got[0].title.startswith("Новый наряд: ") and "08:30" in got[0].title and got[0].url == "/jobs/mine"
+    assert len(got) == 1 and got[0].title.startswith("Новое задание: ") and "08:30" in got[0].title and got[0].url == "/jobs/mine"
     assert inbox("drv2", kind="job") == [] and inbox("drv3", kind="job") == [] and inbox("disp_a", kind="job") == []   # чужие машины и сам диспетчер
     # изменение наряда
     assert disp.patch(f"/jobs/{jid}", {"address": "ул. Мира, 5"}).status_code == 200
-    assert [n.title.split(":")[0] for n in inbox("drv1", kind="job")] == ["Новый наряд", "Наряд изменён"]
+    assert [n.title.split(":")[0] for n in inbox("drv1", kind="job")] == ["Новое задание", "Задание изменено"]
     # водитель приехал и закончил — сообщают тем, кто ведёт наряды, а не водителю
     assert drv.post(f"/jobs/{jid}/arrive").status_code == 200
     assert drv.post(f"/jobs/{jid}/arrive").status_code == 200                                               # повтор ничего не добавляет
@@ -171,9 +171,9 @@ def test_job_notifications_go_to_drivers_of_the_vehicle_and_to_dispatchers(make_
     # отмена и возврат
     j2 = disp.post("/jobs", {"job_date": TODAY.isoformat(), "vehicle_id": world.va1, "address": "ул. Новая, 3", "task": "Мусор"}).json()["id"]
     assert disp.post(f"/jobs/{j2}/state", {"state": "cancelled"}).status_code == 200
-    assert any(t.startswith("Наряд отменён") for t in titles("drv1"))
+    assert any(t.startswith("Задание отменено") for t in titles("drv1"))
     assert disp.post(f"/jobs/{j2}/state", {"state": "planned"}).status_code == 200
-    assert any(t.startswith("Наряд снова в работе") for t in titles("drv1"))
+    assert any(t.startswith("Задание снова в работе") for t in titles("drv1"))
 
 
 # ---------------------------------------------------------------- объявления: создание и права

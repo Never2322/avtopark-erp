@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from app import audit
 from app.common import fail, org_today, utcnow
-from app.enums import STATUS_NEEDS_REASON, STATUS_TERMINAL, VEHICLE_STATUSES
+from app.enums import STATUS_NEEDS_REASON, VEHICLE_STATUSES
 from app.models import Employee, EmploymentAssignment, Vehicle, VehicleAssignment, VehicleStatusHistory
 
 
@@ -17,8 +17,6 @@ def change_status(db: Session, who, vehicle: Vehicle, status: str, reason: str =
         raise fail(422, "bad_status", "Неизвестный статус", "status")
     if vehicle.archived_at:
         raise fail(409, "vehicle_archived", "Машина в архиве: статус не меняется")
-    if vehicle.status in STATUS_TERMINAL:
-        raise fail(409, "vehicle_written_off", "Машина списана: статус больше не меняется")
     if vehicle.status == status:
         return False
     reason = (reason or "").strip()

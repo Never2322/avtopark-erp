@@ -8,16 +8,17 @@ from sqlalchemy import and_, case, func, select
 
 from app.common import num, org_today
 from app.enums import (MAINTENANCE_KINDS, TIRE_SEASONS, VEHICLE_FINANCE_KINDS, VEHICLE_REPAIR_KINDS, CALENDAR_COLORS, CALENDAR_REMIND_MAX, EMPLOYEE_EVENT_KINDS, EMPLOYEE_EVENT_MONEY_KINDS, REMINDER_LEAD_DAYS, PPE_SOON_DAYS, PPE_WEAR_MAX_MONTHS, PART_UNITS, CASH_ACCOUNT_KINDS, CASH_OP_KINDS, COUNTERPARTY_KINDS, DOC_FULL_NAMES, DOC_TYPES, ENTRY_LATE_DAYS, FINE_PAYERS,
-                       FUEL_MAX_LITERS, JOB_DATE_WINDOW_DAYS, JOB_STATES, ORDER_STATUSES, PAYMENT_KINDS, RENTAL_DIRECTIONS, TARIFF_UNITS,
+                       FUEL_MAX_LITERS, JOB_DATE_WINDOW_DAYS, JOB_STATES, ORDER_STATUSES, PAYMENT_KINDS, RENTAL_DIRECTIONS, TARIFF_KINDS, TARIFF_UNITS, PAY_TARIFF_KINDS, PAY_TARIFF_UNITS, WORKLOG_BACKDATE_DAYS, WORKLOG_KINDS, WORKLOG_SOURCES,
                        STOCK_UNITS, VAT_RATES)
 from app.models import (ControlEvent, MaintenanceItem, VehicleFinance, VehicleRepair, VehicleTire, CalendarEvent, EmployeeEvent, CashAccount, CashOp, Constant, Counterparty, Document, Employee, EmployeePayment, EntryPhoto, Fine, FuelCard,
-                        FuelFill, Job, JobPhoto, MiscExpense, Order, PartCatalog, PpeIssue, PpeNorm, Rental, StockItem, Tariff, Trip, Vehicle, Warehouse)
+                        FuelFill, WorkLog, Job, JobPhoto, MiscExpense, Order, PartCatalog, PpeIssue, PpeNorm, Rental, StockItem, Tariff, Trip, Vehicle, Warehouse)
 from app.registry import MAX_MONEY, Col, F, Invalid, R, org_tz, register
 from app.parts_seed import norm as part_key
 from app.services import control as control_svc
 from app.services import fuel as fuel_calc
 from app.services import ppe as ppe_calc
 from app.services import notify as notify_svc
+from app.services import payroll as payroll_svc
 from app.services import stock as stock_svc
 from app.services import reminders as rem
 from app.services.people import user_names
@@ -78,16 +79,34 @@ register(R(
     unique_field="name", unique_text="Контрагент с таким названием уже есть",
 ))
 
+def _tariff_prepare(db, p, v, obj, m):
+    if m.get("kind") in PAY_TARIFF_KINDS and m.get("unit") not in PAY_TARIFF_UNITS:
+        raise Invalid({"unit": "Оплату работы и ремонта считают за час или за сутки"})
+    if m.get("kind") in PAY_TARIFF_KINDS:
+        v["min_amount"] = Decimal(0)               # минимальная сумма нужна только тарифам для заказчика
+
+
+def _tariff_before_void(db, obj):
+    if obj.kind in PAY_TARIFF_KINDS:
+        col = Employee.work_tariff_id if obj.kind == "work" else Employee.repair_tariff_id
+        n = db.scalar(select(func.count()).select_from(Employee).where(col == obj.id, Employee.archived_at.is_(None)))
+        if n:
+            raise Invalid({"_": f"Этот тариф назначен сотрудникам ({n}). Сначала выберите им другой в карточке сотрудника"})
+
+
 register(R(
     key="tariffs", title="Тарифы", one="тариф", model=Tariff, scope="global",
     fields=[
-        F("name", "Название", required=True, max=160, wide=True, hint="Например: «Самосвал, час» или «Вывоз снега, рейс»"),
-        F("unit", "За что платят", "enum", options=TARIFF_UNITS, default="hour", required=True, filter=True),
+        F("name", "Название", required=True, max=160, wide=True, hint="Например: «Самосвал, час», «Вывоз снега, рейс» или «Водитель: ремонт, час»"),
+        F("kind", "Вид", "enum", options=TARIFF_KINDS, default="customer", required=True, filter=True, locked=True,
+          hint="«Оплата работы» и «Оплата ремонта» считают заработок водителя. Вид после добавления не меняется"),
+        F("unit", "Ед. измерения", "enum", options=TARIFF_UNITS, default="hour", required=True, filter=True,
+          hint="Для оплаты работы и ремонта: за час или за сутки"),
         F("rate", "Ставка, ₽", "money", required=True, default="0"),
-        F("min_amount", "Минимальная сумма, ₽", "money", default="0", hint="Меньше этого за выезд не берём; 0 — без минимума"),
+        F("min_amount", "Сумма, ₽", "money", default="0", hint="Минимальная сумма за выезд: меньше не берём. 0 — без минимума", show_if=("kind", "customer")),
         F("note", "Заметка", "textarea", list=False),
     ],
-    search=("name", "note"), order=("name",),
+    search=("name", "note"), order=("name",), prepare=_tariff_prepare, before_void=_tariff_before_void,
     unique_field="name", unique_text="Тариф с таким названием уже есть",
 ))
 
@@ -265,7 +284,7 @@ def _rental_prepare(db, p, v, obj, m):
 
 
 register(R(
-    key="rentals", title="Аренда техники", one="аренда", model=Rental, entity_from="vehicle",
+    key="rentals", title="Дополнительные работы", one="аренда", model=Rental, entity_from="vehicle",
     fields=[
         F("vehicle_id", "Техника", "ref", ref="vehicle", required=True),
         F("direction", "Направление", "enum", options=RENTAL_DIRECTIONS, default="out", required=True, filter=True),
@@ -625,7 +644,7 @@ register(R(
 
 
 
-# ================================================================ наряды на день
+# ================================================================ технические задания
 
 JOB_TIME_RE = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 JOB_TONES = {"planned": "info", "on_site": "warning", "done": "success", "cancelled": "neutral"}
@@ -636,7 +655,7 @@ def job_today() -> dt.date:
 
 
 def job_state_badge(j, today: dt.date) -> dict:
-    """Не закрытый наряд за прошлые дни выделяется красным: его нужно закрыть или отменить."""
+    """Не закрытое задание за прошлые дни выделяется красным: его нужно закрыть или отменить."""
     if j.state in ("planned", "on_site") and j.job_date < today:
         return {"text": "Не закрыт", "tone": "error"}
     return {"text": JOB_STATES[j.state], "tone": JOB_TONES[j.state]}
@@ -649,8 +668,8 @@ def job_check_date(d: dt.date, errors: dict, name: str = "job_date") -> None:
 
 def job_check_vehicle(db, vehicle_id: int, errors: dict, name: str = "vehicle_id") -> None:
     v = db.get(Vehicle, vehicle_id)
-    if v is not None and v.status == "written_off":
-        errors[name] = "Эта техника списана"
+    if v is not None and v.archived_at:
+        errors[name] = "Эта техника в архиве"
 
 
 def _job_prepare(db, p, v, obj, m):
@@ -708,7 +727,7 @@ def _job_filter(q, state, today):
 
 
 register(R(
-    key="jobs", title="Наряды на день", one="наряд", model=Job, entity_from="vehicle",
+    key="jobs", title="Технические задания", one="задание", model=Job, entity_from="vehicle",
     fields=[
         F("job_date", "Дата", "date", required=True),
         F("time_from", "Время", max=5, hint="Во сколько быть на объекте, например 08:30. Можно не указывать"),
@@ -873,20 +892,66 @@ register(R(
     fields=[
         F("fill_date", "Дата", "date", required=True),
         F("vehicle_id", "Техника", "ref", ref="vehicle", required=True),
-        F("driver_id", "Водитель", "ref", ref="employee", hint="Если пусто, подставится водитель, закреплённый за машиной"),
         F("liters", "Литров", "decimal", places=2, lo=Decimal("0.01"), required=True),
-        F("amount", "Сумма по чеку, ₽", "money", default="0", sum=True),
-        F("odometer", "Пробег по спидометру, км", "int", lo=0, hint="По нему считается расход. Можно не указывать"),
-        F("full_tank", "Залит полный бак", "bool", default="1", hint="Отметьте, если заправились «до пробки»: тогда считается расход на 100 км"),
-        F("station", "Заправка (АЗС)", max=80, suggest=True),
-        F("note", "Заметка", "textarea", max=300, list=False),
+        F("driver_id", "Водитель", "ref", ref="employee", hint="Если пусто, подставится водитель, закреплённый за машиной", more=True),
+        F("amount", "Сумма по чеку, ₽", "money", default="0", sum=True, more=True),
+        F("odometer", "Пробег по спидометру, км", "int", lo=0, hint="По нему считается расход. Можно не указывать", more=True),
+        F("full_tank", "Залит полный бак", "bool", default="1", hint="Отметьте, если заправились «до пробки»: тогда считается расход на 100 км", more=True),
+        F("station", "Заправка (АЗС)", max=80, suggest=True, more=True),
+        F("note", "Заметка", "textarea", max=300, list=False, more=True),
         F("client_id", "Код отправки", max=64, auto=True, list=False),
     ],
     cols=[Col("per_l", "Цена за литр, ₽", "money"), Col("consumption", "Расход, л/100 км", "text"), Col("check", "Проверка", "badge"),
           Col("photos", "Фото", "text")],
+    photos=("fuel", "Фото чека"),
     search=("station", "note"),
     search_refs=(("vehicle_id", Vehicle, ("plate", "make", "model")), ("driver_id", Employee, ("last_name", "first_name"))),
     date="fill_date", order=("-fill_date", "-id"), prepare=_fill_prepare, computed=_fill_computed, warn=_fill_warn, after_save=_fill_after_save,
+))
+
+
+# ================================================================ часы работы и ремонта (зарплатный табель)
+
+def _wl_prepare(db, p, v, obj, m):
+    emp = db.get(Employee, m.get("employee_id"))
+    if emp is None:
+        raise Invalid({"employee_id": "Выберите значение из списка"})
+    creating = obj is None
+    driver = (v.get("source") or (obj.source if obj is not None else "")) == "driver"
+    errors = payroll_svc.check_entry(
+        db, emp=emp, entity_id=m.get("legal_entity_id"), work_date=m.get("work_date"), kind=m.get("kind"), hours=m.get("hours"),
+        vehicle_id=m.get("vehicle_id"), description=m.get("description") or "", today=job_today(),
+        backdate_days=WORKLOG_BACKDATE_DAYS if driver and creating else None, exclude_id=None if creating else obj.id)
+    if errors:
+        raise Invalid(errors)
+    if "description" in v:
+        v["description"] = (v["description"] or "").strip()
+    if creating:
+        v.update(payroll_svc.snapshot(db, emp, m["kind"]))
+        v.setdefault("source", "staff")
+    elif obj.tariff_id is None:
+        v.update(payroll_svc.snapshot(db, emp, obj.kind))        # тариф назначили позже: запись получает ставку при правке
+
+
+def _wl_computed(db, objs):
+    amt = payroll_svc.amounts(db, objs)
+    return {o.id: {"src": WORKLOG_SOURCES.get(o.source, ""), "rate_text": payroll_svc.rate_text(o), "amount": amt[o.id]} for o in objs}
+
+
+register(R(
+    key="worklog", title="Часы работы и ремонта", one="запись часов", model=WorkLog, scope="entity",
+    fields=[
+        F("work_date", "Дата", "date", required=True, locked=True),
+        F("employee_id", "Сотрудник", "ref", ref="employee", required=True, locked=True),
+        F("kind", "Что делал", "enum", options=WORKLOG_KINDS, default="work", required=True, locked=True, filter=True),
+        F("hours", "Часов", "decimal", places=1, lo=Decimal("0.1"), required=True, exact=True, hint="Например 8 или 2,5"),
+        F("vehicle_id", "Техника", "ref", ref="vehicle", hint="Можно не указывать"),
+        F("description", "Что делали", "textarea", max=500, hint="Для ремонта обязательно: что именно делали"),
+        F("client_id", "Код отправки", max=64, auto=True, list=False),
+    ],
+    cols=[Col("rate_text", "Ставка", "text"), Col("amount", "Сумма, ₽", "money", sum=True), Col("src", "Кто внёс", "text")],
+    search=("description",), search_refs=(("employee_id", Employee, ("last_name", "first_name")), ("vehicle_id", Vehicle, ("plate", "make", "model"))),
+    date="work_date", order=("-work_date", "-id"), prepare=_wl_prepare, computed=_wl_computed,
 ))
 
 
@@ -1247,7 +1312,7 @@ register(R(
 
 
 register(R(
-    key="vehicle_repairs", title="История ремонтов", one="запись о ремонте", model=VehicleRepair, entity_from="vehicle",
+    key="vehicle_repairs", title="Ремонтные работы", one="запись о ремонте", model=VehicleRepair, entity_from="vehicle",
     fields=[
         F("vehicle_id", "Техника", "ref", ref="vehicle", required=True, filter=True),
         F("repair_date", "Дата", "date", required=True),
@@ -1270,7 +1335,7 @@ def _finance_computed(db, objs):
 
 
 register(R(
-    key="vehicle_finance", title="Финансы по технике", one="операцию", model=VehicleFinance, entity_from="vehicle",
+    key="vehicle_finance", title="Затраты на спецтехнику", one="операцию", model=VehicleFinance, entity_from="vehicle",
     fields=[
         F("vehicle_id", "Техника", "ref", ref="vehicle", required=True, filter=True),
         F("op_date", "Дата", "date", required=True),

@@ -1,9 +1,10 @@
 // Один экран для всех «учётных» разделов (справочники, штрафы, аренда, касса…). Поля и правила приходят с сервера (/meta).
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArchiveRestore, Archive, Download, Plus, Search, type LucideIcon, Inbox } from "lucide-react";
-import { get, patch, post, qs } from "../api";
+import { ArchiveRestore, Archive, Camera, Download, Plus, Search, X, type LucideIcon, Inbox } from "lucide-react";
+import { get, patch, post, qs, upload } from "../api";
+import { shrinkAll } from "../images";
 import { useAuth } from "../auth";
 import { fmtDate, fmtDateTime, fmtMoney, fmtNum, todayIso } from "../format";
 import { Page, useDebounced, useEntityParam } from "../hooks";
@@ -11,13 +12,14 @@ import { Alert, Badge, Button, Card, ConfirmModal, Empty, Field, FilterChips, Mo
 
 interface FieldMeta {
   name: string; label: string; kind: string; required: boolean; ref: string | null; hint: string; options: { value: string; label: string }[] | null;
-  list: boolean; filter: boolean; sum: boolean; locked: boolean; wide: boolean; show_if: [string, string] | null; suggest: boolean; max: number; default: unknown;
+  list: boolean; filter: boolean; sum: boolean; locked: boolean; wide: boolean; show_if: [string, string] | null; suggest: boolean; max: number; default: unknown; more?: boolean;
 }
 export interface Meta {
   key: string; title: string; one: string; scope: "entity" | "global"; entity_from: string | null; date_field: string | null;
   states: { value: string; label: string }[]; fields: FieldMeta[]; columns: { name: string; label: string; kind: string; sum: boolean; first: boolean }[];
   entities: { id: number; name: string }[]; suggestions: Record<string, string[]>;
   can: { view: boolean; create: boolean; edit: boolean; void: boolean };
+  photos?: { kind: "trip" | "fuel"; label: string } | null;
 }
 export type Row = Record<string, any> & { id: number; can_edit: boolean; can_void: boolean; archived: boolean; archive_reason: string; legal_entity?: string; legal_entity_id?: number };
 interface Listing extends Page<Row> { totals: Record<string, number> }
@@ -234,6 +236,12 @@ export function RecordModal({ meta, row, onClose, onSaved, defaults, hide }: { m
   const needsEntity = meta.scope === "entity" && !meta.entity_from;
   const optEntity = meta.scope !== "entity" ? null : editing ? row!.legal_entity_id ?? null : needsEntity ? (values.legal_entity_id ? Number(values.legal_entity_id) : null) : entityId;
 
+  const toast = useToast();
+  const fileInput = useRef<HTMLInputElement>(null);
+  const [pics, setPics] = useState<File[]>([]);
+  const photos = !editing ? meta.photos : null;
+  const MAX_PICS = 3;
+
   const save = useMutation({
     mutationFn: async () => {
       clear();
@@ -245,12 +253,57 @@ export function RecordModal({ meta, row, onClose, onSaved, defaults, hide }: { m
         body[f.name] = f.kind === "datetime" && raw ? new Date(raw).toISOString() : raw;
       }
       if (!editing && needsEntity) body.legal_entity_id = values.legal_entity_id;
-      return editing ? patch(`/${meta.key}/${row!.id}`, body) : post(`/${meta.key}`, body);
+      if (editing) return patch(`/${meta.key}/${row!.id}`, body);
+      const res = await post<{ id: number; warnings?: string[] }>(`/${meta.key}`, body);
+      if (photos && pics.length) {
+        // запись уже сохранена: если фото не ушло, это не должно выглядеть как «ничего не сохранилось»
+        try {
+          const form = new FormData();
+          (await shrinkAll(pics)).forEach((x) => form.append("files", x));
+          await upload(`/entries/${photos.kind}/${res.id}/photos`, form);
+        } catch {
+          toast.error("Запись сохранена, но фото не загрузилось. Добавьте его кнопкой с камерой в строке записи");
+        }
+      }
+      return res;
     },
     onSuccess: (res: { warnings?: string[] }) => { onSaved(res.warnings ?? []); onClose(); },
     onError: fail,
   });
 
+  const visible = (f: FieldMeta) => !hide?.includes(f.name) && (!f.show_if || String(values[f.show_if[0]]) === f.show_if[1]);
+  const renderField = (f: FieldMeta) => {
+    const disabled = readOnly || !!row?.archived || (editing && f.locked);
+    const err = errors[f.name];
+    const label = f.required ? <>{f.label} <span style={{ color: "var(--error)" }} aria-hidden>*</span></> : f.label;
+    const hint = editing && f.locked ? "После добавления не меняется" : f.hint;
+    let input;
+    if (f.kind === "ref") input = <RefSelect f={f} value={values[f.name]} onChange={(v) => set(f.name, v)} entityId={optEntity} row={row} error={err} disabled={disabled} />;
+    else if (f.kind === "enum") input = (
+      <select className="input" value={values[f.name]} disabled={disabled} aria-invalid={!!err} onChange={(e) => set(f.name, e.target.value)}>
+        {!f.required && <option value="">—</option>}
+        {f.required && !values[f.name] && <option value="">Выберите…</option>}
+        {f.options!.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+      </select>
+    );
+    else if (f.kind === "bool") input = <span className="check"><input type="checkbox" checked={!!values[f.name]} disabled={disabled} onChange={(e) => set(f.name, e.target.checked)} /> Да</span>;
+    else if (f.kind === "textarea") input = <textarea className="input" value={values[f.name]} disabled={disabled} aria-invalid={!!err} maxLength={2000} onChange={(e) => set(f.name, e.target.value)} />;
+    else if (f.kind === "datetime") input = <input className="input" type="datetime-local" value={values[f.name]} disabled={disabled} aria-invalid={!!err} onChange={(e) => set(f.name, e.target.value)} />;
+    else if (f.kind === "date") input = <input className="input" type="date" value={values[f.name]} disabled={disabled} aria-invalid={!!err} onChange={(e) => set(f.name, e.target.value)} />;
+    else {
+      const list = f.suggest && meta.suggestions[f.name]?.length ? `sg-${meta.key}-${f.name}` : undefined;
+      input = (
+        <>
+          <input className="input" value={values[f.name]} disabled={disabled} aria-invalid={!!err} list={list} maxLength={f.max}
+            inputMode={f.kind === "money" || f.kind === "decimal" ? "decimal" : f.kind === "int" ? "numeric" : undefined} onChange={(e) => set(f.name, e.target.value)} />
+          {list && <datalist id={list}>{meta.suggestions[f.name].map((s) => <option key={s} value={s} />)}</datalist>}
+        </>
+      );
+    }
+    return <Field key={f.name} label={label} error={err} hint={hint} full={f.wide}>{input}</Field>;
+  };
+
+  const moreFields = meta.fields.filter((f) => visible(f) && f.more);
   const title = readOnly ? meta.title : editing ? "Изменить" : "Добавить";
   return (
     <Modal title={`${title}: ${meta.one}`} wide onClose={onClose}
@@ -272,37 +325,31 @@ export function RecordModal({ meta, row, onClose, onSaved, defaults, hide }: { m
               )}
             </Field>
           )}
-          {meta.fields.filter((f) => !hide?.includes(f.name) && (!f.show_if || String(values[f.show_if[0]]) === f.show_if[1])).map((f) => {
-            const disabled = readOnly || !!row?.archived || (editing && f.locked);
-            const err = errors[f.name];
-            const label = f.required ? <>{f.label} <span style={{ color: "var(--error)" }} aria-hidden>*</span></> : f.label;
-            const hint = editing && f.locked ? "После добавления не меняется" : f.hint;
-            let input;
-            if (f.kind === "ref") input = <RefSelect f={f} value={values[f.name]} onChange={(v) => set(f.name, v)} entityId={optEntity} row={row} error={err} disabled={disabled} />;
-            else if (f.kind === "enum") input = (
-              <select className="input" value={values[f.name]} disabled={disabled} aria-invalid={!!err} onChange={(e) => set(f.name, e.target.value)}>
-                {!f.required && <option value="">—</option>}
-                {f.required && !values[f.name] && <option value="">Выберите…</option>}
-                {f.options!.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-              </select>
-            );
-            else if (f.kind === "bool") input = <span className="check"><input type="checkbox" checked={!!values[f.name]} disabled={disabled} onChange={(e) => set(f.name, e.target.checked)} /> Да</span>;
-            else if (f.kind === "textarea") input = <textarea className="input" value={values[f.name]} disabled={disabled} aria-invalid={!!err} maxLength={2000} onChange={(e) => set(f.name, e.target.value)} />;
-            else if (f.kind === "datetime") input = <input className="input" type="datetime-local" value={values[f.name]} disabled={disabled} aria-invalid={!!err} onChange={(e) => set(f.name, e.target.value)} />;
-            else if (f.kind === "date") input = <input className="input" type="date" value={values[f.name]} disabled={disabled} aria-invalid={!!err} onChange={(e) => set(f.name, e.target.value)} />;
-            else {
-              const list = f.suggest && meta.suggestions[f.name]?.length ? `sg-${meta.key}-${f.name}` : undefined;
-              input = (
-                <>
-                  <input className="input" value={values[f.name]} disabled={disabled} aria-invalid={!!err} list={list} maxLength={f.max}
-                    inputMode={f.kind === "money" || f.kind === "decimal" ? "decimal" : f.kind === "int" ? "numeric" : undefined} onChange={(e) => set(f.name, e.target.value)} />
-                  {list && <datalist id={list}>{meta.suggestions[f.name].map((s) => <option key={s} value={s} />)}</datalist>}
-                </>
-              );
-            }
-            return <Field key={f.name} label={label} error={err} hint={hint} full={f.wide}>{input}</Field>;
-          })}
+          {meta.fields.filter((f) => visible(f) && !f.more).map(renderField)}
         </div>
+        {photos && (
+          <div className="field full">
+            <span className="label">{photos.label}</span>
+            <input ref={fileInput} type="file" accept="image/*" multiple hidden
+              onChange={(ev) => { const files = Array.from(ev.target.files ?? []); ev.target.value = ""; setPics((cur) => [...cur, ...files].slice(0, MAX_PICS)); }} />
+            <div className="row" style={{ flexWrap: "wrap", gap: 8 }}>
+              <Button icon={Camera} disabled={pics.length >= MAX_PICS} onClick={() => fileInput.current?.click()}>{pics.length ? "Добавить ещё" : "Прикрепить фото"}</Button>
+              {pics.map((f, i) => (
+                <span className="chip" key={`${f.name}-${i}`}>
+                  {f.name.length > 22 ? `${f.name.slice(0, 20)}…` : f.name}
+                  <button type="button" className="chip-x" aria-label={`Убрать фото ${f.name}`} onClick={() => setPics((cur) => cur.filter((_, j) => j !== i))}><X size={12} aria-hidden /></button>
+                </span>
+              ))}
+            </div>
+            <span className="muted small">Не больше {MAX_PICS} фото. Можно сфотографировать прямо с телефона.</span>
+          </div>
+        )}
+        {moreFields.length > 0 && (
+          <details className="more-fields" open={editing}>
+            <summary>Дополнительно (можно не заполнять)</summary>
+            <div className="form-grid" style={{ marginTop: 12 }}>{moreFields.map(renderField)}</div>
+          </details>
+        )}
         <button type="submit" hidden />
       </form>
     </Modal>

@@ -18,7 +18,7 @@ export function Notifications() {
   const d = q.data;
   return (
     <>
-      <PageHeader title="Уведомления" sub="Новые обращения, ответы, наряды, объявления и напоминания по срокам. Каждый видит только свои"
+      <PageHeader title="Уведомления" sub="Новые обращения, ответы, задания, объявления и напоминания по срокам. Каждый видит только свои"
         actions={<Button icon={CheckCheck} onClick={() => readAll.mutate()} loading={readAll.isPending} disabled={!d?.unread}>Прочитать все</Button>} />
       <div className="toolbar">
         <FilterChips value={f.show} onChange={(v) => setF({ show: v, page: "1" })}
@@ -27,7 +27,7 @@ export function Notifications() {
       <QueryState q={q}>
         {d && (d.items.length === 0
           ? <Empty icon={BellOff} title={f.show === "unread" ? "Непрочитанных нет" : "Уведомлений пока нет"}>
-              {f.show === "unread" ? "Всё прочитано." : "Они появятся, когда кто-то напишет вам, назначит наряд или подойдёт срок документа."}
+              {f.show === "unread" ? "Всё прочитано." : "Они появятся, когда кто-то напишет вам, назначит задание или подойдёт срок документа."}
             </Empty>
           : <div className="card flush">
               <div className="notice-list">

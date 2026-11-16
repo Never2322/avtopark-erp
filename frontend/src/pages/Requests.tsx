@@ -7,6 +7,7 @@ import { useAuth } from "../auth";
 import { fmtDate } from "../format";
 import { Page, useDebounced, useEntityParam, useUrlState } from "../hooks";
 import { VehicleSelect } from "../components/pickers";
+import { TimeButtons } from "./MyTime";
 import { emptyPart, filledParts, PartsEditor, type PartRow } from "../components/PartsEditor";
 import { Alert, Badge, Button, Card, Empty, Field, FilterChips, Modal, PageHeader, Pagination, Priority, QueryState, RequestStatus, Table, useForm, useToast } from "../ui";
 
@@ -28,11 +29,11 @@ function CreateRequest({ vehicleId, onClose }: { vehicleId?: string; onClose: ()
   const [parts, setParts] = useState<PartRow[]>([emptyPart()]);
   const m = useMutation({
     mutationFn: () => post<{ id: number }>("/requests", { ...f.values, vehicle_id: Number(f.values.vehicle_id), parts: filledParts(parts).map(({ name, article, qty, unit }) => ({ name, article, qty, unit })) }),
-    onSuccess: (r) => { qc.invalidateQueries(); toast.success("Обращение создано"); onClose(); nav(`/requests/${r.id}`); },
+    onSuccess: (r) => { qc.invalidateQueries(); toast.success("Запрос создан"); onClose(); nav(`/requests/${r.id}`); },
     onError: f.fail,
   });
   return (
-    <Modal title="Новое обращение" onClose={onClose} footer={<>
+    <Modal title="Запрос на деталь" onClose={onClose} footer={<>
       <Button onClick={onClose}>Отмена</Button>
       <Button variant="primary" loading={m.isPending} disabled={!f.values.vehicle_id || f.values.title.trim().length < 3} onClick={() => { f.clear(); m.mutate(); }}>Создать</Button>
     </>}>
@@ -98,7 +99,10 @@ export function Requests() {
   return (
     <>
       <PageHeader title="Обращения и ремонты" sub={list.data ? `Открытых: ${list.data.open_total}` : undefined}
-        actions={can("requests.create") && <Button variant="primary" icon={Plus} onClick={() => setCreating({})}>Новое обращение</Button>} />
+        actions={<>
+          {can("requests.create") && <Button variant="primary" icon={Plus} onClick={() => setCreating({})}>Запрос на деталь</Button>}
+          <TimeButtons kinds={["repair"]} />
+        </>} />
       <Card flush>
         <div className="toolbar" style={{ padding: "14px 14px 0" }}>
           <div style={{ position: "relative", minWidth: 240, flex: "1 1 240px", maxWidth: 360 }}>

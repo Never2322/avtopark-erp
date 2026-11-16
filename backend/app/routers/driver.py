@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """Кабинет водителя: что сейчас с его машиной, открытые обращения, последняя заправка и расход.
 
-Наряды и записи (рейсы, заправки) водитель получает из своих разделов («/jobs/mine», «/entries/mine»): здесь только то,
+Задания и записи (рейсы, заправки) водитель получает из своих разделов («/jobs/mine», «/entries/mine»): здесь только то,
 что им не хватает для главной страницы. Видна только техника, закреплённая за ним сейчас; у человека без закреплённой
 машины ответ пустой, а не ошибка: страница объясняет, что делать.
 """
@@ -34,7 +34,7 @@ def home(p: Principal = Depends(current), db: Session = Depends(get_db)):
     ids = assigned_vehicle_ids(db, p.employee_id)
     vehicles = []
     if ids:
-        rows = db.scalars(select(Vehicle).where(Vehicle.id.in_(ids), Vehicle.archived_at.is_(None), Vehicle.status != "written_off",
+        rows = db.scalars(select(Vehicle).where(Vehicle.id.in_(ids), Vehicle.archived_at.is_(None),
                                                 own.cond(Vehicle.legal_entity_id)).order_by(Vehicle.plate)).all()
         tank_norm = norms(db, [v.id for v in rows])
         can_requests = bool(p.scope("requests.view") or p.scope("requests.view_own"))

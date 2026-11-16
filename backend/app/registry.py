@@ -68,6 +68,8 @@ class F:
     show_if: tuple[str, str] | None = None   # поле видно и обязательно, только когда другое поле равно значению
     suggest: bool = False        # подсказывать уже использованные значения
     wide: bool = False           # в форме на всю ширину
+    more: bool = False           # в форме спрятано под «Дополнительно (можно не заполнять)»
+    exact: bool = False          # число не округляется: лишние знаки после запятой — ошибка (например, часы)
 
 
 @dataclass
@@ -104,6 +106,7 @@ class R:
     perm_prefix: str = ""        # если права называются не так же, как раздел
     before_void: Callable | None = None   # before_void(db, obj): можно ли убрать запись в архив; иначе Invalid
     after_save: Callable | None = None    # after_save(db, p, obj, creating) -> [текст] | None: связанные записи; до сохранения в базе (commit), ошибка отменяет всё
+    photos: tuple[str, str] | None = None  # (вид фото для /entries, подпись в форме): при добавлении можно сразу прикрепить фото
 
 
 RESOURCES: dict[str, R] = {}
@@ -158,6 +161,8 @@ def _money(raw: Any, f: F) -> Decimal:
         raise Invalid({f.name: "Введите число, например 1250,50"})
     d = Decimal(text_)
     q = Decimal(1).scaleb(-f.places)
+    if f.exact and d != d.quantize(q):
+        raise Invalid({f.name: "Не больше %d знака после запятой: например 2,5" % f.places if f.places == 1 else "Не больше %d знаков после запятой" % f.places})
     d = d.quantize(q, rounding=ROUND_HALF_UP)
     lo = f.lo if f.lo is not None else Decimal(0)
     if d < lo:
@@ -557,7 +562,7 @@ def meta_out(db: Session, res: R, p: Principal) -> dict:
                        "options": [{"value": k, "label": v} for k, v in (f.options or {}).items()] if f.options else None,
                        "list": f.list, "filter": f.filter, "sum": f.sum, "locked": f.locked, "wide": f.wide or f.kind == "textarea",
                        "show_if": list(f.show_if) if f.show_if else None, "suggest": f.suggest, "max": f.max,
-                       "default": serialize(f.default)})
+                       "default": serialize(f.default), "more": f.more})
         if f.suggest:
             col = getattr(res.model, f.name)
             rows = db.execute(select(col, func.count()).where(col != "").group_by(col).order_by(func.count().desc()).limit(40)).all()
@@ -567,6 +572,8 @@ def meta_out(db: Session, res: R, p: Principal) -> dict:
         "date_field": res.date, "states": [{"value": k, "label": v} for k, v in res.states.items()], "fields": fields, "columns": [{"name": c.name, "label": c.label, "kind": c.kind, "sum": c.sum, "first": c.first} for c in res.cols],
         "entities": allowed_entities(db, p, code_c) if res.scope == "entity" else [], "suggestions": suggestions,
         "can": {"view": p.can(perm(res, "view")), "create": p.can(code_c), "edit": p.can(perm(res, "edit")), "void": p.can(perm(res, "void"))},
+        # фото можно прикрепить сразу при добавлении, только если есть право править записи этого раздела (так же устроена отдельная кнопка с камерой)
+        "photos": {"kind": res.photos[0], "label": res.photos[1]} if res.photos and p.can(perm(res, "edit")) else None,
     }
 
 
@@ -763,7 +770,8 @@ def options(ref: str, q: str = "", legal_entity_id: int | None = None, p: Princi
     if ref == "tariff":
         if not ref_scope(p, ref, "tariffs.view", None):
             raise _denied()
-        query = select(Tariff).where(Tariff.archived_at.is_(None)).order_by(Tariff.name)
+        # в заказах нужны только тарифы для заказчика; тарифы оплаты работы и ремонта выбираются в карточке сотрудника
+        query = select(Tariff).where(Tariff.archived_at.is_(None), Tariff.kind == "customer").order_by(Tariff.name)
         return {"items": [{"id": x.id, "label": x.name} for x in db.scalars(query.limit(300))]}
     if ref == "order":
         scope = ref_scope(p, ref, "orders.view", legal_entity_id)

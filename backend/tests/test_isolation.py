@@ -11,7 +11,7 @@ def test_director_of_a_does_not_see_entity_b_anywhere(make_client, world):
     assert c.get(f"/vehicles/{world.vb1}").status_code == 404                     # чужое «не существует», а не «запрещено»
     assert c.get(f"/vehicles/{world.vb1}/readings").status_code == 404
     assert c.get(f"/vehicles/{world.vb1}/status-history").status_code == 404
-    assert c.post(f"/vehicles/{world.vb1}/status", {"status": "parked"}).status_code == 404
+    assert c.post(f"/vehicles/{world.vb1}/status", {"status": "in_repair", "reason": "Поломка"}).status_code == 404
     assert c.post(f"/vehicles/{world.vb1}/readings", {"kind": "km", "value": 5000}).status_code == 404
     assert c.get(f"/employees/{world.d3}").status_code == 404
     names = {e["last_name"] for e in c.get("/employees").json()["items"]}

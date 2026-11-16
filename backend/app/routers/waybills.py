@@ -21,7 +21,7 @@ from app.services.readings import add_reading, correct_reading, effective
 from app.services.vehicles import assigned_vehicle_ids, employee_in_entity
 
 router = APIRouter(prefix="/waybills", tags=["Путевые листы"])
-BLOCKED_FOR_WORK = ("in_repair", "awaiting_repair", "written_off")
+BLOCKED_FOR_WORK = ("in_repair",)
 READING = dict(ge=0, le=99_999_999, max_digits=12, decimal_places=1)
 FUEL = dict(ge=0, le=9999, max_digits=8, decimal_places=1)
 
@@ -178,8 +178,8 @@ def check_pair(db: Session, p: Principal, vehicle_id: int, driver_id: int, work_
         raise fail(422, "bad_vehicle", "Машина не найдена или недоступна вам", "vehicle_id")
     if entity_id is not None and v.legal_entity_id != entity_id:
         raise fail(422, "entity_mismatch", "Нельзя перенести лист в другое юрлицо: создайте новый", "vehicle_id")
-    if v.archived_at or v.status == "written_off":
-        raise fail(409, "vehicle_archived", "Машина в архиве или списана", "vehicle_id")
+    if v.archived_at:
+        raise fail(409, "vehicle_archived", "Машина в архиве", "vehicle_id")
     d = db.get(Employee, driver_id)
     if not d or d.archived_at:
         raise fail(422, "bad_driver", "Водитель не найден", "driver_id")

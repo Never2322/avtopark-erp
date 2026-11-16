@@ -130,7 +130,6 @@ def cmd_seed_demo(args) -> int:
         for emp, v in zip(staff[:3], cars[:3]):
             db.add(VehicleAssignment(vehicle_id=v.id, employee_id=emp.id, started_on=today - dt.timedelta(days=90)))
         change_status(db, who, cars[1], "in_repair", "Течь масла из КПП")
-        change_status(db, who, cars[4], "day_off")
         req = ServiceRequest(legal_entity_id=cars[1].legal_entity_id, number=next_number(db, cars[1].legal_entity_id, "request"),
                              vehicle_id=cars[1].id, title="Течь масла из КПП", description="Пятно под машиной после смены",
                              priority="high", status="diagnostics", reporter_id=admin.id, created_by_id=admin.id, updated_by_id=admin.id)

@@ -1,15 +1,15 @@
 # -*- coding: utf-8 -*-
-"""Наряды на день: доска дня для диспетчера, наряды водителя, отметки «приехал» и «закончил», фото до и после.
+"""Технические задания: доска дня для диспетчера, задания водителя, отметки «приехал» и «закончил», фото до и после.
 
 Общие операции (список, создание, правка, архив, выгрузка) делает общий механизм разделов (app/registry.py, раздел «jobs»).
 Здесь то, чего он не умеет: отметки, состояния, повтор на следующий день и фото.
 
 Правила:
-- водитель видит и отмечает только наряды по технике, закреплённой за ним сейчас;
+- водитель видит и отмечает только задания по технике, закреплённой за ним сейчас;
 - чужое юрлицо и чужая техника выглядят как «не найдено»;
 - фото не стираются: их «убирают» с отметкой кто и когда, сам файл остаётся в базе;
-- к отменённому наряду и к наряду в архиве фото не добавляются; водитель не добавляет фото «до работы» после того, как наряд выполнен,
-  и не убирает фото из выполненного или отменённого наряда;
+- к отменённому заданию и к заданию в архиве фото не добавляются; водитель не добавляет фото «до работы» после того, как задание выполнен,
+  и не убирает фото из выполненного или отменённого задания;
 - каждое действие пишется в журнал.
 """
 import datetime as dt
@@ -34,9 +34,9 @@ from app.services import notify
 from app.services.people import user_names
 from app.services.vehicles import assigned_vehicle_ids
 
-router = APIRouter(prefix="/jobs", tags=["Наряды на день"])
+router = APIRouter(prefix="/jobs", tags=["Технические задания"])
 
-DRIVER_BACK_DAYS = 7          # незаконченные наряды водитель видит за эту неделю назад
+DRIVER_BACK_DAYS = 7          # незаконченные задания водитель видит за эту неделю назад
 OPEN_STATES = ("planned", "on_site")
 
 
@@ -54,7 +54,7 @@ def can_view(db: Session, p: Principal, job: Job) -> bool:
 
 
 def act_mode(db: Session, p: Principal, job: Job) -> str | None:
-    """«staff» — сотрудник с правом менять наряды; «driver» — водитель своей техники; None — отмечать нельзя."""
+    """«staff» — сотрудник с правом менять задания; «driver» — водитель своей техники; None — отмечать нельзя."""
     if p.can("jobs.edit", job.legal_entity_id):
         return "staff"
     if p.can("jobs.act_own", job.legal_entity_id) and job.vehicle_id in mine(db, p):
@@ -65,7 +65,7 @@ def act_mode(db: Session, p: Principal, job: Job) -> str | None:
 def get_job(db: Session, p: Principal, jid: int) -> Job:
     job = db.get(Job, jid)
     if job is None or not can_view(db, p, job):
-        raise fail(404, "not_found", "Наряд не найден")
+        raise fail(404, "not_found", "Задание не найдено")
     return job
 
 
@@ -74,7 +74,7 @@ def need_act(db: Session, p: Principal, job: Job) -> str:
     if mode is None:
         raise fail(403, "forbidden", "Нет доступа к этому действию")
     if job.archived_at:
-        raise fail(409, "archived", "Наряд в архиве: сначала верните его из архива")
+        raise fail(409, "archived", "Задание в архиве: сначала верните его из архива")
     return mode
 
 
@@ -141,7 +141,7 @@ def order_open_first(q):
 
 @router.get("/day")
 def day_board(date: dt.date | None = None, legal_entity_id: int | None = None, p: Principal = Depends(current), db: Session = Depends(get_db)):
-    """Доска дня для сотрудника: все наряды на дату и незакрытые наряды за прошлые дни."""
+    """Доска дня для сотрудника: все задания на дату и незакрытые задания за прошлые дни."""
     scope = entity_filter(p, "jobs.view", legal_entity_id)
     if not scope:
         raise fail(403, "forbidden", "Нет доступа к этому действию")
@@ -160,7 +160,7 @@ def day_board(date: dt.date | None = None, legal_entity_id: int | None = None, p
 
 @router.get("/mine")
 def my_jobs(p: Principal = Depends(current), db: Session = Depends(get_db)):
-    """Наряды водителя по его технике: сегодня, завтра и незаконченные за последнюю неделю."""
+    """Задания водителя по его технике: сегодня, завтра и незаконченные за последнюю неделю."""
     scope = p.scope("jobs.view_own")
     ids = mine(db, p)
     today = job_today()
@@ -209,9 +209,9 @@ def arrive(jid: int, body: MarkIn | None = None, p: Principal = Depends(current)
     job = get_job(db, p, jid)
     need_act(db, p, job)
     if job.state == "cancelled":
-        raise fail(409, "cancelled", "Наряд отменён")
+        raise fail(409, "cancelled", "Задание отменено")
     if job.state == "done":
-        raise fail(409, "already_done", "Наряд уже выполнен")
+        raise fail(409, "already_done", "Задание уже выполнено")
     changed = job.state == "planned"
     if changed:
         when, late = mark_time(body.at if body else None, utcnow())
@@ -228,7 +228,7 @@ def finish(jid: int, body: FinishIn, p: Principal = Depends(current), db: Sessio
     job = get_job(db, p, jid)
     need_act(db, p, job)
     if job.state == "cancelled":
-        raise fail(409, "cancelled", "Наряд отменён")
+        raise fail(409, "cancelled", "Задание отменено")
     changed = job.state in OPEN_STATES
     if changed:
         note = body.note.strip()
@@ -252,7 +252,7 @@ def set_state(jid: int, body: StateIn, p: Principal = Depends(current), db: Sess
     if not p.can("jobs.edit", job.legal_entity_id):
         raise fail(403, "forbidden", "Нет доступа к этому действию")
     if job.archived_at:
-        raise fail(409, "archived", "Наряд в архиве: сначала верните его из архива")
+        raise fail(409, "archived", "Задание в архиве: сначала верните его из архива")
     if body.state not in JOB_STATES:
         raise fail(422, "bad_state", "Выберите состояние из списка", "state")
     old = job.state
@@ -277,12 +277,12 @@ def set_state(jid: int, body: StateIn, p: Principal = Depends(current), db: Sess
 
 @router.post("/{jid}/copy")
 def copy_next_day(jid: int, p: Principal = Depends(current), db: Session = Depends(get_db)):
-    """Такой же наряд на следующий день: для объектов, куда ездят несколько дней подряд."""
+    """Такое же задание на следующий день: для объектов, куда ездят несколько дней подряд."""
     job = get_job(db, p, jid)
     if not p.can("jobs.create", job.legal_entity_id):
         raise fail(403, "forbidden", "Нет доступа к этому действию")
     if job.archived_at:
-        raise fail(409, "archived", "Наряд в архиве: сначала верните его из архива")
+        raise fail(409, "archived", "Задание в архиве: сначала верните его из архива")
     errors: dict = {}
     day = job.job_date + dt.timedelta(days=1)
     job_check_date(day, errors, "job_date")
@@ -316,7 +316,7 @@ def add_photos(jid: int, stage: str = Form(...), files: list[UploadFile] = File(
     if stage not in JOB_STAGES:
         raise fail(422, "bad_stage", "Укажите, когда сделаны фото: до работы или после", "stage")
     if job.state == "cancelled" or (mode == "driver" and job.state == "done" and stage == "before"):
-        raise fail(409, "photos_closed", "К этому наряду фото уже не добавить")
+        raise fail(409, "photos_closed", "К этому заданию фото уже не добавить")
     prepared = read_uploads(files, images_only=True, required=True)
     # Тот же файл повторно (телефон без связи не узнал, что первая отправка дошла): второй раз не добавляется
     have = set(db.scalars(select(StoredFile.sha256).join(JobPhoto, JobPhoto.file_id == StoredFile.id).where(
@@ -372,7 +372,7 @@ def remove_photo(pid: int, body: RemoveIn, p: Principal = Depends(current), db: 
         raise fail(404, "not_found", "Фото не найдено")
     mode = need_act(db, p, job)
     if mode == "driver" and job.state not in OPEN_STATES:
-        raise fail(403, "forbidden", "Из выполненного наряда фото убрать нельзя: обратитесь к диспетчеру")
+        raise fail(403, "forbidden", "Из выполненного задания фото убрать нельзя: обратитесь к диспетчеру")
     ph.removed_at, ph.removed_by_id, ph.remove_reason = utcnow(), p.id, body.reason.strip() or "Убрано"
     job.updated_by_id = p.id
     audit.log(db, p, "jobs.photo.remove", "jobs", job.id, job.legal_entity_id, photo_id=ph.id, stage=ph.stage, reason=ph.remove_reason)

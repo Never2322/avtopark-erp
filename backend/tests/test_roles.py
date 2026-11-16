@@ -38,7 +38,7 @@ def test_matrix(make_client, world, role, method, url, want):
 
 
 def test_changes_need_their_own_permissions(make_client, world):
-    body = {"status": "parked"}
+    body = {"status": "in_repair", "reason": "Поломка"}
     assert make_client("drv1").post(f"/vehicles/{world.va1}/status", body).status_code == 403
     assert make_client("acc_a").post(f"/vehicles/{world.va1}/status", body).status_code == 403
     assert make_client("emp_a").post(f"/vehicles/{world.va1}/status", body).status_code == 403

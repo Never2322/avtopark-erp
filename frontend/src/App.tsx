@@ -33,6 +33,8 @@ import { Notifications } from "./pages/Notifications";
 import { AnnouncementCard, Announcements } from "./pages/Announcements";
 import { News, NewsCard } from "./pages/News";
 import { Timesheet } from "./pages/Timesheet";
+import { MyTime } from "./pages/MyTime";
+import { Attendance } from "./pages/Attendance";
 import { TimesheetPrint } from "./pages/TimesheetPrint";
 import { JobsBoard, MyJobs } from "./pages/Jobs";
 import { MapPage } from "./pages/MapPage";
@@ -92,6 +94,8 @@ export function App() {
         <Route path="entries" element={<Guard any={["trips.view_own", "fuel_fills.view_own"]}><DriverEntries /></Guard>} />
         <Route path="entries/feed" element={<Guard any={["trips.view", "fuel_fills.view"]}><EntriesFeed /></Guard>} />
         <Route path="timesheet" element={<Guard any={["timesheet.view"]}><Timesheet /></Guard>} />
+        <Route path="my-time" element={<Guard any={["worklog.view_own", "worklog.create_own"]}><MyTime /></Guard>} />
+        <Route path="attendance" element={<Guard any={["attendance.view", "attendance.mark_own"]}><Attendance /></Guard>} />
         <Route path="purchases" element={<Guard any={["purchases.view"]}><Purchases /></Guard>} />
         <Route path="stock" element={<Guard any={["stock_items.view"]}><Stock /></Guard>} />
         <Route path="stock/moves" element={<Guard any={["stock_moves.view"]}><StockMoves /></Guard>} />

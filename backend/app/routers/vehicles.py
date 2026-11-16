@@ -12,7 +12,7 @@ from app import audit
 from app.common import csv_text, fail, like, norm_plate, org_today, page_of, utcnow
 from app.db import get_db
 from app.deps import Principal, current, entity_filter, require
-from app.enums import READING_KINDS, REQUEST_OPEN, VEHICLE_CATEGORIES, VEHICLE_DOC_KINDS, VEHICLE_STATUSES
+from app.enums import READING_KINDS, REQUEST_OPEN, VEHICLE_CATEGORIES, VEHICLE_DOC_KINDS, VEHICLE_STATUSES, status_label
 from app.models import (Department, DossierDoc, Employee, LegalEntity, MaintenanceItem, ServiceRequest, User, Vehicle, VehicleAssignment, VehicleStatusHistory,
                         VehicleType, Waybill)
 from app.services import access, readings as readings_svc
@@ -223,7 +223,7 @@ def types(p: Principal = Depends(current), db: Session = Depends(get_db)):
 @router.get("/lookup")
 def lookup(q: str = "", legal_entity_id: int | None = None, p: Principal = Depends(current), db: Session = Depends(get_db)):
     cond = access.lookup_condition(p, db)
-    query = select(Vehicle).where(cond, Vehicle.archived_at.is_(None), Vehicle.status != "written_off")
+    query = select(Vehicle).where(cond, Vehicle.archived_at.is_(None))
     if legal_entity_id:
         query = query.where(Vehicle.legal_entity_id == legal_entity_id)
     if q.strip():
@@ -371,8 +371,8 @@ def status_history(vid: int, p: Principal = Depends(current), db: Session = Depe
                       .outerjoin(User, User.id == VehicleStatusHistory.changed_by_id)
                       .outerjoin(ServiceRequest, ServiceRequest.id == VehicleStatusHistory.request_id)
                       .where(VehicleStatusHistory.vehicle_id == v.id).order_by(VehicleStatusHistory.id.desc())).all()
-    return {"items": [{"id": h.id, "from_status": h.from_status, "status": h.status, "status_label": VEHICLE_STATUSES[h.status],
-                       "from_label": VEHICLE_STATUSES.get(h.from_status or ""), "reason": h.reason,
+    return {"items": [{"id": h.id, "from_status": h.from_status, "status": h.status, "status_label": status_label(h.status),
+                       "from_label": status_label(h.from_status) if h.from_status else None, "reason": h.reason,
                        "changed_at": h.changed_at.isoformat(), "by": name or login, "request_number": num,
                        "request_id": h.request_id} for h, login, name, num in rows]}
 
@@ -397,8 +397,8 @@ def add_assignment(vid: int, body: AssignmentIn, p: Principal = Depends(require(
     v = get_vehicle(db, p, vid)
     if not p.can("assignments.manage", v.legal_entity_id):
         raise fail(403, "forbidden", "Нет права закреплять водителей за техникой этого юрлица")
-    if v.archived_at or v.status == "written_off":
-        raise fail(409, "vehicle_archived", "Машина в архиве или списана")
+    if v.archived_at:
+        raise fail(409, "vehicle_archived", "Машина в архиве")
     emp = db.get(Employee, body.employee_id)
     if not emp or emp.archived_at:
         raise fail(422, "bad_employee", "Сотрудник не найден или в архиве", "employee_id")

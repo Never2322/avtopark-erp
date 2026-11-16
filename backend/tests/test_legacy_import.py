@@ -58,7 +58,7 @@ def test_organizations_employees_vehicles(old_db):
         assert v2.status == "in_repair" and db.get(VehicleType, v2.type_id).primary_reading == "engine_hours"
         v3 = db.scalar(select(Vehicle).where(Vehicle.plate == "БЕЗ-НОМЕРА-3"))          # у прицепа не было номера
         assert db.get(VehicleType, v3.type_id).name == "Прицеп" and db.get(LegalEntity, v3.legal_entity_id).name == "ИП Юг"
-        assert db.scalar(select(Vehicle.status).where(Vehicle.plate == "В303ВВ54")) == "parked"
+        assert db.scalar(select(Vehicle.status).where(Vehicle.plate == "В303ВВ54")) == "in_work"
         drv = db.scalars(select(VehicleAssignment).where(VehicleAssignment.vehicle_id == v1.id)).all()
         assert len(drv) == 1 and drv[0].role == "primary" and drv[0].employee_id == emp.id
 

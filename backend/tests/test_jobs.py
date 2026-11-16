@@ -53,9 +53,9 @@ def test_create_job_validation_and_entity_from_vehicle(world, make_client):
     r = new_job(world, d, customer="  ООО   Север ", address=" ул.  Мира ,  5 ")
     assert r.json()["customer"] == "ООО Север" and r.json()["address"] == "ул. Мира , 5"
 
-    # списанную технику в наряд не ставят
+    # технику из архива в задание не ставят
     adm = make_client("admin")
-    assert adm.post(f"/vehicles/{world.va3}/status", {"status": "written_off", "reason": "Списана по акту"}).status_code in (200, 201)
+    assert adm.post(f"/vehicles/{world.va3}/archive", {"reason": "Списана по акту"}).status_code in (200, 201)
     r = new_job(world, d, vehicle=world.va3)
     assert r.status_code == 422 and "vehicle_id" in r.json()["fields"]
 

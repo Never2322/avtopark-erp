@@ -210,8 +210,8 @@ def create_request(body: RequestCreate, p: Principal = Depends(require("requests
         raise fail(422, "bad_vehicle", "Машина не найдена или недоступна вам", "vehicle_id")
     if not p.can("requests.create", v.legal_entity_id):
         raise fail(403, "forbidden", "Нет права создавать обращения по технике этого юрлица")
-    if v.archived_at or v.status == "written_off":
-        raise fail(409, "vehicle_archived", "Машина в архиве или списана", "vehicle_id")
+    if v.archived_at:
+        raise fail(409, "vehicle_archived", "Машина в архиве", "vehicle_id")
     lines = parts_svc.clean_lines(body.parts)
     for i, line in enumerate(lines):
         if any(parts_svc.same_part(line, y) for y in lines[:i]):

@@ -349,13 +349,10 @@ class Importer:
 
     @staticmethod
     def vehicle_status(r: dict) -> str:
-        if r.get("status") == "written_off":
-            return "written_off"
-        if r.get("status") == "repair":
+        # статусов теперь два: ремонт или линия; списанные машины уходят в архив (см. ниже)
+        if r.get("status") == "repair" or r.get("work_state") == "repair":
             return "in_repair"
-        if r.get("status") == "reserve":
-            return "parked"
-        return {"work": "in_work", "repair": "in_repair", "vacation": "parked", "dayoff": "day_off"}.get(r.get("work_state") or "work", "in_work")
+        return "in_work"
 
     @staticmethod
     def fuel_kind(v: str) -> str:
@@ -397,7 +394,8 @@ class Importer:
             status = self.vehicle_status(r)
             v = Vehicle(legal_entity_id=eid, type_id=self.vehicle_type(r.get("group_kind") or "truck", r.get("vehicle_type")), plate=plate,
                         internal_no=s(r.get("garage_number"), 30), make=s(r.get("make"), 60), model=s(r.get("model"), 60), vin=vin,
-                        year=r.get("made_year"), status=status, status_changed_at=moment(r.get("work_state_at"), self.tz) or moment(r.get("created_at"), ZoneInfo("UTC")),
+                        year=r.get("made_year"), status=status, archived_at=dt.datetime.now(dt.timezone.utc) if r.get("status") == "written_off" else None,
+                        status_changed_at=moment(r.get("work_state_at"), self.tz) or moment(r.get("created_at"), ZoneInfo("UTC")),
                         note=note)
             self.audit_times(v, r)
             self.add("vehicles", r, v)

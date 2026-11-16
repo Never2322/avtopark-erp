@@ -33,8 +33,8 @@ const SECTION_TABS: { id: TabId; resource: string; label: string; icon: typeof W
   { id: "maintenance", resource: "maintenance", label: "ТО", icon: Wrench, empty: "Добавьте плановое ТО: вид, что сделать и срок по дате или пробегу." },
   { id: "events", resource: "vehicle_events", label: "Мероприятия", icon: Timer, empty: "Добавьте мероприятие со сроком: тахограф, поверка, замена ремня." },
   { id: "tires", resource: "tires", label: "Шины", icon: Disc3, empty: "Добавьте шины: марка, размер, сезон и дата установки." },
-  { id: "repairs", resource: "vehicle_repairs", label: "Ремонты", icon: Hammer, empty: "Добавьте ремонт или деталь: дата, название, стоимость." },
-  { id: "finance", resource: "vehicle_finance", label: "Финансы", icon: PiggyBank, empty: "Добавьте доход или расход по этой машине." },
+  { id: "repairs", resource: "vehicle_repairs", label: "Ремонтные работы", icon: Hammer, empty: "Добавьте ремонтную работу или деталь: дата, название, стоимость." },
+  { id: "finance", resource: "vehicle_finance", label: "Затраты", icon: PiggyBank, empty: "Добавьте затрату или доход по этой машине." },
 ];
 
 function StatusModal({ v, onClose }: { v: Detail; onClose: () => void }) {
@@ -47,7 +47,7 @@ function StatusModal({ v, onClose }: { v: Detail; onClose: () => void }) {
     onSuccess: () => { qc.invalidateQueries(); toast.success("Статус изменён"); onClose(); },
     onError: f.fail,
   });
-  const needs = ["in_repair", "awaiting_repair", "written_off"].includes(f.values.status);
+  const needs = f.values.status === "in_repair";
   return (
     <Modal title="Сменить статус" onClose={onClose} footer={<><Button onClick={onClose}>Отмена</Button>
       <Button variant="primary" loading={m.isPending} disabled={f.values.status === v.status} onClick={() => { f.clear(); m.mutate(); }}>Сохранить</Button></>}>
@@ -61,7 +61,6 @@ function StatusModal({ v, onClose }: { v: Detail; onClose: () => void }) {
         <Field label={needs ? "Причина (обязательно)" : "Причина (по желанию)"} error={f.errors.reason}>
           <textarea className="input" value={f.values.reason} onChange={(e) => f.set("reason", e.target.value)} maxLength={300} />
         </Field>
-        {f.values.status === "written_off" && <Alert tone="warning">Списанную машину нельзя вернуть в работу. Если ошиблись, обратитесь к администратору.</Alert>}
       </div>
     </Modal>
   );

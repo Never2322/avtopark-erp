@@ -56,7 +56,7 @@ def test_status_filter_flags_and_search(world, make_client):
     d = make_client("disp_a")
     assert d.post(f"/vehicles/{world.va2}/status", {"status": "in_repair", "reason": "Сцепление"}).status_code == 200
     items = by_plate(rows(d))
-    assert items["А002АА54"]["status_label"] == "На ремонте" and "old_reading" not in codes(items["А002АА54"])   # старое показание — только у машин «в работе»
+    assert items["А002АА54"]["status_label"] == "В ремонте" and "old_reading" not in codes(items["А002АА54"])   # старое показание — только у машин «в работе»
     assert set(by_plate(rows(d, status="in_repair"))) == {"А002АА54"}
     assert set(by_plate(rows(d, only="no_driver"))) == {"А003АА54"}
     assert set(by_plate(rows(d, q="второй"))) == {"А002АА54"}              # поиск по фамилии водителя
@@ -67,9 +67,9 @@ def test_status_filter_flags_and_search(world, make_client):
     assert d.get("/roster", params={"only": "nope"}).status_code == 422
 
 
-def test_written_off_and_archived_vehicles_are_not_listed(world, make_client):
+def test_archived_vehicles_are_not_listed(world, make_client):
     dr, adm = make_client("dir_a"), make_client("admin")
-    assert adm.post(f"/vehicles/{world.va3}/status", {"status": "written_off", "reason": "Продана"}).status_code == 200
+    assert adm.post(f"/vehicles/{world.va3}/archive", {"reason": "Продана"}).status_code == 200
     assert adm.post(f"/vehicles/{world.va2}/archive", {"reason": "Ошибочно добавлена"}).status_code == 200
     assert set(by_plate(rows(dr))) == {"А001АА54"}
 
@@ -154,7 +154,7 @@ def test_export_csv_audit_and_scope(world, make_client):
     text = r.content.decode("utf-8-sig")
     assert "А003АА54" in text and "А001АА54" not in text and "В001ВВ54" not in text
     head = text.splitlines()[0].split(";")
-    assert head[:4] == ["Госномер", "Машина", "Юрлицо", "Водитель"] and "Замечания" in head and "Нарядов сегодня" in head
+    assert head[:4] == ["Госномер", "Машина", "Юрлицо", "Водитель"] and "Замечания" in head and "Заданий сегодня" in head
     assert "Нет водителя" in text
     rb = b.get("/roster/export.csv").content.decode("utf-8-sig")
     assert "В001ВВ54" in rb and "А001АА54" not in rb

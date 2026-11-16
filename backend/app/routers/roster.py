@@ -2,13 +2,13 @@
 """Сводка «Водители и техника»: за каждой машиной свой водитель, и сразу видно, что с ней сейчас.
 
 Только чтение: закрепления водителей меняются в карточке техники (право «assignments.manage»), статусы там же.
-Что человек видит в строке, зависит от его прав: наряды — с правом на наряды, расход — с правом на заправки и так далее.
+Что человек видит в строке, зависит от его прав: задания — с правом на задания, расход — с правом на заправки и так далее.
 Чего нет по правам, в ответ не попадает (поле равно null), а не прячется на экране.
 
 Замечания в строке (их видно и в выгрузке):
 - нет водителя: у машины в работе или на ремонте никто не закреплён;
 - расход выше нормы: по последнему отрезку между полными заправками;
-- наряд не закрыт за прошлые дни;
+- задание не закрыто за прошлые дни;
 - пробег давно не обновляли: у машины «в работе» нет принятого показания дольше недели.
 """
 import datetime as dt
@@ -35,11 +35,11 @@ router = APIRouter(prefix="/roster", tags=["Водители и техника"]
 
 STALE_READING_DAYS = 7
 # Для этих статусов у машины должен быть водитель; в аренде и «не используется» водитель не нужен.
-NEEDS_DRIVER = {"in_work", "in_repair", "awaiting_repair", "parked", "day_off"}
+NEEDS_DRIVER = {"in_work", "in_repair"}
 FLAGS = {
     "no_driver": "Нет водителя",
     "fuel_over": "Расход выше нормы",
-    "stale_job": "Наряд не закрыт за прошлые дни",
+    "stale_job": "Задание не закрыто за прошлые дни",
     "old_reading": f"Пробег не обновляли больше {STALE_READING_DAYS} дней",
 }
 ONLY = {"", "no_driver", "attention"}
@@ -63,7 +63,7 @@ def last_per_vehicle(db: Session, model, date_col, ids: list[int], scope) -> dic
 
 
 def job_info(j_rows: list[Job], today: dt.date) -> dict:
-    """Наряды машины на сегодня и сколько незакрытых за прошлые дни."""
+    """Задания машины на сегодня и сколько незакрытых за прошлые дни."""
     todays = [j for j in j_rows if j.job_date == today and j.state != "cancelled"]
     stale = sum(1 for j in j_rows if j.job_date < today and j.state in OPEN_STATES)
     rank = {"on_site": 0, "planned": 1, "done": 2}
@@ -84,7 +84,7 @@ def build(db: Session, p: Principal, *, legal_entity_id: int | None, q: str, sta
     if only not in ONLY:
         raise fail(422, "bad_filter", "Неизвестный отбор", "only")
 
-    cond = [access.view_condition(p, db), scope.cond(Vehicle.legal_entity_id), Vehicle.archived_at.is_(None), Vehicle.status != "written_off"]
+    cond = [access.view_condition(p, db), scope.cond(Vehicle.legal_entity_id), Vehicle.archived_at.is_(None)]
     if legal_entity_id is not None:
         cond.append(Vehicle.legal_entity_id == legal_entity_id)
     vehicles = db.scalars(select(Vehicle).where(*cond).order_by(Vehicle.plate, Vehicle.id)).all()
@@ -166,7 +166,7 @@ def build(db: Session, p: Principal, *, legal_entity_id: int | None, q: str, sta
 
     totals = {"vehicles": len(items), "no_driver": sum(1 for i in items if any(f["code"] == "no_driver" for f in i["flags"])),
               "attention": sum(1 for i in items if i["flags"]),
-              "by_status": [{"code": k, "label": lbl, "count": sum(1 for i in items if i["status"] == k)} for k, lbl in VEHICLE_STATUSES.items() if k != "written_off"]}
+              "by_status": [{"code": k, "label": lbl, "count": sum(1 for i in items if i["status"] == k)} for k, lbl in VEHICLE_STATUSES.items()]}
     # отбор применяется после подсчёта итогов: цифры сверху не меняются от того, что человек нажал
     shown = items
     if status:
@@ -220,7 +220,7 @@ def export_csv(legal_entity_id: int | None = None, q: str = "", status: str = ""
     can = data["can"]
     head = ["Госномер", "Машина", "Юрлицо", "Водитель", "Запасные водители", "Состояние", "С какого времени"]
     if can["jobs"]:
-        head += ["Нарядов сегодня", "Ближайший наряд"]
+        head += ["Заданий сегодня", "Ближайшее задание"]
     if can["trips"]:
         head += ["Последний рейс"]
     if can["fuel"]:

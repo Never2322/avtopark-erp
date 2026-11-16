@@ -1,4 +1,4 @@
-// Карта 2ГИС: поиск адреса и адреса нарядов на дату. Слежения за машинами нет.
+// Карта 2ГИС: поиск адреса и адреса заданий на дату. Слежения за машинами нет.
 // Живая карта рисуется скриптом 2ГИС и работает только с ключом (TWOGIS_KEY на сервере). Без ключа остаются ссылки «Открыть в 2ГИС».
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -154,7 +154,7 @@ export function MapPage() {
 
   return (
     <>
-      <PageHeader title="Карта" sub="Поиск адреса и адреса нарядов на карте 2ГИС. Слежения за машинами нет" />
+      <PageHeader title="Карта" sub="Поиск адреса и адреса заданий на карте 2ГИС. Слежения за машинами нет" />
       <QueryState q={cfg}>
         {cfg.data && (
           <div className="stack">
@@ -172,7 +172,7 @@ export function MapPage() {
                   </div>
                 )}
                 {(board || can("jobs.view_own")) && (
-                  <Card title={board ? "Наряды на день" : "Мои наряды сегодня"}>
+                  <Card title={board ? "Технические задания" : "Мои задания сегодня"}>
                     {board && (
                       <div className="toolbar" style={{ marginBottom: 10 }}>
                         <Button icon={ChevronLeft} aria-label="Предыдущий день" onClick={() => setDate(shift(date, -1))} />
@@ -182,8 +182,8 @@ export function MapPage() {
                     )}
                     <div className="muted small" style={{ marginBottom: 8 }}>{fmtDateLong(date)}</div>
                     <QueryState q={jobsQ}>
-                      {jobs.length === 0 ? <Empty icon={MapPin} title="Нарядов с адресом нет" /> : (
-                        <ul className="map-jobs" aria-label="Адреса нарядов">
+                      {jobs.length === 0 ? <Empty icon={MapPin} title="Заданий с адресом нет" /> : (
+                        <ul className="map-jobs" aria-label="Адреса заданий">
                           {jobs.map((j) => {
                             const f = pointOf(j.address);
                             const seen = byAddress.get(norm(j.address));

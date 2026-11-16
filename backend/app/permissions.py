@@ -57,16 +57,16 @@ PERMISSIONS: list[tuple[str, str, str]] = [
     *_crud("constants", "Справочники", "константы"),
     *_crud("fuel_cards", "Топливные карты", "топливные карты"),
     *_crud("fines", "Штрафы", "штрафы"),
-    *_crud("rentals", "Аренда техники", "аренды"),
+    *_crud("rentals", "Дополнительные работы", "дополнительные работы"),
     *_crud("expenses", "Расходы", "прочие расходы"),
     *_crud("payments", "Выплаты сотрудникам", "выплаты сотрудникам"),
     *_crud("cash_accounts", "Касса", "счета и кассы"),
     *_crud("cash", "Касса", "кассовые операции"),
     *_crud("orders", "Заказы и документы", "заказы"),
     *_crud("documents", "Заказы и документы", "документы (счета, акты, накладные, УПД)"),
-    *_crud("jobs", "Наряды на день", "наряды на день"),
-    ("jobs.view_own", "Наряды на день", "Видеть наряды только по своей технике"),
-    ("jobs.act_own", "Наряды на день", "Отмечать «приехал» и «закончил» и добавлять фото по нарядам своей техники"),
+    *_crud("jobs", "Технические задания", "технические задания"),
+    ("jobs.view_own", "Технические задания", "Видеть задания только по своей технике"),
+    ("jobs.act_own", "Технические задания", "Отмечать «приехал» и «закончил» и добавлять фото по заданиям своей техники"),
     *_crud("trips", "Рейсы и заправки", "рейсы"),
     ("trips.view_own", "Рейсы и заправки", "Видеть рейсы только по своей технике"),
     ("trips.create_own", "Рейсы и заправки", "Вносить рейсы по своей технике, добавлять фото и убирать свою свежую запись"),
@@ -83,6 +83,12 @@ PERMISSIONS: list[tuple[str, str, str]] = [
     ("timesheet.view", "Табель", "Видеть табель учёта рабочего времени"),
     ("timesheet.edit", "Табель", "Ставить и менять отметки в табеле, заполнять месяц"),
     ("timesheet.export", "Табель", "Выгружать табель в Excel"),
+    *_crud("worklog", "Табель", "часы работы и ремонта (из них считается заработок)"),
+    ("worklog.view_own", "Табель", "Видеть свои часы работы и ремонта и свой заработок"),
+    ("worklog.create_own", "Табель", "Отмечать свои часы работы и ремонта и убирать свою свежую запись"),
+    ("attendance.view", "Выход на работу", "Видеть, кто выйдет на работу в выбранный день"),
+    ("attendance.edit", "Выход на работу", "Отмечать выход за сотрудника (например, по телефону)"),
+    ("attendance.mark_own", "Выход на работу", "Отмечать, выйду ли я сам на работу, и видеть свои ответы"),
     *_crud("ppe", "СИЗ", "выдачу СИЗ"),
     *_crud("ppe_norms", "СИЗ", "нормы СИЗ (что выдаём и на сколько хватает)"),
     *_crud("employee_events", "События сотрудников", "события сотрудников (медосмотры, нарушения, премии)"),
@@ -100,11 +106,11 @@ PERMISSIONS: list[tuple[str, str, str]] = [
     ("reports.money", "Отчёты", "Видеть в отчётах деньги: затраты, доходы, суммы заказов"),
     ("reports.export", "Отчёты", "Выгружать отчёты в Excel и CSV"),
     *_crud("tires", "Транспорт", "шины техники"),
-    *_crud("vehicle_repairs", "Транспорт", "историю ремонтов техники"),
-    *_crud("vehicle_finance", "Транспорт", "доходы и расходы по технике"),
+    *_crud("vehicle_repairs", "Транспорт", "ремонтные работы по технике"),
+    *_crud("vehicle_finance", "Транспорт", "затраты на спецтехнику"),
     *_crud("maintenance", "Транспорт", "плановое ТО техники"),
     *_crud("vehicle_events", "Транспорт", "контроль мероприятий по технике"),
-    ("map.view", "Карта", "Открывать карту 2ГИС: поиск адреса и адреса нарядов на карте"),
+    ("map.view", "Карта", "Открывать карту 2ГИС: поиск адреса и адреса заданий на карте"),
     ("legal_entities.view", "Организации", "Видеть юридические лица"),
     ("legal_entities.manage", "Организации", "Добавлять и менять юридические лица"),
     ("users.view", "Администрирование", "Видеть пользователей"),
@@ -175,7 +181,7 @@ ROLE_DEFAULTS["accountant"] += (_all("counterparties", "tariffs", "expenses", "p
 ROLE_DEFAULTS["dispatcher"] += (_all("counterparties", "tariffs", "documents", only=_VIEW)
                                 + _all("fines", "rentals", "fuel_cards", "orders", only=_WORK))
 ROLE_DEFAULTS["mechanic"] += _all("fuel_cards", "fines", "rentals", "tariffs", only=_VIEW)
-# Наряды: диспетчер ведёт их целиком, бухгалтер смотрит, водитель видит и отмечает только свою технику, механик и кладовщик не видят
+# Задания: диспетчер ведёт их целиком, бухгалтер смотрит, водитель видит и отмечает только свою технику, механик и кладовщик не видят
 ROLE_DEFAULTS["dispatcher"] += _all("jobs")
 ROLE_DEFAULTS["accountant"] += _all("jobs", only=_VIEW)
 ROLE_DEFAULTS["driver"] += ["jobs.view_own", "jobs.act_own"]
@@ -231,7 +237,7 @@ ROLE_DEFAULTS["dispatcher"] += ["reports.view", "reports.export"]
 ROLE_DEFAULTS["mechanic"] += ["reports.view"]
 ROLE_DEFAULTS["director"] += ["readings.import"]
 ROLE_DEFAULTS["dispatcher"] += ["readings.import"]
-# Карта 2ГИС (этап 4-4). Допущение: карту открывают те, кто работает с нарядами; список нарядов на ней берётся по их же правам.
+# Карта 2ГИС (этап 4-4). Допущение: карту открывают те, кто работает с заданиями; список заданий на ней берётся по их же правам.
 for _role in ("director", "dispatcher", "driver", "mechanic"):
     ROLE_DEFAULTS[_role] += ["map.view"]
 # Вкладки техники (этап 5-2). Допущения: директор делает всё; механик ведёт шины, ремонты, ТО и контроль (без права убирать в архив),
@@ -240,4 +246,14 @@ ROLE_DEFAULTS["director"] += _all("tires", "vehicle_repairs", "vehicle_finance",
 ROLE_DEFAULTS["mechanic"] += _all("tires", "vehicle_repairs", "maintenance", "vehicle_events", only=_WORK) + _all("vehicle_finance", only=_VIEW)
 ROLE_DEFAULTS["dispatcher"] += _all("tires", "vehicle_repairs", "maintenance", "vehicle_events", only=_VIEW)
 ROLE_DEFAULTS["accountant"] += _all("vehicle_repairs", "tires", only=_VIEW) + _all("vehicle_finance", only=_WORK)
+# Зарплатный табель: часы и заработок видят и правят директор, бухгалтер и диспетчер (отмену записи тоже делает диспетчер);
+# водитель сам отмечает свои часы и видит только свои записи и свой заработок.
+ROLE_DEFAULTS["director"] += _all("worklog")
+ROLE_DEFAULTS["accountant"] += _all("worklog")
+ROLE_DEFAULTS["dispatcher"] += _all("worklog")
+ROLE_DEFAULTS["driver"] += ["worklog.view_own", "worklog.create_own"]
+# Выход на работу: водитель отвечает сам; директор и диспетчер видят ответы и могут отметить за человека.
+ROLE_DEFAULTS["director"] += ["attendance.view", "attendance.edit"]
+ROLE_DEFAULTS["dispatcher"] += ["attendance.view", "attendance.edit"]
+ROLE_DEFAULTS["driver"] += ["attendance.mark_own"]
 assert all(c in PERMISSION_CODES for codes in ROLE_DEFAULTS.values() for c in codes)

@@ -31,7 +31,7 @@ interface RosterData {
 }
 
 const FLAG_TONE: Record<string, "warning" | "error"> = { no_driver: "warning", fuel_over: "error", stale_job: "error", old_reading: "warning" };
-const SHORT: Record<string, string> = { no_driver: "Нет водителя", fuel_over: "Перерасход", stale_job: "Наряд не закрыт", old_reading: "Пробег устарел" };
+const SHORT: Record<string, string> = { no_driver: "Нет водителя", fuel_over: "Перерасход", stale_job: "Задание не закрыто", old_reading: "Пробег устарел" };
 
 function exportUrl(params: Record<string, string | number | undefined>) {
   const q = new URLSearchParams();
@@ -75,13 +75,13 @@ export function Roster() {
         {r.status_since && <span className="muted small">с {fmtDate(r.status_since)}</span>}
       </div>) },
   ];
-  if (d?.can.jobs) cols.push({ key: "j", header: "Наряд сегодня", render: (r) => {
+  if (d?.can.jobs) cols.push({ key: "j", header: "Задание сегодня", render: (r) => {
     if (!r.job) return <span className="muted">—</span>;
     const n = r.job.next;
     return (
       <div className="roster-cell wide">
         {n ? <><span>{n.time_from ? `${n.time_from} · ` : ""}{n.address}</span>
-          <span className="muted small">{r.job.today > 1 ? `${r.job.done} из ${r.job.today} выполнено · ` : ""}{n.state_label}</span></> : <span className="muted">нарядов нет</span>}
+          <span className="muted small">{r.job.today > 1 ? `${r.job.done} из ${r.job.today} выполнено · ` : ""}{n.state_label}</span></> : <span className="muted">заданий нет</span>}
         {r.job.stale > 0 && <Badge tone="error">Не закрыто за прошлые дни: {r.job.stale}</Badge>}
       </div>);
   } });
@@ -136,11 +136,11 @@ export function Roster() {
               {d.items.length === 0
                 ? <Empty icon={d.totals.vehicles === 0 ? Truck : AlertTriangle} title={d.totals.vehicles === 0 ? "Техники пока нет" : "Ничего не найдено"}>
                     {d.totals.vehicles === 0 ? "Добавьте технику в разделе «Транспорт»." : "Измените поиск или отбор."}</Empty>
-                : <Table columns={cols} rows={d.items} rowKey={(r) => r.id} dim={(r) => r.status === "unused"} />}
+                : <Table columns={cols} rows={d.items} rowKey={(r) => r.id} />}
             </Card>
             <p className="muted small">
               Показано {d.items.length} из {d.totals.vehicles} {plural(d.totals.vehicles, "машины", "машин", "машин")}. Замечания: нет водителя, расход выше нормы на 30 % и больше,
-              наряд не закрыт за прошлые дни, пробег у машины «в работе» не обновляли больше недели.
+              задание не закрыто за прошлые дни, пробег у машины «в работе» не обновляли больше недели.
             </p>
           </div>
         )}

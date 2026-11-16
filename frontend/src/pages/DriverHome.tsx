@@ -1,9 +1,9 @@
 // Кабинет водителя: главная страница человека, у которого есть своя техника, но нет права смотреть весь парк.
-// Сверху то, что делают чаще всего (рейс, заправка), ниже машина, наряды на сегодня и последние записи.
+// Сверху то, что делают чаще всего (рейс, заправка), ниже машина, задания на сегодня и последние записи.
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { CalendarCheck, ClipboardList, Fuel, Gauge, Route as RouteIcon, Truck, Wrench } from "lucide-react";
+import { CalendarCheck, ClipboardList, Fuel, Gauge, Hourglass, Route as RouteIcon, Truck, Wrench } from "lucide-react";
 import { get } from "../api";
 import { useAuth } from "../auth";
 import { fmtDate, fmtDateTime, fmtNum, plural } from "../format";
@@ -11,6 +11,8 @@ import { OutboxList } from "../components/Outbox";
 import { Alert, Badge, Button, Card, Empty, PageHeader, QueryState, RequestStatus, VehicleStatus } from "../ui";
 import { EntryCard, EntryModal, type Mine as EntriesData } from "./Entries";
 import { JobCard, useRefresh, type Mine as JobsData } from "./Jobs";
+import { TimeButtons } from "./MyTime";
+import { AttendanceCard } from "./Attendance";
 
 interface HomeVehicle {
   id: number; plate: string; label: string; type: string; status: string; status_label: string; status_since: string | null; primary_reading: string;
@@ -62,13 +64,13 @@ function VehicleBlock({ v, canRequest }: { v: HomeVehicle; canRequest: boolean }
           </ul>
         </div>
       )}
-      {canRequest && <div><Link className="btn sm" to={`/requests?new=1&vehicle=${v.id}`}><Wrench size={14} aria-hidden /> Написать обращение по этой машине</Link></div>}
+      {canRequest && <div><Link className="btn sm" to={`/requests?new=1&vehicle=${v.id}`}><Wrench size={14} aria-hidden /> Запрос на деталь по этой машине</Link></div>}
     </Card>
   );
 }
 
 export function DriverHome() {
-  const { me } = useAuth();
+  const { me, can } = useAuth();
   const qc = useQueryClient();
   const home = useQuery({ queryKey: ["driver-home"], queryFn: () => get<Home>("/driver/home"), refetchInterval: 60_000 });
   const entries = useQuery({ queryKey: ["entries-mine"], queryFn: () => get<EntriesData>("/entries/mine"), refetchInterval: 60_000 });
@@ -90,30 +92,34 @@ export function DriverHome() {
         {h && (
           <div className="stack">
             <OutboxList />
+            <AttendanceCard />
             {!h.has_vehicle ? (
-              <Card><Empty icon={Truck} title="За вами не закреплена техника">Попросите диспетчера закрепить за вами машину: тогда здесь появятся наряды, рейсы и заправки.</Empty></Card>
+              <Card><Empty icon={Truck} title="За вами не закреплена техника">Попросите диспетчера закрепить за вами машину: тогда здесь появятся задания, рейсы и заправки.</Empty></Card>
             ) : (
               <>
                 <div className="entry-quick">
                   <Button variant="primary" size="lg" icon={RouteIcon} disabled={!h.can.trip || !entries.data?.can.trip} onClick={() => setForm("trip")}>Рейс</Button>
                   <Button variant="primary" size="lg" icon={Fuel} disabled={!h.can.fuel || !entries.data?.can.fuel} onClick={() => setForm("fuel")}>Заправка</Button>
+                  <TimeButtons kinds={["repair", "work"]} size="lg" />
                   {h.can.requests && <Link className="btn lg" to={single ? `/requests?new=1&vehicle=${single.id}` : "/requests?new=1"}><Wrench size={16} aria-hidden /> Обращение</Link>}
                   {h.can.waybills && <Link className="btn lg" to="/waybills"><ClipboardList size={16} aria-hidden /> Путевые листы</Link>}
+                  {can("worklog.create_own") && <Link className="btn lg" to="/my-time"><Hourglass size={16} aria-hidden /> Мои часы</Link>}
                 </div>
+
 
                 <div className="grid cols-2 vehicles-grid">{h.vehicles.map((v) => <VehicleBlock key={v.id} v={v} canRequest={h.can.requests} />)}</div>
 
                 {h.can.jobs && (
                   <section className="stack-sm">
-                    <h2 className="row" style={{ gap: 8 }}><CalendarCheck size={18} aria-hidden /> Наряды
-                      {todayJobs.length > 0 && <Badge tone="mint">{todayJobs.length} {plural(todayJobs.length, "наряд", "наряда", "нарядов")}</Badge>}
+                    <h2 className="row" style={{ gap: 8 }}><CalendarCheck size={18} aria-hidden /> Задания
+                      {todayJobs.length > 0 && <Badge tone="mint">{todayJobs.length} {plural(todayJobs.length, "задание", "задания", "заданий")}</Badge>}
                     </h2>
                     {jobs.isLoading ? <p className="muted">Загрузка…</p> : todayJobs.length === 0 ? (
-                      <Card><p className="muted">На сегодня нарядов нет.{tomorrow > 0 ? ` На завтра: ${tomorrow}.` : ""} <Link to="/jobs/mine">Все наряды</Link></p></Card>
+                      <Card><p className="muted">На сегодня заданий нет.{tomorrow > 0 ? ` На завтра: ${tomorrow}.` : ""} <Link to="/jobs/mine">Все задания</Link></p></Card>
                     ) : (
                       <div className="job-list">{todayJobs.map((j) => <JobCard key={j.id} job={j} driver onChanged={refreshJobs} />)}</div>
                     )}
-                    {todayJobs.length > 0 && tomorrow > 0 && <p className="muted small">Ещё нарядов на завтра: {tomorrow}. <Link to="/jobs/mine">Открыть все наряды</Link></p>}
+                    {todayJobs.length > 0 && tomorrow > 0 && <p className="muted small">Ещё заданий на завтра: {tomorrow}. <Link to="/jobs/mine">Открыть все задания</Link></p>}
                   </section>
                 )}
 

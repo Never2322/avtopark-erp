@@ -4,7 +4,7 @@
 Правила:
 - уведомление получает только тот, кто может открыть то, о чём оно (по праву и юрлицу или как автор и исполнитель);
 - сам человек уведомления о своих действиях не получает;
-- создание уведомления не должно ломать само действие: ошибка записи уходит в журнал сервера, обращение или наряд сохраняются;
+- создание уведомления не должно ломать само действие: ошибка записи уходит в журнал сервера, обращение или задание сохраняются;
 - напоминания по срокам (документы, штрафы, аренда, СИЗ, счета) превращаются в уведомления фоновым обходом; ключ
   не даёт сообщить об одном и том же дважды, а если набралось сразу много, приходит одно общее.
 """
@@ -97,7 +97,7 @@ def push(db: Session, user_ids, kind: str, title: str, text_: str = "", url: str
 
 
 def safe(fn):
-    """Событие программы: ошибка подбора получателей или записи не должна ломать само действие (обращение, наряд, покупку)."""
+    """Событие программы: ошибка подбора получателей или записи не должна ломать само действие (обращение, задание, покупку)."""
     @functools.wraps(fn)
     def wrapper(db: Session, *args, **kw):
         try:
@@ -173,24 +173,34 @@ def on_stock_low(db: Session, item, left, actor_id: int | None) -> None:
 
 @safe
 def on_job_saved(db: Session, job, creating: bool, actor_id: int | None) -> None:
-    """Наряд назначен или изменён: водителям этой машины."""
+    """Задание назначено или изменено: водителям этой машины."""
     where = f"{job.job_date.strftime('%d.%m.%Y')}{', ' + job.time_from if job.time_from else ''}"
-    title = ("Новый наряд: " if creating else "Наряд изменён: ") + where
+    title = ("Новое задание: " if creating else "Задание изменено: ") + where
     push(db, drivers_of(db, job.vehicle_id), "job", title, short(f"{job.address}. {job.task}".strip(". "), 300), "/jobs/mine", job.legal_entity_id, actor_id)
 
 
 @safe
 def on_job_cancelled(db: Session, job, state: str, actor_id: int | None) -> None:
-    title = ("Наряд отменён: " if state == "cancelled" else "Наряд снова в работе: ") + job.job_date.strftime("%d.%m.%Y")
+    title = ("Задание отменено: " if state == "cancelled" else "Задание снова в работе: ") + job.job_date.strftime("%d.%m.%Y")
     push(db, drivers_of(db, job.vehicle_id), "job", title, short(job.address, 300), "/jobs/mine", job.legal_entity_id, actor_id)
 
 
 @safe
 def on_job_progress(db: Session, job, what: str, actor_id: int | None) -> None:
-    """Водитель приехал или закончил: тем, кто ведёт наряды."""
+    """Водитель приехал или закончил: тем, кто ведёт задания."""
     plate = job.vehicle.plate if getattr(job, "vehicle", None) else ""
     text_ = short(f"{job.address}. {job.result_note}".strip(". "), 300)
     push(db, users_with(db, "jobs.edit", job.legal_entity_id), "job", f"{what}: {plate}".strip(": "), text_, "/jobs", job.legal_entity_id, actor_id)
+
+
+@safe
+def on_worklog_kind(db: Session, emp: Employee, work_date: dt.date, kind: str, before, after, entity_id: int | None, actor_id: int | None) -> None:
+    """Офис перевёл часы водителя за день в другой тип: водителю сообщаем, что и как изменилась сумма за день."""
+    if emp.user_id is None:
+        return
+    money = lambda x: f"{Decimal(str(x)):,.2f}".replace(",", " ").replace(".", ",")          # noqa: E731
+    title = f"Часы за {work_date.strftime('%d.%m.%Y')} переведены: {'ремонт' if kind == 'repair' else 'работа'}"
+    push(db, {emp.user_id}, "info", title, f"Сумма за день: {money(before)} ₽ → {money(after)} ₽. Изменили в офисе.", "/my-time", entity_id, actor_id)
 
 
 # ---------------------------------------------------------------- напоминания по срокам

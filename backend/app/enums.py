@@ -2,18 +2,32 @@
 """Справочники значений: коды хранятся в базе, подписи показываются людям."""
 
 VEHICLE_STATUSES = {
-    "in_work": "В работе",
-    "in_repair": "На ремонте",
-    "awaiting_repair": "Ожидает ремонта",
-    "parked": "На стоянке",
-    "day_off": "Выходной",
-    "rented": "В аренде",
-    "unused": "Не используется",
-    "written_off": "Списана",
+    "in_work": "На линии",
+    "in_repair": "В ремонте",
 }
-# Для этих статусов причина обязательна: потом по истории должно быть понятно, что произошло.
-STATUS_NEEDS_REASON = {"in_repair", "awaiting_repair", "written_off"}
-STATUS_TERMINAL = {"written_off"}
+# Старые статусы остались только в истории смен статусов (её в базе менять нельзя). В новых записях их нет.
+LEGACY_VEHICLE_STATUSES = {
+    "awaiting_repair": "Ожидает ремонта", "parked": "На стоянке", "day_off": "Выходной",
+    "rented": "В аренде", "unused": "Не используется", "written_off": "Списана",
+}
+# К какому из двух статусов относится старый: ожидание ремонта считается ремонтом, остальное линией.
+LEGACY_STATUS_TO_NEW = {"awaiting_repair": "in_repair", "parked": "in_work", "day_off": "in_work", "rented": "in_work",
+                        "unused": "in_work", "written_off": "in_work"}
+ALL_STATUS_CODES = {**LEGACY_VEHICLE_STATUSES, **VEHICLE_STATUSES}
+
+
+def status_label(code: str | None) -> str:
+    """Название статуса, в том числе старого из истории."""
+    return ALL_STATUS_CODES.get(code or "", code or "")
+
+
+def status_now(code: str | None) -> str:
+    """Старый статус из истории приводит к одному из двух нынешних."""
+    return code if code in VEHICLE_STATUSES else LEGACY_STATUS_TO_NEW.get(code or "", "in_work")
+
+
+# Для этого статуса причина обязательна: потом по истории должно быть понятно, что произошло.
+STATUS_NEEDS_REASON = {"in_repair"}
 
 VEHICLE_CATEGORIES = {"truck": "Грузовой", "special": "Спецтехника", "car": "Легковой", "trailer": "Прицеп", "other": "Прочее"}
 READING_KINDS = {"km": "Пробег, км", "engine_hours": "Моточасы, ч"}
@@ -95,6 +109,19 @@ FUEL_TYPES = {"diesel": "Дизель", "petrol": "Бензин", "gas": "Газ
 # ---------------------------------------------------------------- деньги и справочники (перенос из старой программы)
 COUNTERPARTY_KINDS = {"customer": "Заказчик", "supplier": "Поставщик", "both": "Заказчик и поставщик"}
 TARIFF_UNITS = {"km": "за километр", "hour": "за час", "ton": "за тонну", "trip": "за рейс", "day": "за сутки"}
+TARIFF_KINDS = {"customer": "Для заказчика (цена работы техники)", "work": "Оплата работы водителю", "repair": "Оплата ремонта водителю"}
+PAY_TARIFF_KINDS = ("work", "repair")                     # из них считается заработок
+PAY_TARIFF_UNITS = ("hour", "day")                        # заработок считают за час или за день
+WORKLOG_KINDS = {"work": "Работа", "repair": "Ремонт"}
+WORKLOG_SOURCES = {"driver": "Внёс водитель", "staff": "Внесли в офисе"}
+WORKLOG_BACKDATE_DAYS = 7              # водитель может отметить часы не раньше чем за столько дней; диспетчер и директор — за любой день
+WORKLOG_DRIVER_DELETE_HOURS = 48       # водитель сам убирает свою запись только первые столько часов
+WORKLOG_MAX_HOURS = 24                 # в сутках не больше
+ATTENDANCE_SOURCES = {"driver": "Отметил сам", "staff": "Отметили в офисе"}
+ATTENDANCE_AHEAD_DAYS = 14             # водитель отвечает «выйду / не выйду» не дальше чем на столько дней вперёд
+ATTENDANCE_BACK_DAYS = 7               # офис может поправить ответ не раньше чем за столько дней
+ATTENDANCE_AHEAD_OFFICE_DAYS = 60      # и не дальше чем на столько дней вперёд
+ATTENDANCE_SHOW_DAYS = 7               # сколько дней водитель видит на своей странице
 FINE_PAYERS = {"company": "Платит компания", "driver": "Удерживается с водителя"}
 RENTAL_DIRECTIONS = {"out": "Сдаём в аренду", "in": "Берём в аренду"}
 PAYMENT_KINDS = {"salary": "Зарплата", "advance": "Аванс", "bonus": "Премия", "other": "Прочее", "fine": "Удержание (штраф)"}
@@ -108,11 +135,11 @@ DOC_FULL_NAMES = {"invoice": "Счёт на оплату", "act": "Акт ока
                   "upd": "Универсальный передаточный документ"}
 
 
-# ---------------------------------------------------------------- наряды на день (перенос из старой программы)
+# ---------------------------------------------------------------- технические задания (перенос из старой программы)
 JOB_STATES = {"planned": "Запланирован", "on_site": "На объекте", "done": "Выполнен", "cancelled": "Отменён"}
 JOB_STAGES = {"before": "До работы", "after": "После работы"}
 JOB_MAX_PHOTOS_PER_STAGE = 10
-# Дата наряда не дальше этого числа дней от сегодняшней (защита от опечаток в году)
+# Дата задания не дальше этого числа дней от сегодняшней (защита от опечаток в году)
 JOB_DATE_WINDOW_DAYS = 366
 
 
@@ -169,7 +196,7 @@ BILL_UNPAID_DAYS = 7                     # счёт на ремонт, не оп
 
 # ---------------------------------------------------------------- уведомления и объявления (этап 3в)
 NOTIFICATION_KINDS = {
-    "request": "Обращение", "reply": "Ответ", "announce": "Объявление", "job": "Наряд", "parts": "Куплено", "reminder": "Напоминание",
+    "request": "Обращение", "reply": "Ответ", "announce": "Объявление", "job": "Задание", "parts": "Куплено", "reminder": "Напоминание",
     "stock": "Склад", "info": "Сообщение",
 }
 NOTIFICATION_KEEP_DAYS = 120             # прочитанные уведомления хранятся столько дней

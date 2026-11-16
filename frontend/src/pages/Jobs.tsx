@@ -1,5 +1,5 @@
-// Наряды на день: доска дня для диспетчера («/jobs») и «Мои наряды» для водителя («/jobs/mine»).
-// Создание и правка наряда идут через общую форму разделов (Registry), здесь отметки, состояния и фото.
+// Технические задания: доска дня для диспетчера («/jobs») и «Мои задания» для водителя («/jobs/mine»).
+// Создание и правка задания идут через общую форму разделов (Registry), здесь отметки, состояния и фото.
 import { useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -35,7 +35,7 @@ const hhmm = (iso: string | null) => (iso ? fmtDateTime(iso) : "");
 const weekday = (iso: string) => new Date(iso + "T12:00:00").toLocaleDateString("ru-RU", { weekday: "long" });
 const shift = (iso: string, days: number) => { const d = new Date(iso + "T12:00:00"); d.setDate(d.getDate() + days); return d.toISOString().slice(0, 10); };
 
-/** Всё, что меняет наряд, обновляет и доску, и «Мои наряды», и счётчики на главной. */
+/** Всё, что меняет задание, обновляет и доску, и «Мои задания», и счётчики на главной. */
 export function useRefresh() {
   const qc = useQueryClient();
   return () => { for (const k of ["jobs-day", "jobs-mine", "reg", "dashboard", "driver-home"]) qc.invalidateQueries({ queryKey: [k] }); };
@@ -102,14 +102,14 @@ function PhotoStage({ job, stage, title, canAdd, onChanged }: { job: Job; stage:
       )}
       {removing && (
         <ConfirmModal title="Убрать фото" danger confirmLabel="Убрать" reasonLabel="Причина" reasonRequired={false}
-          text="Фото пропадёт из наряда, но останется в журнале. Причину можно не писать."
+          text="Фото пропадёт из задания, но останется в журнале. Причину можно не писать."
           onConfirm={async (reason) => { await post(`/jobs/photos/${removing.id}/remove`, { reason }); onChanged(); }} onClose={() => setRemoving(null)} />
       )}
     </div>
   );
 }
 
-/* ---------------- карточка наряда ---------------- */
+/* ---------------- карточка задания ---------------- */
 
 function FinishModal({ job, onClose, onDone }: { job: Job; onClose: () => void; onDone: () => void }) {
   const [note, setNote] = useState("");
@@ -121,16 +121,16 @@ function FinishModal({ job, onClose, onDone }: { job: Job; onClose: () => void; 
         return await post<{ queued?: undefined }>(`/jobs/${job.id}/finish`, { note });
       } catch (e) {
         if (!isOffline(e) || !outboxAvailable()) throw e;
-        await enqueue({ kind: "job_finish", title: `Наряд выполнен · ${job.plate} · ${job.address}`, url: `/jobs/${job.id}/finish`, json: { note, at }, job_id: job.id });
+        await enqueue({ kind: "job_finish", title: `Задание выполнено · ${job.plate} · ${job.address}`, url: `/jobs/${job.id}/finish`, json: { note, at }, job_id: job.id });
         return { queued: true as const };
       }
     },
-    onSuccess: (r) => { onDone(); toast.success(r.queued ? "Нет связи: отметка сохранена в телефоне и уйдёт сама" : "Наряд выполнен. Спасибо!"); onClose(); },
+    onSuccess: (r) => { onDone(); toast.success(r.queued ? "Нет связи: отметка сохранена в телефоне и уйдёт сама" : "Задание выполнено. Спасибо!"); onClose(); },
     onError: (e) => toast.error(errorText(e)),
   });
   const noAfter = job.photos.after.length === 0;
   return (
-    <Modal title="Закончить наряд" onClose={onClose} footer={<><Button onClick={onClose}>Отмена</Button><Button variant="primary" loading={finish.isPending} onClick={() => finish.mutate()}>Наряд выполнен</Button></>}>
+    <Modal title="Закончить задание" onClose={onClose} footer={<><Button onClick={onClose}>Отмена</Button><Button variant="primary" loading={finish.isPending} onClick={() => finish.mutate()}>Задание выполнено</Button></>}>
       <div className="stack-sm">
         <div><strong>{job.plate}</strong> · {job.address}</div>
         {noAfter && <Alert tone="warning">Фото «после работы» ещё нет. Лучше сначала сфотографировать результат: после выполнения это можно сделать, но проще сейчас.</Alert>}
@@ -162,7 +162,7 @@ export function JobCard({ job, driver, onEdit, onChanged }: { job: Job; driver: 
       onChanged();
       if (r.queued) toast.success("Нет связи: отметка «приехал» сохранена в телефоне и уйдёт сама. Фото «до работы» можно сделать сейчас");
       else if (v.url.endsWith("/arrive")) toast.success(r.changed === false ? "Отметка уже стоит" : "Отмечено: вы на объекте. Сделайте фото «до работы»");
-      else if (v.url.endsWith("/copy")) toast.success(`Наряд повторён на ${fmtDateLong(r.job.job_date)}`);
+      else if (v.url.endsWith("/copy")) toast.success(`Задание повторено на ${fmtDateLong(r.job.job_date)}`);
     },
     onError: (e) => toast.error(errorText(e)),
   });
@@ -193,7 +193,7 @@ export function JobCard({ job, driver, onEdit, onChanged }: { job: Job; driver: 
           </div>
         )}
         {job.result_note && <div className="job-note"><span className="muted small">Итог:</span> {job.result_note}</div>}
-        {job.archived && <Alert tone="warning">Наряд в архиве{job.archive_reason ? `: ${job.archive_reason}` : ""}</Alert>}
+        {job.archived && <Alert tone="warning">Задание в архиве{job.archive_reason ? `: ${job.archive_reason}` : ""}</Alert>}
         {pend.arrive && <Alert tone="warning">Отметка «Приехал» сохранена в телефоне и ждёт связи</Alert>}
         {pend.finish && <Alert tone="warning">Отметка «Закончил» сохранена в телефоне и ждёт связи</Alert>}
         {pend.failed.map((x) => <Alert key={x.id} tone="error">{x.title}: {x.error}</Alert>)}
@@ -211,7 +211,7 @@ export function JobCard({ job, driver, onEdit, onChanged }: { job: Job; driver: 
           <>
             <span className="spacer" />
             {job.can.state && (
-              <select className="input compact" aria-label="Состояние наряда" value={job.state} disabled={busy}
+              <select className="input compact" aria-label="Состояние задания" value={job.state} disabled={busy}
                 onChange={(e) => run.mutate({ url: `/jobs/${job.id}/state`, body: { state: e.target.value } })}>
                 {STATES.map((s) => <option key={s.v} value={s.v}>{s.l}</option>)}
               </select>
@@ -224,9 +224,9 @@ export function JobCard({ job, driver, onEdit, onChanged }: { job: Job; driver: 
       </div>
       {finishing && <FinishModal job={job} onClose={() => setFinishing(false)} onDone={onChanged} />}
       {voiding && (
-        <ConfirmModal title="Убрать наряд в архив" danger confirmLabel="В архив" reasonLabel="Причина"
-          text="Наряд не удаляется: его можно найти в журнале нарядов и вернуть. Водитель его больше не увидит."
-          onConfirm={async (reason) => { await post(`/jobs/${job.id}/void`, { reason }); onChanged(); toast.success("Наряд в архиве"); }} onClose={() => setVoiding(false)} />
+        <ConfirmModal title="Убрать задание в архив" danger confirmLabel="В архив" reasonLabel="Причина"
+          text="Задание не удаляется: его можно найти в журнале заданий и вернуть. Водитель его больше не увидит."
+          onConfirm={async (reason) => { await post(`/jobs/${job.id}/void`, { reason }); onChanged(); toast.success("Задание в архиве"); }} onClose={() => setVoiding(false)} />
       )}
     </div>
   );
@@ -253,11 +253,11 @@ export function JobsBoard() {
 
   return (
     <>
-      <PageHeader title="Наряды на день" sub="Куда едет каждая машина: адрес, задача, отметки «приехал» и «закончил», фото до и после"
+      <PageHeader title="Технические задания" sub="Куда едет каждая машина: адрес, задача, отметки «приехал» и «закончил», фото до и после"
         actions={<>
           {can("map.view") && <Link className="btn" to={date === todayIso() ? "/map" : `/map?date=${date}`}><MapPin size={16} aria-hidden /> На карте</Link>}
           <Link className="btn" to="/jobs/list">Журнал</Link>
-          {d?.can_create && <Button variant="primary" icon={Plus} onClick={() => setEdit("new")}>Новый наряд</Button>}
+          {d?.can_create && <Button variant="primary" icon={Plus} onClick={() => setEdit("new")}>Новое задание</Button>}
         </>} />
       <div className="toolbar" style={{ marginBottom: 12 }}>
         <Button icon={ChevronLeft} aria-label="Предыдущий день" onClick={() => setDate(shift(date, -1))} />
@@ -272,7 +272,7 @@ export function JobsBoard() {
           <div className="stack">
             {d.stale_total > 0 && (
               <Alert tone="warning">
-                Не закрыто нарядов за прошлые дни: {d.stale_total}. Их нужно закрыть или отменить.{" "}
+                Не закрыто заданий за прошлые дни: {d.stale_total}. Их нужно закрыть или отменить.{" "}
                 <button className="linklike" onClick={() => setShowStale((v) => !v)}>{showStale ? "Скрыть" : "Показать"}</button>
               </Alert>
             )}
@@ -284,7 +284,7 @@ export function JobsBoard() {
               {d.counts.cancelled > 0 && <Badge tone="neutral">Отменено: {d.counts.cancelled}</Badge>}
             </div>
             {d.items.length === 0 ? (
-              <Card><Empty icon={CalendarPlus} title="На этот день нарядов нет">{d.can_create ? "Нажмите «Новый наряд» или повторите вчерашний кнопкой «Повторить на следующий день»." : undefined}</Empty></Card>
+              <Card><Empty icon={CalendarPlus} title="На этот день заданий нет">{d.can_create ? "Нажмите «Новое задание» или повторите вчерашнее кнопкой «Повторить на следующий день»." : undefined}</Empty></Card>
             ) : (
               <div className="job-list">{d.items.map((j) => <JobCard key={j.id} job={j} driver={false} onEdit={(x) => setEdit(asRow(x))} onChanged={refresh} />)}</div>
             )}
@@ -299,7 +299,7 @@ export function JobsBoard() {
   );
 }
 
-/* ---------------- «Мои наряды» (водитель) ---------------- */
+/* ---------------- «Мои задания» (водитель) ---------------- */
 
 export function MyJobs() {
   const q = useQuery({ queryKey: ["jobs-mine"], queryFn: () => get<Mine>("/jobs/mine"), refetchInterval: 60_000 });
@@ -312,18 +312,18 @@ export function MyJobs() {
   ].filter((g) => g.items.length) : [];
   return (
     <>
-      <PageHeader title="Мои наряды" sub="Нажмите «Приехал», когда будете на объекте, сфотографируйте до работы и после, затем «Закончил»" />
+      <PageHeader title="Мои задания" sub="Нажмите «Приехал», когда будете на объекте, сфотографируйте до работы и после, затем «Закончил»" />
       <QueryState q={q}>
         {d && (!d.has_vehicle ? (
-          <Card><Empty icon={Truck} title="За вами не закреплена техника">Попросите диспетчера закрепить за вами машину, тогда здесь появятся наряды.</Empty></Card>
+          <Card><Empty icon={Truck} title="За вами не закреплена техника">Попросите диспетчера закрепить за вами машину, тогда здесь появятся задания.</Empty></Card>
         ) : groups.length === 0 ? (
-          <Card><Empty icon={CalendarCheck} title="Нарядов на сегодня и завтра нет">Когда диспетчер добавит наряд, он появится здесь.</Empty></Card>
+          <Card><Empty icon={CalendarCheck} title="Заданий на сегодня и завтра нет">Когда диспетчер добавит задание, оно появится здесь.</Empty></Card>
         ) : (
           <div className="stack">
             <OutboxList />
             {groups.map((g) => (
               <section key={g.title} className="stack-sm">
-                <h2 className="row" style={{ gap: 8 }}>{g.title} <Badge tone={g.tone}>{g.items.length} {plural(g.items.length, "наряд", "наряда", "нарядов")}</Badge></h2>
+                <h2 className="row" style={{ gap: 8 }}>{g.title} <Badge tone={g.tone}>{g.items.length} {plural(g.items.length, "задание", "задания", "заданий")}</Badge></h2>
                 <div className="job-list">{g.items.map((j) => <JobCard key={j.id} job={j} driver onChanged={refresh} />)}</div>
               </section>
             ))}

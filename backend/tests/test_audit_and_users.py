@@ -14,7 +14,7 @@ def actions(c, **params):
 
 
 def test_audit_is_append_only_in_database(make_client, world):
-    make_client("dir_a").post(f"/vehicles/{world.va1}/status", {"status": "parked"})
+    make_client("dir_a").post(f"/vehicles/{world.va1}/status", {"status": "in_repair", "reason": "Поломка"})
     with session_factory()() as db:
         assert db.scalar(select(AuditLog.id).limit(1))
         for sql in ("UPDATE audit_log SET action = 'x'", "DELETE FROM audit_log", "UPDATE audit_log SET user_login = 'кто-то другой'"):
@@ -25,7 +25,7 @@ def test_audit_is_append_only_in_database(make_client, world):
 
 def test_main_actions_are_logged_with_who_and_where(make_client, world):
     boss = make_client("dir_a")
-    boss.post(f"/vehicles/{world.va1}/status", {"status": "parked"})
+    boss.post(f"/vehicles/{world.va1}/status", {"status": "in_repair", "reason": "Поломка"})
     boss.post(f"/vehicles/{world.va1}/readings", {"kind": "km", "value": 1100})
     req = boss.post("/requests", {"vehicle_id": world.va1, "title": "Проверка журнала"}).json()
     boss.post(f"/requests/{req['id']}/transition", {"to_status": "diagnostics"})
@@ -37,7 +37,7 @@ def test_main_actions_are_logged_with_who_and_where(make_client, world):
             "waybill.close"} <= got
     row = make_client("admin").get("/audit", params={"action": "vehicle.status"}).json()["items"][0]
     assert row["user_login"] == "dir_a" and row["entity_type"] == "vehicle" and row["entity_id"] == world.va1
-    assert row["legal_entity_id"] == world.A and row["ip"] and row["details"]["to_status"] == "parked"
+    assert row["legal_entity_id"] == world.A and row["ip"] and row["details"]["to_status"] == "in_repair"
     assert row["action_label"] == "Сменён статус техники"
 
 
@@ -90,8 +90,8 @@ def test_user_with_link_to_employee_and_deactivation_kills_sessions(make_client,
 def test_audit_requires_permission_and_filters_work(make_client, world):
     assert make_client("mech_a").get("/audit").status_code == 403
     boss = make_client("dir_a")
-    boss.post(f"/vehicles/{world.va1}/status", {"status": "parked"})
-    boss.post(f"/vehicles/{world.va2}/status", {"status": "parked"})
+    boss.post(f"/vehicles/{world.va1}/status", {"status": "in_repair", "reason": "Поломка"})
+    boss.post(f"/vehicles/{world.va2}/status", {"status": "in_repair", "reason": "Поломка"})
     assert boss.get("/audit", params={"entity_type": "vehicle", "entity_id": world.va1, "action": "vehicle.status"}).json()["total"] == 1
     assert boss.get("/audit", params={"user": "dir_a"}).json()["total"] >= 2
     assert boss.get("/audit", params={"action": "vehicle.status", "date_from": "2000-01-01", "date_to": "2999-01-01"}).json()["total"] == 2

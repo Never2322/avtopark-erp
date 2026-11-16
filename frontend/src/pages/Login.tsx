@@ -4,6 +4,7 @@ import { LogIn, Truck } from "lucide-react";
 import { useAuth } from "../auth";
 import { Alert, Button, Field } from "../ui";
 import { errorText } from "../api";
+import { ThemeToggle } from "../components/ThemeToggle";
 
 export function Login() {
   const { login, sessionExpired } = useAuth();
@@ -30,6 +31,7 @@ export function Login() {
 
   return (
     <div className="login-wrap">
+      <ThemeToggle />
       <form className="card login-card stack" onSubmit={submit} noValidate>
         <div className="row" style={{ gap: 12 }}>
           <span className="brand" style={{ padding: 0 }}><span className="logo"><Truck size={18} aria-hidden /></span></span>

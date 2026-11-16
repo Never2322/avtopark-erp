@@ -239,9 +239,10 @@ def test_export_csv(world, make_client):
     r = c.get("/timesheet/export.csv", params={"month": MONTH, "legal_entity_id": world.A})
     assert r.status_code == 200 and "text/csv" in r.headers["content-type"]
     lines = r.content.decode("utf-8-sig").splitlines()
-    assert lines[0].startswith("№;ФИО;Должность;1;2;3") and lines[0].endswith("Дней;Часов;Неявок, дней")
+    # после «Неявок» идут столбцы заработка (у кого есть право на часы): работа и ремонт в часах и рублях, итого
+    assert lines[0].startswith("№;ФИО;Должность;1;2;3") and "Дней;Часов;Неявок, дней;Работа, ч;Ремонт, ч;Работа, ₽;Ремонт, ₽;Итого, ₽" in lines[0]
     mine = next(ln for ln in lines if "Первый" in ln)
-    assert ";Я 6;Б;" in mine and mine.endswith(";1;6;1")
+    assert ";Я 6;Б;" in mine and ";1;6;1;0,00;0,00;0,00;0,00;0,00" in mine
     assert make_client("disp_a").get("/timesheet/export.csv", params={"month": MONTH}).status_code == 403          # диспетчер выгружать не может
     assert make_client("dir_b").get("/timesheet/export.csv", params={"month": MONTH, "legal_entity_id": world.A}).status_code == 403
     with session_factory()() as db:

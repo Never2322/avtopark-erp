@@ -22,7 +22,7 @@ from app.common import fail, like, org_today, page_of, utcnow
 from app.db import get_db
 from app.deps import Principal, current, entity_filter, require
 from app.enums import (ALL_DOC_KINDS, DOC_EXPIRING_DAYS, DOC_KINDS_NO_EXPIRY, EMPLOYEE_DOC_KINDS, EMPLOYEE_SENSITIVE_KINDS,
-                       FUEL_TYPES, OWNERSHIP, READING_KINDS, REQUEST_STATUSES, VEHICLE_DOC_KINDS, VEHICLE_STATUSES)
+                       FUEL_TYPES, OWNERSHIP, READING_KINDS, REQUEST_STATUSES, VEHICLE_DOC_KINDS, VEHICLE_STATUSES, status_label)
 from app.models import (DossierDoc, DossierDocFile, Employee, EmploymentAssignment, LegalEntity, ServiceRequest, StoredFile,
                         Vehicle, VehicleAssignment, VehicleReading, VehicleSpecs, VehicleStatusHistory)
 from app.routers.employees import can_see, employee_entities, full_name, out as employee_out, visible_filter
@@ -510,7 +510,7 @@ def history(db: Session, p: Principal, v: Vehicle) -> dict:
                            for r in readings]
         hist = db.scalars(select(VehicleStatusHistory).where(VehicleStatusHistory.vehicle_id == v.id)
                           .order_by(VehicleStatusHistory.changed_at.desc(), VehicleStatusHistory.id.desc()).limit(8)).all()
-        out["statuses"] = [{"status": h.status, "status_label": VEHICLE_STATUSES[h.status], "reason": h.reason, "changed_at": h.changed_at.isoformat()}
+        out["statuses"] = [{"status": h.status, "status_label": status_label(h.status), "reason": h.reason, "changed_at": h.changed_at.isoformat()}
                            for h in hist]
     if p.can("requests.view", v.legal_entity_id):
         reqs = db.scalars(select(ServiceRequest).where(ServiceRequest.vehicle_id == v.id).order_by(ServiceRequest.id.desc()).limit(5)).all()

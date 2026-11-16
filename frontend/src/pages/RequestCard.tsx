@@ -61,7 +61,7 @@ function TransitionModal({ r, to, onClose }: { r: Detail; to: { status: string; 
           <Field label="Заодно сменить статус машины" error={f.errors.vehicle_status} hint={suggested ? `Обычно здесь выбирают «${types.data?.statuses.find((s) => s.code === suggested)?.label}»` : undefined}>
             <select className="input" value={f.values.vehicle_status} onChange={(e) => f.set("vehicle_status", e.target.value)}>
               <option value="">Не менять (сейчас: {types.data?.statuses.find((s) => s.code === r.vehicle.status)?.label ?? r.vehicle.status})</option>
-              {types.data?.statuses.filter((s) => s.code !== r.vehicle.status && s.code !== "written_off").map((s) => <option key={s.code} value={s.code}>{s.label}</option>)}
+              {types.data?.statuses.filter((s) => s.code !== r.vehicle.status).map((s) => <option key={s.code} value={s.code}>{s.label}</option>)}
             </select>
           </Field>
         )}
@@ -158,7 +158,7 @@ export function RequestCard() {
         <div className="stack">
           <Card title="О чём обращение">
             <dl className="kv">
-              <dt>Машина</dt><dd><Link to={`/vehicles/${r.vehicle.id}`}><strong>{r.vehicle.plate}</strong></Link> <span className="muted">{r.vehicle.name}</span> <VehicleStatus code={r.vehicle.status} label={({ in_work: "В работе", in_repair: "На ремонте", awaiting_repair: "Ожидает ремонта", parked: "На стоянке", day_off: "Выходной", rented: "В аренде", unused: "Не используется", written_off: "Списана" } as Record<string, string>)[r.vehicle.status] ?? r.vehicle.status} /></dd>
+              <dt>Машина</dt><dd><Link to={`/vehicles/${r.vehicle.id}`}><strong>{r.vehicle.plate}</strong></Link> <span className="muted">{r.vehicle.name}</span> <VehicleStatus code={r.vehicle.status} label={({ in_work: "На линии", in_repair: "В ремонте" } as Record<string, string>)[r.vehicle.status] ?? r.vehicle.status} /></dd>
               <dt>Описание</dt><dd>{r.description || <span className="muted">не заполнено</span>}</dd>
               <dt>План работ</dt><dd>{r.planned_work || <span className="muted">не заполнен</span>}</dd>
               <dt>Кто сообщил</dt><dd>{r.reporter ?? "—"}</dd>

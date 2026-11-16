@@ -31,15 +31,21 @@ def test_same_status_does_not_duplicate_history(make_client, world):
     assert len(history(c, world.va1)) == n
 
 
-def test_written_off_is_final_and_unknown_status_rejected(make_client, world):
+def test_only_two_statuses_and_archived_vehicle_is_final(make_client, world):
     c = make_client("dir_a")
     assert c.post(f"/vehicles/{world.va3}/status", {"status": "flying"}).status_code == 422
-    assert c.post(f"/vehicles/{world.va3}/status", {"status": "written_off", "reason": "Авария, не подлежит восстановлению"}).status_code == 200
-    assert c.post(f"/vehicles/{world.va3}/status", {"status": "in_work"}).status_code == 409
+    for old in ("written_off", "parked", "day_off", "rented", "unused", "awaiting_repair"):       # старые статусы убраны
+        assert c.post(f"/vehicles/{world.va3}/status", {"status": old, "reason": "проверка"}).status_code == 422, old
+    types = c.get("/vehicles/types").json()
+    assert [(s["code"], s["label"]) for s in types["statuses"]] == [("in_work", "На линии"), ("in_repair", "В ремонте")]
+    assert c.post(f"/vehicles/{world.va3}/status", {"status": "in_repair"}).json()["code"] == "reason_required"   # для ремонта нужна причина
+    assert c.post(f"/vehicles/{world.va3}/status", {"status": "in_repair", "reason": "Авария"}).status_code == 200
+    assert c.post(f"/vehicles/{world.va3}/archive", {"reason": "Списана"}).status_code == 200
+    assert c.post(f"/vehicles/{world.va3}/status", {"status": "in_work"}).status_code == 409                       # в архиве статус не меняется
 
 
 def test_status_history_cannot_be_rewritten_in_database(make_client, world):
-    make_client("mech_a").post(f"/vehicles/{world.va1}/status", {"status": "parked"})
+    make_client("mech_a").post(f"/vehicles/{world.va1}/status", {"status": "in_repair", "reason": "Поломка"})
     with session_factory()() as db:
         for sql in ("UPDATE vehicle_status_history SET reason = 'нет'", "DELETE FROM vehicle_status_history"):
             with pytest.raises(DBAPIError):

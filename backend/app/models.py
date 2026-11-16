@@ -19,7 +19,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, deferred, mapped_column, relationship
 
 from app.db import Base
-from app.enums import (MAINTENANCE_KINDS, OUTBOX_CHANNELS, OUTBOX_STATES, TIRE_SEASONS, VEHICLE_FINANCE_KINDS, VEHICLE_REPAIR_KINDS, ALL_DOC_KINDS, ANNOUNCEMENT_AUDIENCES, NOTIFICATION_KINDS, CALENDAR_COLORS, CALENDAR_REMIND_MAX, EMPLOYEE_EVENT_KINDS, BACKUP_STATUSES, BILL_KINDS, BILL_STATUSES, CASH_ACCOUNT_KINDS, CASH_OP_KINDS, COUNTERPARTY_KINDS, DOC_TYPES, FINE_PAYERS,
+from app.enums import (ATTENDANCE_SOURCES, TARIFF_KINDS, WORKLOG_KINDS, WORKLOG_SOURCES, ALL_STATUS_CODES, MAINTENANCE_KINDS, OUTBOX_CHANNELS, OUTBOX_STATES, TIRE_SEASONS, VEHICLE_FINANCE_KINDS, VEHICLE_REPAIR_KINDS, ALL_DOC_KINDS, ANNOUNCEMENT_AUDIENCES, NOTIFICATION_KINDS, CALENDAR_COLORS, CALENDAR_REMIND_MAX, EMPLOYEE_EVENT_KINDS, BACKUP_STATUSES, BILL_KINDS, BILL_STATUSES, CASH_ACCOUNT_KINDS, CASH_OP_KINDS, COUNTERPARTY_KINDS, DOC_TYPES, FINE_PAYERS,
                        JOB_STAGES, JOB_STATES, ORDER_STATUSES, VAT_RATES,
                        PAYMENT_KINDS, RENTAL_DIRECTIONS, TARIFF_UNITS, TIMESHEET_CODES, READING_KINDS, READING_SOURCES, REQUEST_PRIORITIES, REQUEST_STATUSES, STOCK_MOVE_KINDS,
                        REVIEW_STATES, VEHICLE_CATEGORIES, VEHICLE_STATUSES, WAYBILL_SHIFTS, WAYBILL_STATUSES, check_in)
@@ -165,6 +165,9 @@ class Employee(Audited, Base):
     note: Mapped[str] = mapped_column(Text, default="")
     user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), unique=True)
     archived_at: Mapped[dt.datetime | None] = mapped_column(TS)
+    # по каким тарифам считается заработок: за работу и за ремонт (справочник «Тарифы»)
+    work_tariff_id: Mapped[int | None] = mapped_column(ForeignKey("tariffs.id", ondelete="SET NULL"))
+    repair_tariff_id: Mapped[int | None] = mapped_column(ForeignKey("tariffs.id", ondelete="SET NULL"))
     assignments: Mapped[list["EmploymentAssignment"]] = relationship(back_populates="employee", cascade="all, delete-orphan")
 
 
@@ -234,7 +237,7 @@ class VehicleStatusHistory(Base):
     changed_at: Mapped[dt.datetime] = mapped_column(TS, server_default=func.now())
     changed_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
     request_id: Mapped[int | None] = mapped_column(ForeignKey("service_requests.id"))
-    __table_args__ = (CheckConstraint(check_in("status", VEHICLE_STATUSES), name="status"),)
+    __table_args__ = (CheckConstraint(check_in("status", ALL_STATUS_CODES), name="status"),)
 
 
 class VehicleAssignment(Base):
@@ -556,7 +559,10 @@ class Tariff(Audited, Voidable, Base):
     rate: Mapped[Decimal] = mapped_column(Money, default=0, server_default="0")
     min_amount: Mapped[Decimal] = mapped_column(Money, default=0, server_default="0")
     note: Mapped[str] = mapped_column(Text, default="", server_default="")
+    # customer — цена работы техники для заказчика; work и repair — сколько платим водителю за час или за день
+    kind: Mapped[str] = mapped_column(String(10), default="customer", server_default="customer")
     __table_args__ = (
+        CheckConstraint(check_in("kind", TARIFF_KINDS), name="kind"),
         CheckConstraint(check_in("unit", TARIFF_UNITS), name="unit"),
         CheckConstraint("rate >= 0 AND min_amount >= 0", name="amounts"),
         Index("uq_tariffs_name_active", text("lower(name)"), unique=True, postgresql_where=text("archived_at IS NULL")),
@@ -961,6 +967,53 @@ class RepairBillFile(Base):
 
 
 # ---------------------------------------------------------------- табель и СИЗ
+
+class WorkLog(Audited, Voidable, Base):
+    """Сколько часов человек работал или ремонтировал в день. Ставка запоминается в записи на момент внесения:
+    если тариф потом изменится, прошлые дни не пересчитываются. Сумма не хранится, её считает программа (services/payroll.py)."""
+    __tablename__ = "work_logs"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    legal_entity_id: Mapped[int] = mapped_column(ForeignKey("legal_entities.id"), index=True)
+    employee_id: Mapped[int] = mapped_column(ForeignKey("employees.id"), index=True)
+    work_date: Mapped[dt.date] = mapped_column(Date)
+    kind: Mapped[str] = mapped_column(String(8))
+    hours: Mapped[Decimal] = mapped_column(Numeric(4, 1))
+    vehicle_id: Mapped[int | None] = mapped_column(ForeignKey("vehicles.id"))
+    description: Mapped[str] = mapped_column(String(500), default="", server_default="")
+    tariff_id: Mapped[int | None] = mapped_column(ForeignKey("tariffs.id", ondelete="SET NULL"))
+    tariff_name: Mapped[str] = mapped_column(String(160), default="", server_default="")
+    unit: Mapped[str] = mapped_column(String(8), default="hour", server_default="hour")
+    rate: Mapped[Decimal] = mapped_column(Money, default=0, server_default="0")
+    source: Mapped[str] = mapped_column(String(8), default="staff", server_default="staff")
+    client_id: Mapped[str] = mapped_column(String(64), default="", server_default="")
+    __table_args__ = (
+        CheckConstraint(check_in("kind", WORKLOG_KINDS), name="kind"),
+        CheckConstraint(check_in("source", WORKLOG_SOURCES), name="source"),
+        CheckConstraint("unit IN ('hour', 'day')", name="unit"),
+        CheckConstraint("hours > 0 AND hours <= 24", name="hours"),
+        CheckConstraint("rate >= 0", name="rate"),
+        Index("ix_work_logs_period", "legal_entity_id", "work_date"),
+        Index("ix_work_logs_employee_date", "employee_id", "work_date"),
+        Index("uq_work_logs_client", "created_by_id", "client_id", unique=True, postgresql_where=text("client_id <> ''")),
+    )
+
+
+class ShiftPlan(Audited, Base):
+    """Ответ сотрудника «выйду на работу в этот день или нет». Одна строка на человека и день; ответ можно менять, поэтому
+    история изменений остаётся в журнале действий. Строки нет, если человек ещё не ответил."""
+    __tablename__ = "shift_plans"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    employee_id: Mapped[int] = mapped_column(ForeignKey("employees.id"), index=True)
+    plan_date: Mapped[dt.date] = mapped_column(Date)
+    will_come: Mapped[bool] = mapped_column(Boolean)
+    reason: Mapped[str] = mapped_column(String(300), default="", server_default="")
+    source: Mapped[str] = mapped_column(String(8), default="driver", server_default="driver")
+    __table_args__ = (
+        CheckConstraint(check_in("source", ATTENDANCE_SOURCES), name="source"),
+        Index("uq_shift_plans_employee_date", "employee_id", "plan_date", unique=True),
+        Index("ix_shift_plans_date", "plan_date"),
+    )
+
 
 class TimesheetMark(Audited, Base):
     """Одна отметка в табеле: сотрудник, день и код («Я», «Б»…), у «Я» и «С» бывают часы. Пустая клетка = нет строки."""
