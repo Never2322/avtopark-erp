@@ -74,12 +74,15 @@ def my_time(month: str = "", p: Principal = Depends(current), db: Session = Depe
     for l in logs:
         tot[f"{l.kind}_h"] += Decimal(l.hours)
         tot[l.kind] += amt[l.id]
+    tonnage = pay.ton_fields(pay.ton_pay(db, emp, first, last))
+    tot["work"] += Decimal(str(tonnage["tons_amount"]))          # работа за тонны входит в сумму за работу
     changed = set(db.scalars(select(AuditLog.entity_id).where(AuditLog.action == "worklog.day_kind", AuditLog.entity_type == "worklog",
                                                               AuditLog.entity_id.in_([l.id for l in logs])))) if logs else set()
     return {
         "month": first.strftime("%Y-%m"), "title": f"{ts.MONTHS[first.month - 1]} {first.year}",
         "items": [_item(l, amt, plates, changed) for l in logs],
         "totals": {**{k: pay.num(v) for k, v in tot.items()}, "total": pay.num(tot["work"] + tot["repair"])},
+        "tonnage": tonnage if tonnage["by_tons"] else None,
         "tariffs": {"work": _tariff_card(db, emp, "work"), "repair": _tariff_card(db, emp, "repair")},
     }
 

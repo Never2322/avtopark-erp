@@ -3,7 +3,7 @@ import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import {
   BellRing, Building2, CalendarCheck, CalendarClock, CalendarDays, ChevronDown, ClipboardList, DatabaseBackup, Gauge, LayoutDashboard, LogOut, Menu, ScrollText, Search, ShieldCheck,
-  Truck, User as UserIcon, UserCheck, UserCog, UserSquare2, Users, UsersRound, Wrench, FolderOpen, Fuel, NotebookPen, ShoppingCart, ReceiptText, Megaphone, Newspaper, Boxes, ArrowLeftRight, BarChart3, FileUp, Hourglass, MapPin, Send, Weight, type LucideIcon,
+  Truck, User as UserIcon, UserCheck, UserCog, UserSquare2, Users, UsersRound, Wrench, FolderOpen, Fuel, NotebookPen, ShoppingCart, ReceiptText, Megaphone, Newspaper, Boxes, ArrowLeftRight, BarChart3, FileUp, Hourglass, ListOrdered, MapPin, Send, Weight, type LucideIcon,
 } from "lucide-react";
 import { ConnectionBar, useOutboxSync } from "./Outbox";
 import { BellMenu, useNotifSummary } from "./Bell";
@@ -13,7 +13,7 @@ import { get } from "../api";
 import { SECTIONS } from "../sections";
 import { Empty } from "../ui";
 
-interface Item { to: string; label: string; icon: LucideIcon; any: string[]; end?: boolean; badge?: "pending" | "reminders" | "news"; unless?: string[]; all?: string[]; feature?: "tonnage" }
+interface Item { to: string; label: string; icon: LucideIcon; any: string[]; end?: boolean; badge?: "pending" | "reminders" | "news"; unless?: string[]; all?: string[]; feature?: "tonnage" | "hauls" }
 const sectionItems = (...keys: string[]): Item[] =>
   keys.map((k) => SECTIONS.find((x) => x.key === k)!).map((x) => ({ to: x.path, label: x.label, icon: x.icon, any: [`${x.key}.view`] }));
 
@@ -90,6 +90,7 @@ const NAV: { title: string; items: Item[] }[] = [
     title: "Тоннаж",
     items: [
       { to: "/tonnage", label: "Тоннаж", icon: Weight, any: ["weigh_tickets.view_own"], unless: ["weigh_tickets.view"], feature: "tonnage", end: true },
+      { to: "/hauls", label: "Счётчик ходок", icon: ListOrdered, any: ["hauls.use_own"], feature: "hauls", end: true },
       ...sectionItems("weigh_tickets"),
       { to: "/reports/tonnage", label: "Тоннаж за месяц", icon: BarChart3, any: ["weigh_tickets.view"], all: ["reports.view"] },
     ],

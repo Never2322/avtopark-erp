@@ -1045,6 +1045,24 @@ class ShiftPlan(Audited, Base):
     )
 
 
+class HaulMark(Base):
+    """Одна ходка в личном счётчике водителя самосвала. Это его личный калькулятор, чтобы не запутаться за день: в отчёты, табель,
+    журнал действий и карточку сотрудника записи не попадают, видит их только сам водитель. Ходку, нажатую случайно, водитель убирает
+    совсем. Время запоминается в момент нажатия с часовым поясом телефона (tz_min), день (local_date) считается по месту, где он был."""
+    __tablename__ = "haul_marks"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    employee_id: Mapped[int] = mapped_column(ForeignKey("employees.id"))
+    marked_at: Mapped[dt.datetime] = mapped_column(TS)
+    local_date: Mapped[dt.date] = mapped_column(Date)
+    tz_min: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    client_id: Mapped[str] = mapped_column(String(64), default="", server_default="")
+    created_at: Mapped[dt.datetime] = mapped_column(TS, server_default=func.now(), nullable=False)
+    __table_args__ = (
+        Index("ix_haul_marks_employee_day", "employee_id", "local_date", "marked_at"),
+        Index("uq_haul_marks_client", "employee_id", "client_id", unique=True, postgresql_where=text("client_id <> ''")),
+    )
+
+
 class TimesheetMark(Audited, Base):
     """Одна отметка в табеле: сотрудник, день и код («Я», «Б»…), у «Я» и «С» бывают часы. Пустая клетка = нет строки."""
     __tablename__ = "timesheet_marks"

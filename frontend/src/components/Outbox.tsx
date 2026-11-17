@@ -2,13 +2,13 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
-import { Camera, CalendarCheck, CloudOff, Fuel, Route as RouteIcon, Send, Trash2, UploadCloud, Weight, type LucideIcon } from "lucide-react";
+import { Camera, CalendarCheck, CloudOff, Fuel, ListOrdered, Route as RouteIcon, Send, Trash2, UploadCloud, Weight, type LucideIcon } from "lucide-react";
 import { discard, flush, setOutboxUser, useOutbox, type OutboxItem, type OutboxKind } from "../outbox";
 import { useAuth } from "../auth";
 import { fmtDateTime, plural } from "../format";
 import { Alert, Badge, Button, Card, ConfirmModal } from "../ui";
 
-const ICONS: Record<OutboxKind, LucideIcon> = { trip: RouteIcon, fuel: Fuel, ticket: Weight, job_arrive: CalendarCheck, job_finish: CalendarCheck, job_photos: Camera };
+const ICONS: Record<OutboxKind, LucideIcon> = { trip: RouteIcon, fuel: Fuel, ticket: Weight, job_arrive: CalendarCheck, job_finish: CalendarCheck, job_photos: Camera, haul: ListOrdered };
 const SYNC_EVERY_MS = 30_000;
 
 export function useOnline() {

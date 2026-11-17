@@ -16,7 +16,7 @@ export interface Me {
   legal_entities: { id: number; name: string; short_name: string }[];
   csrf_token: string;
   org_timezone: string;
-  features?: { tonnage: boolean };
+  features?: { tonnage: boolean; hauls: boolean };
 }
 
 interface AuthState {

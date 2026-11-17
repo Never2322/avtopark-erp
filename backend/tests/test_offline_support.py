@@ -123,7 +123,7 @@ def test_driver_home_basics_and_permissions(world, make_client):
     v = h["vehicles"][0]
     assert v["status"] == "in_work" and v["current_km"] == 1000.0 and v["requests"] == [] and v["fuel"] is None
     assert h["name"] == "Тест"
-    assert h["can"] == {"requests": True, "waybills": True, "trip": True, "fuel": True, "jobs": True, "reading": True, "tonnage": False, "status": True}
+    assert h["can"] == {"requests": True, "waybills": True, "trip": True, "fuel": True, "jobs": True, "reading": True, "tonnage": False, "status": True, "hauls": True}
     for login in ("mech_a", "disp_a", "dir_a", "acc_a", "emp_a", "store_a"):               # сотрудникам кабинет водителя не нужен
         assert make_client(login).get("/driver/home").status_code == 403, login
 

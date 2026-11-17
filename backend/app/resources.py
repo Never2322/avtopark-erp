@@ -8,7 +8,7 @@ from sqlalchemy import and_, case, func, select
 
 from app.common import num, org_today
 from app.enums import (MAINTENANCE_KINDS, TIRE_SEASONS, VEHICLE_FINANCE_KINDS, VEHICLE_REPAIR_KINDS, CALENDAR_COLORS, CALENDAR_REMIND_MAX, EMPLOYEE_EVENT_KINDS, EMPLOYEE_EVENT_MONEY_KINDS, REMINDER_LEAD_DAYS, PPE_SOON_DAYS, PPE_WEAR_MAX_MONTHS, PART_UNITS, CASH_ACCOUNT_KINDS, CASH_OP_KINDS, COUNTERPARTY_KINDS, DOC_FULL_NAMES, DOC_TYPES, ENTRY_LATE_DAYS, FINE_PAYERS,
-                       FUEL_MAX_LITERS, JOB_DATE_WINDOW_DAYS, JOB_STATES, ORDER_STATUSES, PAYMENT_KINDS, RENTAL_DIRECTIONS, TARIFF_KINDS, TARIFF_UNITS, PAY_TARIFF_KINDS, PAY_TARIFF_UNITS, WORKLOG_BACKDATE_DAYS, WORKLOG_KINDS, WORKLOG_SOURCES,
+                       FUEL_MAX_LITERS, JOB_DATE_WINDOW_DAYS, JOB_STATES, ORDER_STATUSES, PAYMENT_KINDS, RENTAL_DIRECTIONS, TARIFF_KINDS, TARIFF_UNITS, WORK_TARIFF_UNITS, PAY_TARIFF_KINDS, PAY_TARIFF_UNITS, WORKLOG_BACKDATE_DAYS, WORKLOG_KINDS, WORKLOG_SOURCES,
                        STOCK_UNITS, VAT_RATES)
 from app.models import (ControlEvent, MaintenanceItem, VehicleFinance, VehicleRepair, VehicleTire, CalendarEvent, EmployeeEvent, CashAccount, CashOp, Constant, Counterparty, Document, Employee, EmployeePayment, EntryPhoto, Fine, FuelCard,
                         FuelFill, WeighTicket, WorkLog, Job, JobPhoto, MiscExpense, Order, PartCatalog, PpeIssue, PpeNorm, Rental, StockItem, Tariff, Trip, Vehicle, Warehouse)
@@ -81,8 +81,10 @@ register(R(
 ))
 
 def _tariff_prepare(db, p, v, obj, m):
-    if m.get("kind") in PAY_TARIFF_KINDS and m.get("unit") not in PAY_TARIFF_UNITS:
-        raise Invalid({"unit": "Оплату работы и ремонта считают за час или за сутки"})
+    if m.get("kind") == "work" and m.get("unit") not in WORK_TARIFF_UNITS:
+        raise Invalid({"unit": "Оплату работы считают за час, за сутки или за тонну"})
+    if m.get("kind") == "repair" and m.get("unit") not in PAY_TARIFF_UNITS:
+        raise Invalid({"unit": "Оплату ремонта считают за час или за сутки"})
     if m.get("kind") in PAY_TARIFF_KINDS:
         v["min_amount"] = Decimal(0)               # минимальная сумма нужна только тарифам для заказчика
 
@@ -102,7 +104,7 @@ register(R(
         F("kind", "Вид", "enum", options=TARIFF_KINDS, default="customer", required=True, filter=True, locked=True,
           hint="«Оплата работы» и «Оплата ремонта» считают заработок водителя. Вид после добавления не меняется"),
         F("unit", "Ед. измерения", "enum", options=TARIFF_UNITS, default="hour", required=True, filter=True,
-          hint="Для оплаты работы и ремонта: за час или за сутки"),
+          hint="Оплата работы: за час, за сутки или за тонну (мусоровозам: по талонам весов). Оплата ремонта: за час или за сутки"),
         F("rate", "Ставка, ₽", "money", required=True, default="0"),
         F("min_amount", "Сумма, ₽", "money", default="0", hint="Минимальная сумма за выезд: меньше не берём. 0 — без минимума", show_if=("kind", "customer")),
         F("note", "Заметка", "textarea", list=False),

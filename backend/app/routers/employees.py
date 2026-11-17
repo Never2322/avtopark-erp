@@ -100,7 +100,7 @@ def out(db: Session, p: Principal, e: Employee, detailed: bool = False) -> dict:
             if sc:                                                          # сколько человек уже заработал в этом месяце (по внесённым часам)
                 first = org_today().replace(day=1)
                 data["pay"]["earned"] = {"month": first.strftime("%Y-%m"), "title": f"{ts_svc.MONTHS[first.month - 1]} {first.year}",
-                                         **pay_svc.month_totals(db, e.id, first, first.replace(day=ts_svc.month_days(first)), sc.cond(WorkLog.legal_entity_id))}
+                                         **pay_svc.month_totals(db, e.id, first, first.replace(day=ts_svc.month_days(first)), sc.cond(WorkLog.legal_entity_id), scope=sc)}
         data["assignments"] = [{"id": a.id, "legal_entity_id": a.legal_entity_id, "legal_entity": ents.get(a.legal_entity_id, ""),
                                 "position": a.position, "started_on": a.started_on.isoformat() if a.started_on else None,
                                 "ended_on": a.ended_on.isoformat() if a.ended_on else None} for a in sorted(e.assignments, key=lambda a: a.id)]

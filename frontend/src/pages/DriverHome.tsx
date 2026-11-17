@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { CalendarCheck, ClipboardList, Fuel, Gauge, Hourglass, Route as RouteIcon, Truck, Wallet, Weight, Wrench } from "lucide-react";
+import { CalendarCheck, ClipboardList, Fuel, Gauge, Hourglass, ListOrdered, Route as RouteIcon, Truck, Wallet, Weight, Wrench } from "lucide-react";
 import { get } from "../api";
 import { useAuth } from "../auth";
 import { fmtDate, fmtDateTime, fmtMoney, fmtNum, plural } from "../format";
@@ -21,10 +21,13 @@ interface HomeVehicle {
   requests: { id: number; number: number; title: string; status: string; status_label: string; priority: string; priority_label: string }[];
   fuel: { date: string; liters: number; per100: number | null; norm: number | null; over_pct: number | null } | null;
 }
-export interface Earned { month: string; title: string; work_h: number; repair_h: number; work: number; repair: number; total: number; no_rate: number; entries: number }
+export interface Earned {
+  month: string; title: string; work_h: number; repair_h: number; work: number; repair: number; total: number; no_rate: number; entries: number;
+  by_tons?: boolean; tons?: number; tons_rate?: number; tons_amount?: number; tons_pending?: number;   // мусоровозы: работа по тоннам из талонов весов
+}
 interface Home {
   today: string; name: string; has_vehicle: boolean; vehicles: HomeVehicle[];
-  can: { requests: boolean; waybills: boolean; trip: boolean; fuel: boolean; jobs: boolean; reading: boolean; tonnage?: boolean; status?: boolean };
+  can: { requests: boolean; waybills: boolean; trip: boolean; fuel: boolean; jobs: boolean; reading: boolean; tonnage?: boolean; status?: boolean; hauls?: boolean };
   earned?: Earned | null;
 }
 
@@ -84,11 +87,17 @@ function EarnedBlock({ e }: { e: Earned }) {
       <h2 className="row" style={{ gap: 8 }}><Wallet size={18} aria-hidden /> Заработано за {e.title} <Link className="small" to="/my-time">Мои часы</Link></h2>
       <div className="kpi-row earned">
         <Card><span className="muted small">Всего</span><span className="pay-big">{fmtMoney(e.total)} ₽</span><span className="muted small">до вычета налогов</span></Card>
-        <Card><span className="muted small">Работа</span><span className="pay-big">{fmtNum(e.work_h)} ч</span><span className="small">{fmtMoney(e.work)} ₽</span></Card>
+        {e.by_tons ? (
+          <Card><span className="muted small">Тонны</span><span className="pay-big">{fmtNum(e.tons, 2)} т</span><span className="small">{fmtMoney(e.tons_amount)} ₽ · {fmtMoney(e.tons_rate)} ₽ за тонну</span></Card>
+        ) : (
+          <Card><span className="muted small">Работа</span><span className="pay-big">{fmtNum(e.work_h)} ч</span><span className="small">{fmtMoney(e.work)} ₽</span></Card>
+        )}
         <Card><span className="muted small">Ремонт</span><span className="pay-big">{fmtNum(e.repair_h)} ч</span><span className="small">{fmtMoney(e.repair)} ₽</span></Card>
       </div>
       {e.no_rate > 0 && <Alert tone="warning">По {e.no_rate} {plural(e.no_rate, "записи", "записям", "записям")} часов нет тарифа, поэтому они пока без суммы. Попросите директора назначить вам тариф: сумма посчитается сама.</Alert>}
-      {e.entries === 0 && <p className="muted small">Часов за этот месяц пока нет. Когда их внесёт директор или вы сами, здесь появится сумма.</p>}
+      {e.by_tons && (e.tons_pending ?? 0) > 0 && <Alert tone="info">Талонов без веса: {e.tons_pending}. Они оплатятся, когда вес внесут.</Alert>}
+      {e.by_tons && <p className="muted small">Работа считается по тоннам с талонов весов, часы отдельно не оплачиваются.</p>}
+      {e.entries === 0 && !e.by_tons && <p className="muted small">Часов за этот месяц пока нет. Когда их внесёт директор или вы сами, здесь появится сумма.</p>}
     </section>
   );
 }
@@ -131,6 +140,7 @@ export function DriverHome() {
                   <Button variant="primary" size="lg" icon={Fuel} disabled={!h.can.fuel || !entries.data?.can.fuel} onClick={() => setForm("fuel")}>Заправка</Button>
                   {h.can.tonnage && <Button variant="primary" size="lg" icon={Weight} disabled={!tonnage.data?.can.create || !tonnage.data.vehicles.length} onClick={() => setTicket(true)}>Талон весов</Button>}
                   {h.can.requests && <Link className="btn lg" to={single ? `/requests?new=1&vehicle=${single.id}` : "/requests?new=1"}><Wrench size={16} aria-hidden /> Обращение</Link>}
+                  {h.can.hauls && <Link className="btn lg" to="/hauls"><ListOrdered size={16} aria-hidden /> Счётчик ходок</Link>}
                   {h.can.waybills && <Link className="btn lg" to="/waybills"><ClipboardList size={16} aria-hidden /> Путевые листы</Link>}
                   {can("worklog.view_own") && <Link className="btn lg" to="/my-time"><Hourglass size={16} aria-hidden /> Мои часы</Link>}
                 </div>

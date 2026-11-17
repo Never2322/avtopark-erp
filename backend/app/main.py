@@ -149,11 +149,11 @@ def create_app() -> FastAPI:
         return {"status": "ok"}
 
     from app.routers import (audit_log, auth, backups, bills, dashboard, dossier, driver, employees, entries, jobs, legal_entities, purchases, readings,
-                             request_parts, requests_, roles, roster, timesheet, trade, users, vehicles, waybills, ppe, calendar_view, reminders, notifications, announcements, stock, reports, readings_import, map_, control, channels, payroll, attendance, tonnage)
+                             request_parts, requests_, roles, roster, timesheet, trade, users, vehicles, waybills, ppe, calendar_view, reminders, notifications, announcements, stock, reports, readings_import, map_, control, channels, payroll, attendance, tonnage, hauls)
     from app import resources  # noqa: F401  (описания разделов регистрируются при импорте)
     from app.registry import RESOURCES, build_router, options_router
     for module in (auth, legal_entities, users, roles, employees, vehicles, readings, requests_, waybills, dashboard,
-                   dossier, audit_log, backups, trade, jobs, entries, roster, driver, request_parts, purchases, bills, ppe, timesheet, calendar_view, reminders, notifications, announcements, stock, reports, readings_import, map_, control, channels, payroll, attendance, tonnage):
+                   dossier, audit_log, backups, trade, jobs, entries, roster, driver, request_parts, purchases, bills, ppe, timesheet, calendar_view, reminders, notifications, announcements, stock, reports, readings_import, map_, control, channels, payroll, attendance, tonnage, hauls):
         app.include_router(module.router, prefix="/api")
     app.include_router(announcements.news, prefix="/api")
     for res in RESOURCES.values():
