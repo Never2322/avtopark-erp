@@ -1,11 +1,12 @@
-// Печатная форма табеля: альбомный лист А4, месяц целиком, расшифровка использованных кодов и подписи.
+// Печатная форма табеля: альбомный лист А4, сумма заработка за каждый день месяца, итоги и подписи.
 import { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, Printer } from "lucide-react";
 import { get } from "../api";
+import { fmtMoney } from "../format";
 import { Alert, Button, QueryState } from "../ui";
-import { fmtH, type Sheet, useTimesheetEntity } from "./Timesheet";
+import { cellMoney, fmtH, type Sheet, useTimesheetEntity } from "./Timesheet";
 
 export function TimesheetPrint() {
   const nav = useNavigate();
@@ -16,9 +17,6 @@ export function TimesheetPrint() {
     if (d) document.title = `Табель ${d.title}`;
     return () => { document.title = "Автопарк ERP"; };
   }, [d]);
-
-  const usedCodes = d ? d.codes.filter((c) => d.rows.some((r) => Object.values(r.marks).some((m) => m.code === c.code))) : [];
-  const total = d ? d.rows.reduce((a, r) => ({ days: a.days + r.days, hours: a.hours + r.hours, absent: a.absent + r.absent }), { days: 0, hours: 0, absent: 0 }) : null;
 
   return (
     <div className="print-root">
@@ -34,15 +32,15 @@ export function TimesheetPrint() {
           {d && (
             <div className="sheet ts-print">
               <div className="center"><strong>{d.legal_entity.full_name || d.legal_entity.name}</strong></div>
-              <h1 className="center" style={{ textTransform: "uppercase" }}>Табель учёта рабочего времени</h1>
-              <div className="center">за {d.title.toLowerCase()}</div>
+              <h1 className="center" style={{ textTransform: "uppercase" }}>Табель заработка</h1>
+              <div className="center">за {d.title.toLowerCase()}, рублей</div>
               <table className="ptable ts-ptable">
                 <thead>
                   <tr>
                     <th rowSpan={2} style={{ width: 28 }}>№</th>
                     <th rowSpan={2} style={{ textAlign: "left", minWidth: 150 }}>Сотрудник</th>
                     {d.days.map((x) => <th key={x.n} className={x.off ? "off" : ""}>{x.n}</th>)}
-                    <th rowSpan={2}>Дней</th><th rowSpan={2}>Часов</th><th rowSpan={2}>Неявок</th>
+                    <th rowSpan={2}>Часов</th><th rowSpan={2}>Итого, ₽</th>
                   </tr>
                   <tr>{d.days.map((x) => <th key={x.n} className={`wd ${x.off ? "off" : ""}`}>{x.wd}</th>)}</tr>
                 </thead>
@@ -51,24 +49,21 @@ export function TimesheetPrint() {
                     <tr key={r.employee_id}>
                       <td className="c">{i + 1}</td>
                       <td style={{ textAlign: "left" }}>{r.name}{r.position && <div className="cap">{r.position}</div>}</td>
-                      {d.days.map((x) => <td key={x.n} className={`c ts-p ${x.off ? "off" : ""}`}>{r.marks[String(x.n)]?.text ?? ""}</td>)}
-                      <td className="num">{r.days}</td><td className="num">{fmtH(r.hours)}</td><td className="num">{r.absent}</td>
+                      {d.days.map((x) => <td key={x.n} className={`c ts-p ${x.off ? "off" : ""}`}>{cellMoney(r.days[String(x.n)]?.total ?? 0)}</td>)}
+                      <td className="num">{r.totals.work_h + r.totals.repair_h ? fmtH(Math.round((r.totals.work_h + r.totals.repair_h) * 10) / 10) : ""}</td>
+                      <td className="num">{r.totals.total ? fmtMoney(r.totals.total) : ""}</td>
                     </tr>
                   ))}
-                  {total && d.rows.length > 1 && (
-                    <tr className="strong">
-                      <td colSpan={2 + d.days.length} style={{ textAlign: "right" }}>Итого</td>
-                      <td className="num">{total.days}</td><td className="num">{fmtH(Math.round(total.hours * 10) / 10)}</td><td className="num">{total.absent}</td>
-                    </tr>
-                  )}
+                  <tr className="strong">
+                    <td colSpan={2} style={{ textAlign: "right" }}>Итого за день</td>
+                    {d.days.map((x) => <td key={x.n} className={`c ts-p ${x.off ? "off" : ""}`}>{cellMoney(d.day_totals[String(x.n)] ?? 0)}</td>)}
+                    <td className="num">{fmtH(Math.round((d.totals.work_h + d.totals.repair_h) * 10) / 10)}</td><td className="num">{fmtMoney(d.totals.total)}</td>
+                  </tr>
                 </tbody>
               </table>
-              {usedCodes.length > 0 && (
-                <p className="cap" style={{ marginTop: 6 }}>
-                  Условные обозначения: {usedCodes.map((c) => `${c.code} — ${c.label.toLowerCase()}`).join("; ")}.
-                  Явка без указанных часов считается за {d.default_hours} ч.
-                </p>
-              )}
+              <p className="cap" style={{ marginTop: 6 }}>
+                В клетке дня сумма заработка за этот день по часам работы и ремонта (часы × тариф). Суммы до вычета налогов. Пустая клетка: часов за день не внесено.
+              </p>
               <div className="signs three">
                 <div className="sign"><span>Ответственный</span><span className="line" /><span className="decode">(должность, подпись, расшифровка)</span></div>
                 <div className="sign"><span>Руководитель</span><span className="line" /><span className="decode">(подпись, расшифровка)</span></div>

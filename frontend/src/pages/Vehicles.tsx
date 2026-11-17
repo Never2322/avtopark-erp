@@ -14,7 +14,7 @@ export interface Insurance { kind: string; label: string; until: string }
 export interface VehicleRow {
   id: number; legal_entity_id: number; legal_entity: string; plate: string; internal_no: string; make: string; model: string;
   vin: string | null; year: number | null; status: string; status_label: string; current_km: number | null; current_hours: number | null;
-  archived: boolean; driver: { id: number; name: string } | null; next_service?: string | null; insurance?: Insurance[] | null;
+  archived: boolean; tonnage?: boolean; driver: { id: number; name: string } | null; next_service?: string | null; insurance?: Insurance[] | null;
   type: { id: number; name: string; category: string; primary_reading: string };
 }
 
@@ -59,17 +59,19 @@ function CreateVehicle({ onClose }: { onClose: () => void }) {
   const entities = me!.legal_entities.filter((e) => can("vehicles.create", e.id));
   // юрлицо по умолчанию: выбранное в переключателе вверху
   const f = useForm({ legal_entity_id: String((entities.find((x) => x.id === entityId) ?? entities[0])?.id ?? ""), type_id: "", plate: "", make: "", model: "", internal_no: "", vin: "", year: "", initial_km: "", initial_hours: "", note: "" });
+  const [tonnage, setTonnage] = useState<boolean | null>(null);   // null — ещё не трогали: по умолчанию включено для мусоровоза и самосвала
   const m = useMutation({
     mutationFn: () => post<{ id: number }>("/vehicles", {
       legal_entity_id: Number(f.values.legal_entity_id), type_id: Number(f.values.type_id), plate: f.values.plate, make: f.values.make, model: f.values.model,
       internal_no: f.values.internal_no, vin: f.values.vin, year: numOrNull(f.values.year), initial_km: numOrNull(f.values.initial_km),
-      initial_hours: numOrNull(f.values.initial_hours), note: f.values.note,
+      initial_hours: numOrNull(f.values.initial_hours), note: f.values.note, tonnage: tonnageOn,
     }),
     onSuccess: (v) => { qc.invalidateQueries(); toast.success("Техника добавлена"); onClose(); nav(`/vehicles/${v.id}`); },
     onError: f.fail,
   });
   const submit = (e: FormEvent) => { e.preventDefault(); f.clear(); m.mutate(); };
   const t = types.data?.items.find((x) => String(x.id) === f.values.type_id);
+  const tonnageOn = tonnage ?? /мусоровоз|самосвал/i.test(t?.name ?? "");
   return (
     <Modal title="Добавить технику" onClose={onClose} wide footer={<>
       <Button onClick={onClose}>Отмена</Button>
@@ -106,6 +108,10 @@ function CreateVehicle({ onClose }: { onClose: () => void }) {
             <input className="input" inputMode="decimal" value={f.values.initial_hours} onChange={(e) => f.set("initial_hours", e.target.value)} />
           </Field>
           <Field label="Заметка" full error={f.errors.note}><textarea className="input" value={f.values.note} onChange={(e) => f.set("note", e.target.value)} /></Field>
+          <div className="full">
+            <label className="check"><input type="checkbox" checked={tonnageOn} onChange={(e) => setTonnage(e.target.checked)} /> <span>Вести тоннаж</span></label>
+            <div className="muted small">Водитель этой машины увидит вкладку «Тоннаж» и будет присылать фото талонов весов. Для мусоровозов и самосвалов включено само.</div>
+          </div>
         </div>
       </form>
     </Modal>

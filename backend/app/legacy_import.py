@@ -32,6 +32,7 @@ from app.models import (CalendarEvent, CashAccount, CashOp, ControlEvent, Consta
                         ServiceRequest, ServiceRequestEvent, StockItem, StockMove, Tariff, TimesheetMark, Trip, Vehicle, VehicleAssignment,
                         VehicleFinance, VehicleReading, VehicleRepair, VehicleSpecs, VehicleStatusHistory, VehicleTire, VehicleType,
                         Waybill, Warehouse)
+from app.services import weigh as weigh_svc
 from app.services.readings import recompute_current
 from app.common import org_today
 
@@ -397,6 +398,8 @@ class Importer:
                         year=r.get("made_year"), status=status, archived_at=dt.datetime.now(dt.timezone.utc) if r.get("status") == "written_off" else None,
                         status_changed_at=moment(r.get("work_state_at"), self.tz) or moment(r.get("created_at"), ZoneInfo("UTC")),
                         note=note)
+            vtype = self.db.get(VehicleType, v.type_id)
+            v.tonnage = bool(vtype and weigh_svc.type_tonnage(vtype))
             self.audit_times(v, r)
             self.add("vehicles", r, v)
             active[plate] = v.id

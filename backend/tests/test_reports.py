@@ -102,7 +102,7 @@ def seed_may(world):
 
 def test_list_depends_on_rights(make_client, world):
     names = lambda who: {x["name"] for x in make_client(who).get("/reports").json()["items"]}          # noqa: E731
-    assert names("dir_a") == {"month", "mileage", "fuel", "costs", "repairs", "waybill_fuel", "downtime", "orders", "day"}
+    assert names("dir_a") == {"month", "mileage", "fuel", "costs", "repairs", "waybill_fuel", "downtime", "orders", "salary", "tonnage", "day"}
     assert names("acc_a") >= {"costs", "repairs", "orders", "mileage"}
     disp = names("disp_a")
     assert {"month", "mileage", "fuel", "downtime", "orders"} <= disp and not ({"costs", "repairs"} & disp)

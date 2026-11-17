@@ -30,6 +30,7 @@ from app.registry import org_tz
 from app.routers.dossier import read_uploads, store
 from app.routers.requests_ import visible as request_visible
 from app.services import bills as svc
+from app.services import ocr
 from app.services import parts as parts_svc
 from app.services.numbering import next_number
 from app.services.words import amount_in_words
@@ -498,7 +499,10 @@ def write_items(db: Session, bill: RepairBill, items: list[dict]) -> None:
 
 
 def attach_files(db: Session, p: Principal, bill: RepairBill, uploads: list[UploadFile]) -> list[str]:
-    prepared = read_uploads(uploads, images_only=False, required=False)
+    return attach_prepared(db, p, bill, read_uploads(uploads, images_only=False, required=False))
+
+
+def attach_prepared(db: Session, p: Principal, bill: RepairBill, prepared: list) -> list[str]:
     if not prepared:
         return []
     have = set(db.scalars(select(StoredFile.sha256).join(RepairBillFile, RepairBillFile.file_id == StoredFile.id).where(
@@ -562,29 +566,148 @@ def prefill(request: int, p: Principal = Depends(require("bills.create")), db: S
                       for x in rows]}
 
 
+def lookups_for_reading(db: Session, p: Principal):
+    scope = p.scope("bills.create")
+    vehicles = list(db.scalars(select(Vehicle).where(scope.cond(Vehicle.legal_entity_id), Vehicle.archived_at.is_(None))))
+    suppliers = [(c.id, c.inn) for c in db.scalars(select(Counterparty).where(Counterparty.archived_at.is_(None), Counterparty.inn != ""))]
+    return scope, vehicles, suppliers
+
+
+def plain(found: dict) -> dict:
+    return {k: (float(v) if isinstance(v, Decimal) else v) for k, v in found.items()}
+
+
 @router.post("/bills/recognize")
 def recognize(file: UploadFile = File(...), p: Principal = Depends(require("bills.create")), db: Session = Depends(get_db)):
-    """Подсказка для формы: прочитать счёт поставщика из PDF. Ничего не сохраняет, файл прикладывается позже вместе со счётом."""
+    """Подсказка для формы: прочитать счёт поставщика из PDF, скана или фото. Ничего не сохраняет, файл прикладывается позже вместе со счётом."""
     from app.services import files as filesvc
     prepared = filesvc.prepare(file.filename, file.file.read(filesvc.MAX_FILE_BYTES + 1))
-    if prepared.content_type != "application/pdf":
-        return {"found": {}, "how": "photo", "readable": False,
-                "note": "Это фото: чтение цифр с фотографий появится позже. Заполните поля вручную, фото приложится к счёту."}
-    text = svc.pdf_text(prepared.data)
+    is_pdf = prepared.content_type == "application/pdf"
+    text, how = svc.extract_text([prepared])
     if not text.strip():
-        return {"found": {}, "how": "pdf", "readable": False, "note": "В PDF нет текста: это скан. Заполните поля вручную, файл приложится к счёту."}
-    scope = p.scope("bills.create")
-    vehicles = [(v.id, v.plate) for v in db.scalars(select(Vehicle).where(scope.cond(Vehicle.legal_entity_id), Vehicle.archived_at.is_(None)))]
-    suppliers = [(c.id, c.inn) for c in db.scalars(select(Counterparty).where(Counterparty.archived_at.is_(None), Counterparty.inn != ""))]
-    found = svc.parse_bill_text(text, vehicles, suppliers)
-    for k in ("total", "vat"):
-        if k in found:
-            found[k] = float(found[k])
+        if is_pdf:
+            return {"found": {}, "how": "pdf", "readable": False,
+                    "note": "В PDF нет текста (это скан), и прочитать его не удалось. Заполните поля вручную, файл приложится к счёту."}
+        why = "Фото прочитать не удалось: снимите ровнее и крупнее." if ocr.available() else "Чтение фото на этом сервере не включено."
+        return {"found": {}, "how": "photo", "readable": False, "note": f"{why} Заполните поля вручную, фото приложится к счёту."}
+    _scope, vehicles, suppliers = lookups_for_reading(db, p)
+    found = plain(svc.parse_bill_text(text, [(v.id, v.plate) for v in vehicles], suppliers))
+    found.pop("buyer_inn", None)
+    shown = "pdf" if how == "pdf" else "photo" if how == "photo" else "pdf"
     if not found:
-        return {"found": {}, "how": "pdf", "readable": False,
-                "note": "Из файла не удалось прочитать данные (другой вид счёта). Заполните поля вручную."}
-    return {"found": found, "how": "pdf", "readable": True,
-            "note": "Поля заполнены из файла. Проверьте номер, дату, сумму и поставщика: программа может ошибиться."}
+        return {"found": {}, "how": shown, "readable": False, "note": "Из файла не удалось прочитать данные (другой вид счёта). Заполните поля вручную."}
+    tail = "" if how == "pdf" else " Это распознавание со скана или фото: в цифрах бывают ошибки, сверьте с бумагой."
+    return {"found": found, "how": shown, "readable": True,
+            "note": "Поля заполнены из файла. Проверьте номер, дату, сумму и поставщика: программа может ошибиться." + tail}
+
+
+# ---------------------------------------------------------------- «Загрузить счёт»: прочитать файл и внести счёт самой
+
+READ_LABELS = {"number": "номер счёта", "bill_date": "дата счёта", "total": "сумма", "supplier_name": "поставщик", "legal_entity_id": "юрлицо"}
+
+
+@router.post("/bills/auto")
+def auto_bill(files: list[UploadFile] = File(default=[]), note: str = Form(""), legal_entity_id: int | None = Form(default=None),
+              p: Principal = Depends(require("bills.create")), db: Session = Depends(get_db)):
+    """Человек прикладывает только файл счёта (PDF, скан, фото) и, если хочет, заметку. Программа читает номер, дату, сумму, НДС,
+    поставщика и юрлицо (по ИНН покупателя) и вносит счёт. Если что-то не прочиталось или сумму со скана не удалось подтвердить,
+    счёт НЕ вносится: ответ несёт прочитанное, а сайт открывает форму, где остаётся дописать и нажать «Внести счёт»."""
+    prepared = read_uploads(files, images_only=False, required=True)
+    if len(prepared) > BILL_MAX_FILES:
+        raise fail(422, "too_many_files", f"К счёту можно приложить не больше {BILL_MAX_FILES} файлов", "files")
+    note = (note or "").strip()
+    if len(note) > 500:
+        raise fail(422, "too_long", "Заметка длиннее 500 знаков", "note")
+    text, how = svc.extract_text(prepared)
+    scope, vehicles, suppliers = lookups_for_reading(db, p)
+    found = svc.parse_bill_text(text, [(v.id, v.plate) for v in vehicles], suppliers) if text.strip() else {}
+    ents = list(db.scalars(select(LegalEntity).where(LegalEntity.archived_at.is_(None), scope.cond(LegalEntity.id)).order_by(LegalEntity.name)))
+    read_any = bool(found)
+
+    # юрлицо: выбор человека, иначе покупатель из счёта (по ИНН), иначе юрлицо машины, иначе единственное доступное
+    buyer = [e for e in ents if e.inn and e.inn == found.get("buyer_inn")]
+    veh = next((v for v in vehicles if v.id == found.get("vehicle_id")), None)
+    entity, problems = None, []
+    if legal_entity_id is not None:
+        if legal_entity_id not in {e.id for e in ents}:
+            raise fail(403, "forbidden", "Нет права вносить счета по этому юрлицу")
+        entity = legal_entity_id
+        if buyer and buyer[0].id != entity:
+            problems.append(f"в счёте покупатель «{buyer[0].name}», а выбрано другое юрлицо")
+    elif len(buyer) == 1:
+        entity = buyer[0].id
+    elif veh is not None:
+        entity = veh.legal_entity_id
+    elif len(ents) == 1:
+        entity = ents[0].id
+    if veh is not None and entity is not None and veh.legal_entity_id != entity:
+        found.pop("vehicle_id", None)                      # машина другого юрлица: только подсказка, не привязываем
+    if entity is not None:
+        found["legal_entity_id"] = entity
+    # необязательные реквизиты с явным мусором (искажены при распознавании) отбрасываются, а не мешают внести счёт
+    for k, (lengths, _hint) in DIGITS.items():
+        if found.get(k) and (not str(found[k]).isdigit() or len(str(found[k])) not in lengths):
+            found.pop(k)
+
+    missing = [k for k in ("number", "bill_date", "total") if not found.get(k)]
+    if not (found.get("supplier_name") or found.get("supplier_id")):
+        missing.append("supplier_name")
+    if entity is None:
+        missing.append("legal_entity_id")
+
+    def reply(created: bool, text_note: str, **extra) -> dict:
+        return {"created": created, "bill": None, "duplicate": None, "found": plain(found), "missing": missing, "how": how, "readable": read_any,
+                "confirmed": confirmed, "note": text_note, "errors": {}, **extra}
+
+    confirmed = False
+    if how == "none":
+        if ocr.available():
+            return reply(False, "Не удалось прочитать счёт: на фото или скане не нашлось текста. Заполните данные вручную, файлы уже приложены.")
+        return reply(False, "Чтение фото и сканов на этом сервере не включено, а в файле нет текста. Заполните данные вручную, файлы уже приложены.")
+    if missing:
+        names = ", ".join(READ_LABELS[k] for k in missing)
+        return reply(False, f"Не удалось прочитать: {names}. Впишите это в форму и нажмите «Внести счёт», файлы уже приложены.")
+    d = dt.date.fromisoformat(found["bill_date"])
+    if d > today() + dt.timedelta(days=30):
+        problems.append("дата счёта в будущем, возможно, прочитана с ошибкой")
+    confirmed, why = svc.confirm_total(text, found, how)
+    if not confirmed:
+        problems.append(why)
+    if problems:
+        return reply(False, "Счёт прочитан, но его не стоит вносить без проверки: " + "; ".join(problems) + ". Проверьте данные и нажмите «Внести счёт».")
+
+    total = svc.to_money(found["total"], allow_zero=False)
+    twin = db.scalar(select(RepairBill).where(RepairBill.legal_entity_id == entity, RepairBill.archived_at.is_(None), RepairBill.bill_date == d,
+                                              func.lower(RepairBill.number) == str(found["number"]).lower(), RepairBill.total == total))
+    if twin is not None:
+        return reply(False, f"Такой счёт уже внесён: № {twin.number}.", duplicate={"id": twin.id, "number": twin.number})
+
+    body = {"kind": "uploaded", "legal_entity_id": entity, "number": str(found["number"]), "bill_date": found["bill_date"], "total": str(total), "note": note}
+    for k in SUPPLIER_FIELDS + ("basis", "supplier_id", "vehicle_id", "vat_pct"):
+        if found.get(k) not in (None, ""):
+            body[k] = found[k]
+    if found.get("vat") is not None:
+        body["vat"] = str(found["vat"])
+    try:
+        values, _items, _auto = validate(db, p, merged(None, BillIn.model_validate(body), None), "uploaded", None, "bills.create")
+    except ValidationError as e:
+        return reply(False, "Данные счёта не прошли проверку. Исправьте отмеченное и нажмите «Внести счёт».", errors=pydantic_fields(e))
+    except HTTPException as e:
+        d_ = e.detail if isinstance(e.detail, dict) else {}
+        if e.status_code == 403:
+            raise
+        errs = {d_["field"]: d_.get("message", "Проверьте значение")} if d_.get("field") else {}
+        return reply(False, d_.get("message", "Данные счёта не прошли проверку.") + " Исправьте и нажмите «Внести счёт».", errors=errs)
+    b = RepairBill(kind="uploaded", created_by_id=p.id, updated_by_id=p.id, **values)
+    db.add(b)
+    db.flush()
+    names = attach_prepared(db, p, b, prepared)
+    audit.log(db, p, "bill.create", "bill", b.id, b.legal_entity_id, kind="uploaded", files=names, auto_read=how, **describe(db, b))
+    db.commit()
+    db.refresh(b)
+    src = {"pdf": "Счёт прочитан из текста PDF.", "scan": f"Счёт прочитан со скана ({why}).", "photo": f"Счёт прочитан с фото ({why})."}[how]
+    return reply(True, src + " Сверьте номер, дату и сумму с бумагой.",
+                 bill={"id": b.id, "number": b.number, "total": float(b.total), "supplier_name": b.supplier_name, "bill_date": b.bill_date.isoformat()})
 
 
 @router.get("/bills/files/{fid}")

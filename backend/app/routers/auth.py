@@ -12,6 +12,7 @@ from app.config import get_settings
 from app.db import get_db
 from app.deps import COOKIE, Principal, client_ip, current_even_if_password_temporary
 from app.models import Employee, LegalEntity, LoginAttempt, Role, User, UserRole, UserSession
+from app.services import weigh as weigh_svc
 from app.security import DUMMY_HASH, hash_password, new_token, password_problem, token_hash, verify_password
 
 router = APIRouter(prefix="/auth", tags=["Вход"])
@@ -45,6 +46,8 @@ def me_payload(db: Session, p: Principal) -> dict:
         "legal_entities": [{"id": e.id, "name": e.name, "short_name": e.short_name or e.name} for e in entities if visible.allows(e.id)],
         "csrf_token": p.session.csrf_token,
         "org_timezone": s.org_timezone,
+        # что включено именно этому человеку, а не его роли: вкладка «Тоннаж» нужна, когда за ним закреплена машина с галочкой «Вести тоннаж»
+        "features": {"tonnage": weigh_svc.has_tonnage(db, p)},
     }
 
 

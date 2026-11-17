@@ -29,17 +29,39 @@ def pay_tariff(db: Session, emp: Employee, kind: str) -> Tariff | None:
 
 
 def snapshot(db: Session, emp: Employee, kind: str) -> dict:
-    """Что записать в строку часов: какой тариф и какая ставка действовали в этот момент (без тарифа — ставка 0)."""
+    """Что записать в строку часов: какой тариф и какая ставка действовали в этот момент (без тарифа — ставка 0).
+    Тариф берётся из карточки сотрудника (по виду «работа» или «ремонт»)."""
     t = pay_tariff(db, emp, kind)
     if t is None:
-        return {"tariff_id": None, "tariff_name": "", "unit": "hour", "rate": Decimal(0)}
-    return {"tariff_id": t.id, "tariff_name": t.name, "unit": t.unit, "rate": t.rate}
+        return {"tariff_id": None, "tariff_name": "", "unit": "hour", "rate": Decimal(0), "tariff_manual": False}
+    return {"tariff_id": t.id, "tariff_name": t.name, "unit": t.unit, "rate": t.rate, "tariff_manual": False}
+
+
+def snapshot_of(t: Tariff) -> dict:
+    """То же, но по тарифу, который выбрал человек при внесении часов."""
+    return {"tariff_id": t.id, "tariff_name": t.name, "unit": t.unit, "rate": t.rate, "tariff_manual": True}
+
+
+def pickable(db: Session) -> list[Tariff]:
+    """Тарифы, из которых офис выбирает оплату за запись часов: любые действующие, считаемые за час или за сутки.
+    Сначала «Оплата работы» и «Оплата ремонта», потом остальные (например, тарифы для заказчика)."""
+    order = {"work": 0, "repair": 1}
+    rows = db.scalars(select(Tariff).where(Tariff.archived_at.is_(None), Tariff.unit.in_(PAY_TARIFF_UNITS)))
+    return sorted(rows, key=lambda t: (order.get(t.kind, 2), (t.name or "").lower()))
+
+
+def pick_group(kind: str) -> str:
+    return {"work": "Оплата работы", "repair": "Оплата ремонта"}.get(kind, "Другие тарифы")
+
+
+def rate_str(rate, unit: str) -> str:
+    return f"{money(rate):,.2f}".replace(",", " ").replace(".", ",").replace(",00", "") + (" ₽/час" if unit == "hour" else " ₽/день")
 
 
 def rate_text(log) -> str:
     if log.tariff_id is None and not log.rate:
         return "нет тарифа"
-    return f"{money(log.rate):,.2f}".replace(",", " ").replace(".", ",").replace(",00", "") + (" ₽/час" if log.unit == "hour" else " ₽/день")
+    return rate_str(log.rate, log.unit)
 
 
 def amounts(db: Session, logs: list[WorkLog]) -> dict[int, Decimal]:
@@ -61,6 +83,73 @@ def amounts(db: Session, logs: list[WorkLog]) -> dict[int, Decimal]:
             out[l.id] = money(l.rate) if first_of.get((l.employee_id, l.work_date, l.kind)) == l.id else Decimal(0)
         else:
             out[l.id] = money(Decimal(l.hours) * Decimal(l.rate))
+    return out
+
+
+def month_totals(db: Session, employee_id: int, first: dt.date, last: dt.date, cond=None) -> dict:
+    """Заработано за период: часы и суммы по работе и ремонту и общий итог (убранные в архив записи не считаются).
+    cond: ограничение по юрлицам, если смотрит сотрудник офиса, которому разрешены не все. «Нет тарифа» — сколько записей без ставки."""
+    stmt = select(WorkLog).where(WorkLog.employee_id == employee_id, WorkLog.work_date >= first, WorkLog.work_date <= last,
+                                 WorkLog.archived_at.is_(None))
+    if cond is not None:
+        stmt = stmt.where(cond)
+    logs = list(db.scalars(stmt))
+    amt = amounts(db, logs)
+    tot = {"work_h": Decimal(0), "repair_h": Decimal(0), "work": Decimal(0), "repair": Decimal(0)}
+    for l in logs:
+        tot[f"{l.kind}_h"] += Decimal(l.hours)
+        tot[l.kind] += amt[l.id]
+    out = {k: num(v) for k, v in tot.items()}
+    out["total"] = num(tot["work"] + tot["repair"])
+    out["no_rate"] = sum(1 for l in logs if l.tariff_id is None)
+    out["entries"] = len(logs)
+    return out
+
+
+def _day_amounts(logs: list) -> dict[int, Decimal]:
+    """Суммы записей одного человека за один день, если все записи дня перед глазами (для предварительного расчёта)."""
+    first: dict[str, int] = {}
+    for l in sorted(logs, key=lambda x: x.id):
+        if l.unit == "day":
+            first.setdefault(l.kind, l.id)
+    return {l.id: (money(l.rate) if first.get(l.kind) == l.id else Decimal(0)) if l.unit == "day" else money(Decimal(l.hours) * Decimal(l.rate)) for l in logs}
+
+
+class _Draft:
+    """Запись, которой ещё нет в базе: нужна только для предварительного расчёта суммы."""
+    def __init__(self, id_, kind, unit, rate, hours):
+        self.id, self.kind, self.unit, self.rate, self.hours = id_, kind, unit, rate, hours
+
+
+def preview_entry(db: Session, *, emp: Employee, work_date: dt.date, kind: str, hours, tariff_id: int | None, exclude_id: int | None, allows) -> dict:
+    """Сколько выйдет по записи часов и за весь день у человека, если её сохранить. Ничего не пишет.
+    allows(legal_entity_id) — какие юрлица может видеть тот, кто спрашивает: в итог дня попадают только они."""
+    t, source = None, "none"
+    if tariff_id:
+        t = db.get(Tariff, tariff_id)
+        if t is None or t.archived_at is not None or t.unit not in PAY_TARIFF_UNITS:
+            return {"ok": False, "message": "Выберите тариф из списка"}
+        source = "chosen"
+    else:
+        t = pay_tariff(db, emp, kind) if kind in WORKLOG_KINDS else None
+        source = "card" if t is not None else "none"
+    try:
+        h = Decimal(str(hours).replace(",", ".")) if str(hours or "").strip() else None
+        h = h if h is not None and h.is_finite() and 0 < h <= WORKLOG_MAX_HOURS else None
+    except Exception:
+        h = None
+    day = [l for l in db.scalars(select(WorkLog).where(WorkLog.employee_id == emp.id, WorkLog.work_date == work_date, WorkLog.archived_at.is_(None))
+                                 .order_by(WorkLog.id)) if l.id != exclude_id and allows(l.legal_entity_id)]
+    before = _day_amounts(day)
+    out = {"ok": True, "source": source, "tariff_id": t.id if t else None, "tariff_name": t.name if t else "",
+           "unit": t.unit if t else "hour", "rate": num(t.rate) if t else 0.0, "rate_text": rate_str(t.rate, t.unit) if t else "нет тарифа",
+           "hours": num(h) if h is not None else None, "day_hours_other": num(sum((Decimal(l.hours) for l in day), Decimal(0))),
+           "day_other": num(sum(before.values(), Decimal(0))), "amount": None, "day_total": None}
+    if h is not None:
+        draft = _Draft(exclude_id or 10**12, kind, t.unit if t else "hour", t.rate if t else Decimal(0), h)
+        after = _day_amounts(day + [draft])
+        out["amount"] = num(after[draft.id])
+        out["day_total"] = num(sum(after.values(), Decimal(0)))
     return out
 
 
@@ -104,7 +193,7 @@ def check_entry(db: Session, *, emp: Employee, entity_id: int | None, work_date:
     elif work_date > today:
         e["work_date"] = "Часы за будущие дни не вносят"
     elif backdate_days is not None and work_date < today - dt.timedelta(days=backdate_days):
-        e["work_date"] = f"Самому можно отметить не раньше чем за {backdate_days} дн. Позвоните диспетчеру: он внесёт старый день"
+        e["work_date"] = f"Можно внести не раньше чем за {backdate_days} дн. Старый день внесёт директор или диспетчер"
     try:
         h = Decimal(str(hours).replace(",", "."))
     except Exception:
@@ -154,8 +243,8 @@ def entity_for(db: Session, emp: Employee, work_date: dt.date, vehicle_id: int |
     if len(ids) == 1:
         return ids[0], ""
     if not ids:
-        return None, "В этот день вы нигде не числитесь: обратитесь к диспетчеру"
-    return None, "Выберите технику: вы числитесь в нескольких юрлицах"
+        return None, "В этот день сотрудник нигде не числится: сначала оформите его в карточке сотрудника"
+    return None, "Выберите технику: сотрудник числится в нескольких юрлицах"
 
 
 def recalc_without_tariff(db: Session, emp: Employee, user_id: int) -> int:

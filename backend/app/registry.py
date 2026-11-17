@@ -32,6 +32,7 @@ from app import audit
 from app.common import csv_text, fail, like, org_today, page_of, utcnow
 from app.config import get_settings
 from app.db import get_db
+from app.enums import PAY_TARIFF_UNITS
 from app.deps import NOTHING, Principal, Scope, current, entity_filter
 from app.models import CashAccount, Counterparty, Employee, EmploymentAssignment, LegalEntity, Order, PpeNorm, Tariff, Vehicle
 from app.routers import audit_log
@@ -140,7 +141,7 @@ def ref_labels(db: Session, ref: str, ids: set[int]) -> dict[int, str]:
         return {e.id: _emp_label(e) for e in db.scalars(select(Employee).where(Employee.id.in_(ids)))}
     if ref in ("counterparty", "customer"):
         return {c.id: c.name for c in db.scalars(select(Counterparty).where(Counterparty.id.in_(ids)))}
-    if ref == "tariff":
+    if ref in ("tariff", "pay_tariff"):
         return {t.id: t.name for t in db.scalars(select(Tariff).where(Tariff.id.in_(ids)))}
     if ref == "order":
         rows = db.execute(select(Order.id, Order.number, Order.year, Order.order_date, Counterparty.name)
@@ -442,12 +443,14 @@ def validate_refs(db: Session, res: R, values: dict, entity_id: int | None, obj:
                 errors[f.name] = "Контрагент в архиве"
             elif f.ref == "customer" and changed and row.kind == "supplier":
                 errors[f.name] = "Это поставщик, а нужен заказчик: измените вид контрагента в справочнике"
-        elif f.ref == "tariff":
+        elif f.ref in ("tariff", "pay_tariff"):
             row = db.get(Tariff, v)
             if row is None:
                 errors[f.name] = pick
             elif changed and row.archived_at:
                 errors[f.name] = "Тариф в архиве"
+            elif f.ref == "pay_tariff" and changed and row.unit not in PAY_TARIFF_UNITS:
+                errors[f.name] = "Оплата считается только за час или за сутки: выберите такой тариф"
         elif f.ref == "order":
             row = db.get(Order, v)
             if row is None or (entity_id is not None and row.legal_entity_id != entity_id):
@@ -562,7 +565,7 @@ def meta_out(db: Session, res: R, p: Principal) -> dict:
                        "options": [{"value": k, "label": v} for k, v in (f.options or {}).items()] if f.options else None,
                        "list": f.list, "filter": f.filter, "sum": f.sum, "locked": f.locked, "wide": f.wide or f.kind == "textarea",
                        "show_if": list(f.show_if) if f.show_if else None, "suggest": f.suggest, "max": f.max,
-                       "default": serialize(f.default), "more": f.more})
+                       "default": serialize(f.default), "more": f.more, "places": f.places})
         if f.suggest:
             col = getattr(res.model, f.name)
             rows = db.execute(select(col, func.count()).where(col != "").group_by(col).order_by(func.count().desc()).limit(40)).all()
@@ -773,6 +776,13 @@ def options(ref: str, q: str = "", legal_entity_id: int | None = None, p: Princi
         # в заказах нужны только тарифы для заказчика; тарифы оплаты работы и ремонта выбираются в карточке сотрудника
         query = select(Tariff).where(Tariff.archived_at.is_(None), Tariff.kind == "customer").order_by(Tariff.name)
         return {"items": [{"id": x.id, "label": x.name} for x in db.scalars(query.limit(300))]}
+    if ref == "pay_tariff":
+        # оплата за запись часов: выбирает тот, кто вносит часы; ставку видят те, кому тариф всё равно нужен для работы
+        if not ref_scope(p, ref, None, None):
+            raise _denied()
+        from app.services.payroll import pick_group, pickable, rate_str
+        return {"items": [{"id": x.id, "label": f"{x.name} — {rate_str(x.rate, x.unit)}", "group": pick_group(x.kind), "unit": x.unit, "rate": float(x.rate)}
+                          for x in pickable(db)]}
     if ref == "order":
         scope = ref_scope(p, ref, "orders.view", legal_entity_id)
         query = (select(Order, Counterparty.name).join(Counterparty, Counterparty.id == Order.customer_id)

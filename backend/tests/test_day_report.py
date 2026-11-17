@@ -23,9 +23,9 @@ def prepare(world, make_client):
     work = mk_tariff(d, "Работа", "work", "hour", 450)
     rep = mk_tariff(d, "Ремонт", "repair", "hour", 300)
     assert d.put(f"/payroll/employees/{world.d1}/tariffs", {"work_tariff_id": work, "repair_tariff_id": rep}).status_code == 200
-    drv = make_client("drv1")
-    assert drv.post("/payroll/mine", {"work_date": TODAY.isoformat(), "kind": "work", "hours": "8", "vehicle_id": world.va1}).status_code == 201
-    assert drv.post("/payroll/mine", {"work_date": TODAY.isoformat(), "kind": "repair", "hours": "2", "description": "Менял ремень"}).status_code == 201
+    mech = make_client("mech_a")
+    assert mech.post("/payroll/enter", {"employee_id": world.d1, "work_date": TODAY.isoformat(), "kind": "work", "hours": "8", "vehicle_id": world.va1}).status_code == 201
+    assert mech.post("/payroll/enter", {"employee_id": world.d1, "work_date": TODAY.isoformat(), "kind": "repair", "hours": "2", "description": "Менял ремень"}).status_code == 201
     with session_factory()() as db:
         db.add(Waybill(legal_entity_id=world.A, year=TODAY.year, number=7, vehicle_id=world.va1, driver_id=world.d1, work_date=TODAY, status="closed",
                        start_km=Decimal(1000), end_km=Decimal(1100)))
@@ -68,9 +68,9 @@ def test_day_report_type_and_empty_days(world, make_client):
     _, rows, totals = table(d.get("/reports/day", params={"from": (TODAY - dt.timedelta(days=5)).isoformat()}))
     assert rows == [] and totals is None
     # только ремонт: тип «Ремонт», ставка работы показывается из тарифа сотрудника
-    drv = make_client("drv1")
+    mech = make_client("mech_a")
     day = TODAY - dt.timedelta(days=2)
-    assert drv.post("/payroll/mine", {"work_date": day.isoformat(), "kind": "repair", "hours": "3", "description": "Замена гидравлики"}).status_code == 201
+    assert mech.post("/payroll/enter", {"employee_id": world.d1, "work_date": day.isoformat(), "kind": "repair", "hours": "3", "description": "Замена гидравлики"}).status_code == 201
     _, rows, _ = table(d.get("/reports/day", params={"from": day.isoformat()}))
     assert len(rows) == 1 and rows[0]["Тип занятости"] == "Ремонт" and rows[0]["Ставка"] == "450 ₽/ч" and rows[0]["Ремонт, ₽"] == 900
 
@@ -135,7 +135,7 @@ def test_day_kind_preview_changes_nothing(world, make_client):
     d = prepare(world, make_client)
     r = day_kind(d, world, "work", dry_run=True)
     assert r.status_code == 200, r.text
-    assert r.json() == {"changed": 1, "hours": 2.0, "before": 4200.0, "after": 4500.0, "no_rate": False, "need_description": False, "rate_text": "450 ₽/час"}
+    assert r.json() == {"changed": 1, "hours": 2.0, "before": 4200.0, "after": 4500.0, "no_rate": False, "need_description": False, "rate_text": "450 ₽/час", "kept_manual": 0}
     a = first_row(d)
     assert (a["Тип занятости"], a["Часы работы"], a["Часы ремонта"], a["Всего, ₽"]) == ("Работа и ремонт", 8, 2, 4200)
 

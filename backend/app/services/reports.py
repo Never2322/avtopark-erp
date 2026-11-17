@@ -18,13 +18,14 @@ from sqlalchemy.orm import Session, aliased
 from app.common import fail
 from app.deps import Principal, Scope
 from app.enums import EFFECTIVE_STATES, FINE_PAYERS, REQUEST_STATUSES, VEHICLE_STATUSES, status_now
-from app.models import (Counterparty, Employee, Fine, FuelFill, MiscExpense, Order, Rental, RepairBill, ServiceRequest, StockMove, Trip, Vehicle,
-                        VehicleReading, VehicleStatusHistory, VehicleType, Waybill, WorkLog)
+from app.models import (Counterparty, Employee, Fine, LegalEntity, FuelFill, MiscExpense, Order, Rental, RepairBill, ServiceRequest, StockMove, Trip, Vehicle,
+                        VehicleReading, VehicleStatusHistory, VehicleType, Waybill, WeighTicket, WorkLog)
 from app.services import payroll as pay
 from app.registry import _vehicle_label
 from app.services.fuel import norms, segments
 from app.services.reminders import day_start, local_day
 
+MONTHS_RU = ["январь", "февраль", "март", "апрель", "май", "июнь", "июль", "август", "сентябрь", "октябрь", "ноябрь", "декабрь"]
 MONTHS_SHORT = ["", "янв", "фев", "мар", "апр", "май", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"]
 MAX_SPAN_DAYS = 1830            # диапазон дат в отчёте не длиннее пяти лет
 EXTRA_LIMIT = 500               # строк в дополнительной таблице итогов месяца
@@ -91,7 +92,7 @@ def table(cols: list[Col], rows: list[dict], totals: bool = True) -> dict:
                 foot.append("Итого")
             elif c.total:
                 vals = [r.get(c.key) for r in rows if isinstance(r.get(c.key), (int, float))]
-                foot.append(round(sum(vals), 2 if c.kind == "money" else 1) if c.kind != "int" else int(sum(vals)))
+                foot.append(round(sum(vals), 2 if c.kind == "money" else 3 if c.kind == "ton" else 1) if c.kind != "int" else int(sum(vals)))
             else:
                 foot.append(None)
     return {"columns": [{"key": c.key, "label": c.label, "kind": c.kind} for c in shown], "rows": body, "totals": foot}
@@ -545,7 +546,7 @@ def extra(title: str, cols: list[dict], rows: list[list], c: Ctx, total_label: b
         totals = ["Итого"] + [None] * (len(cols) - 1)
         for i, col in enumerate(cols):
             if col.get("sum"):
-                totals[i] = round(sum(r[i] or 0 for r in shown), 2)
+                totals[i] = round(sum(r[i] or 0 for r in shown), 3 if col.get("kind") == "ton" else 2)
     return {"title": title + (f" (первые {EXTRA_LIMIT})" if cut else ""), "columns": [{k: v for k, v in col.items() if k != "sum"} for col in cols], "rows": shown, "totals": totals}
 
 
@@ -746,6 +747,143 @@ def report_day(c: Ctx) -> dict:
                     "«Работа», «Ремонт» или «Работа и ремонт»; кто может менять часы, меняет тип вручную прямо в таблице. Суммы считаются по ставкам, которые действовали, когда вносили часы."}
 
 
+def report_salary(c: Ctx) -> dict:
+    """Зарплата за месяц по сотрудникам: часы работы и ремонта, суммы по тарифам, итог. Те же записи и ставки, что в разделе «Часы работы
+    и ремонта» и в табеле: сумма за день у человека складывается из записей дня, за месяц — из дней. Налоги и вычеты не считаются."""
+    db = c.db
+    sc = c.sc("worklog.view")
+    if not sc:
+        raise fail(403, "forbidden", "Нет доступа к часам работы и ремонта")
+    logs = list(db.scalars(select(WorkLog).where(WorkLog.work_date >= c.d_from, WorkLog.work_date <= c.d_to, WorkLog.archived_at.is_(None),
+                                                 sc.cond(WorkLog.legal_entity_id)).order_by(WorkLog.work_date, WorkLog.id)))
+    amt = pay.amounts(db, logs)
+    emps = {e.id: e for e in db.scalars(select(Employee).where(Employee.id.in_({l.employee_id for l in logs})))} if logs else {}
+    plates = {v.id: label(v) for v in db.scalars(select(Vehicle).where(Vehicle.id.in_({l.vehicle_id for l in logs if l.vehicle_id})))} if logs else {}
+    ents = {e.id: (e.short_name or e.name) for e in db.scalars(select(LegalEntity))} if logs else {}
+    people: dict[tuple[int, int], dict] = {}
+    by_tariff: dict[tuple, dict] = {}
+    by_vehicle: dict[int | None, dict] = {}
+    no_rate = 0
+    for l in logs:
+        a = people.setdefault((l.employee_id, l.legal_entity_id), {"days": set(), "work_h": 0.0, "repair_h": 0.0, "work": 0.0, "repair": 0.0})
+        a["days"].add(l.work_date)
+        a[f"{l.kind}_h"] += float(l.hours)
+        a[l.kind] += float(amt[l.id])
+        t = by_tariff.setdefault((l.tariff_name or "Без тарифа", pay.rate_text(l)), {"h": 0.0, "sum": 0.0})
+        t["h"] += float(l.hours)
+        t["sum"] += float(amt[l.id])
+        v = by_vehicle.setdefault(l.vehicle_id, {"h": 0.0, "sum": 0.0})
+        v["h"] += float(l.hours)
+        v["sum"] += float(amt[l.id])
+        no_rate += 1 if l.tariff_id is None and not l.rate else 0
+    many = len({k[1] for k in people}) > 1
+
+    def who(eid: int) -> str:
+        e = emps.get(eid)
+        return " ".join(x for x in (e.last_name, e.first_name, e.middle_name) if x) if e else "—"
+
+    cols = [Col("name", "Сотрудник"), Col("ent", "Юрлицо", show=many), Col("days", "Дней с часами", "int", True), Col("work_h", "Часы работы", "dec", True),
+            Col("repair_h", "Часы ремонта", "dec", True), Col("hours", "Часов всего", "dec", True), Col("work", "Работа, ₽", "money", True),
+            Col("repair", "Ремонт, ₽", "money", True), Col("total", "К выплате, ₽", "money", True)]
+    rows = [{"name": who(eid), "ent": ents.get(ent, ""), "days": len(a["days"]), "work_h": round(a["work_h"], 1), "repair_h": round(a["repair_h"], 1),
+             "hours": round(a["work_h"] + a["repair_h"], 1), "work": fl(a["work"]), "repair": fl(a["repair"]), "total": fl(a["work"] + a["repair"])}
+            for (eid, ent), a in people.items()]
+    rows.sort(key=lambda r: (r["name"].lower(), r["ent"]))
+    top = sorted(rows, key=lambda r: -r["total"])[:10]
+    ch = chart([short(r["name"].split(" ")[0] + "".join(" " + w[0] + "." for w in r["name"].split(" ")[1:3]), 16) for r in top], [r["total"] for r in top], "₽", [r["name"] for r in top])
+    extras = []
+    if by_tariff:
+        extras.append(extra("По тарифам", [{"key": "t", "label": "Тариф", "kind": "text"}, {"key": "r", "label": "Ставка", "kind": "text"},
+                                           {"key": "h", "label": "Часов", "kind": "dec", "sum": True}, {"key": "s", "label": "Сумма, ₽", "kind": "money", "sum": True}],
+                            [[k[0], k[1], round(v["h"], 1), fl(v["sum"])] for k, v in sorted(by_tariff.items(), key=lambda kv: (-kv[1]["sum"], kv[0]))], c, True))
+    if by_vehicle:
+        extras.append(extra("По технике", [{"key": "v", "label": "Техника", "kind": "text"}, {"key": "h", "label": "Часов", "kind": "dec", "sum": True},
+                                           {"key": "s", "label": "Сумма, ₽", "kind": "money", "sum": True}],
+                            [[plates.get(k, "Без техники"), round(v["h"], 1), fl(v["sum"])] for k, v in sorted(by_vehicle.items(), key=lambda kv: (-kv[1]["sum"], str(kv[0])))], c, True))
+    note = ("Все записи часов за месяц по дате работы. Сумма за день у человека складывается из его записей (часы × ставка тарифа, суточный тариф "
+            "один раз в день и вид), сумма за месяц — из дней. Ставка запоминается при внесении часов. Налоги и вычеты не считаются: суммы до вычета налогов.")
+    if no_rate:
+        note += f" Внимание: у {no_rate} записей нет тарифа, они считаются как 0 ₽: выберите тариф в разделе «Часы работы и ремонта»."
+    return {"title": f"Зарплата за {MONTHS_RU[c.d_from.month - 1]} {c.d_from.year}", "table": table(cols, rows), "chart": ch, "extras": extras, "note": note}
+
+
+def report_tonnage(c: Ctx) -> dict:
+    """Тоннаж за месяц по мусоровозам и самосвалам: сколько ходок и тонн привезла каждая машина. Тонны берутся с талонов весов
+    (нетто), которые водители прикладывают в «Тоннаже». Талон без тоннажа считается ходкой, но в тонны не входит: его вес ещё нужно внести
+    в «Журнале тоннажа»; такие талоны и возможные повторы одного талона перечислены в отдельной таблице."""
+    db = c.db
+    sc = c.sc("weigh_tickets.view")
+    if not sc:
+        raise fail(403, "forbidden", "Нет доступа к тоннажу")
+    tickets = list(db.scalars(select(WeighTicket).where(WeighTicket.ticket_date >= c.d_from, WeighTicket.ticket_date <= c.d_to, WeighTicket.archived_at.is_(None),
+                                                        sc.cond(WeighTicket.legal_entity_id)).order_by(WeighTicket.ticket_date, WeighTicket.id)))
+    flagged = list(db.scalars(select(Vehicle).where(Vehicle.tonnage.is_(True), Vehicle.archived_at.is_(None), sc.cond(Vehicle.legal_entity_id))))
+    ids = {t.vehicle_id for t in tickets} | {v.id for v in flagged}
+    vehicles = {v.id: v for v in db.scalars(select(Vehicle).where(Vehicle.id.in_(ids)))} if ids else {}
+    types = {t.id: t.name for t in db.scalars(select(VehicleType))}
+    ents = {e.id: (e.short_name or e.name) for e in db.scalars(select(LegalEntity))}
+    emps = {e.id: e for e in db.scalars(select(Employee).where(Employee.id.in_({t.driver_id for t in tickets if t.driver_id})))} if tickets else {}
+
+    def who(eid: int | None) -> str:
+        e = emps.get(eid)
+        return " ".join(x for x in (e.last_name, e.first_name) if x) if e else "Без водителя"
+
+    by_v: dict[int, dict] = {vid: {"trips": 0, "tons": 0.0, "pending": 0} for vid in ids}
+    by_day: dict[dt.date, dict] = {}
+    by_driver: dict[int | None, dict] = {}
+    twins: dict[tuple[int, str], list[WeighTicket]] = {}
+    for t in tickets:
+        for a in (by_v[t.vehicle_id], by_day.setdefault(t.ticket_date, {"trips": 0, "tons": 0.0}), by_driver.setdefault(t.driver_id, {"trips": 0, "tons": 0.0})):
+            a["trips"] += 1
+            a["tons"] += float(t.tons) if t.tons is not None else 0.0
+        if t.tons is None:
+            by_v[t.vehicle_id]["pending"] += 1
+        if t.doc_number:
+            twins.setdefault((t.vehicle_id, t.doc_number), []).append(t)
+    many = len({vehicles[vid].legal_entity_id for vid in ids if vid in vehicles}) > 1
+    cols = [Col("veh", "Машина"), Col("type", "Тип"), Col("ent", "Юрлицо", show=many), Col("trips", "Ходок", "int", True), Col("tons", "Тонн", "ton", True),
+            Col("avg", "В среднем за ходку, т", "ton"), Col("pending", "Талонов без тоннажа", "int", True)]
+    rows = []
+    for vid, a in by_v.items():
+        v = vehicles.get(vid)
+        if v is None:
+            continue
+        counted = a["trips"] - a["pending"]
+        rows.append({"veh": label(v), "type": types.get(v.type_id, ""), "ent": ents.get(v.legal_entity_id, ""), "trips": a["trips"], "tons": round(a["tons"], 3),
+                     "avg": round(a["tons"] / counted, 3) if counted else None, "pending": a["pending"]})
+    rows.sort(key=lambda r: (-r["tons"], r["veh"]))
+    top = [r for r in rows if r["tons"]][:10]
+    ch = chart([short(r["veh"].split(" · ")[0], 12) for r in top], [r["tons"] for r in top], "т", [r["veh"] for r in top])
+    extras = []
+    if by_day:
+        extras.append(extra("По дням", [{"key": "d", "label": "День", "kind": "date"}, {"key": "n", "label": "Ходок", "kind": "int", "sum": True},
+                                        {"key": "t", "label": "Тонн", "kind": "ton", "sum": True}],
+                            [[d.isoformat(), a["trips"], round(a["tons"], 3)] for d, a in sorted(by_day.items())], c, True))
+    if by_driver:
+        extras.append(extra("По водителям", [{"key": "w", "label": "Водитель", "kind": "text"}, {"key": "n", "label": "Ходок", "kind": "int", "sum": True},
+                                             {"key": "t", "label": "Тонн", "kind": "ton", "sum": True}],
+                            [[who(k), a["trips"], round(a["tons"], 3)] for k, a in sorted(by_driver.items(), key=lambda kv: (-kv[1]["tons"], who(kv[0])))], c, True))
+    problems = []
+    for t in tickets:
+        if t.tons is None:
+            problems.append([t.ticket_date.isoformat(), label(vehicles[t.vehicle_id]) if t.vehicle_id in vehicles else "", who(t.driver_id), "Тоннаж не внесён"])
+    for (vid, number), group in twins.items():
+        if len(group) > 1:
+            for t in group[1:]:
+                problems.append([t.ticket_date.isoformat(), label(vehicles[vid]) if vid in vehicles else "", who(t.driver_id), f"Возможный повтор талона № {number}"])
+    problems.sort()
+    if problems:
+        extras.append(extra("Что проверить", [{"key": "d", "label": "День", "kind": "date"}, {"key": "v", "label": "Машина", "kind": "text"},
+                                              {"key": "w", "label": "Водитель", "kind": "text"}, {"key": "p", "label": "Что не так", "kind": "text"}], problems, c))
+    pending = sum(a["pending"] for a in by_v.values())
+    note = ("Тонны берутся с талонов весов полигона (нетто), которые водители прикладывают во вкладке «Тоннаж»; считаются талоны за выбранный месяц по дате талона, "
+            "убранные в архив не учитываются. В таблице машины, по которым ведётся тоннаж, в том числе те, что за месяц ничего не привезли.")
+    if pending:
+        note += (f" Внимание: у {pending} талонов тоннаж ещё не внесён (программа не смогла уверенно прочитать вес с фото). Они посчитаны как ходки, но тонн в итоге нет: "
+                 "откройте «Журнал тоннажа», отберите «Тоннаж не внесён» и впишите вес по фото.")
+    return {"title": f"Тоннаж за {MONTHS_RU[c.d_from.month - 1]} {c.d_from.year}", "table": table(cols, rows), "chart": ch, "extras": extras, "note": note}
+
+
 @dataclass
 class Report:
     name: str
@@ -766,6 +904,10 @@ REPORTS: dict[str, Report] = {r.name: r for r in (
     Report("waybill_fuel", "Расход по путевым листам", "range", ("waybills.view",), report_waybill_fuel, desc="Расход топлива по закрытым листам и перерасход"),
     Report("downtime", "Простои", "range", ("vehicles.view",), report_downtime, desc="Сколько суток машина в работе, на ремонте, в отпуске"),
     Report("orders", "Заказы по заказчикам", "range", ("orders.view",), report_orders, desc="Заказы и выручка по заказчикам"),
+    Report("salary", "Зарплата за месяц", "month", ("worklog.view",), report_salary,
+           desc="Сколько заработал каждый сотрудник за месяц по часам работы и ремонта, итог к выплате"),
+    Report("tonnage", "Тоннаж за месяц", "month", ("weigh_tickets.view",), report_tonnage,
+           desc="Сколько тонн привёз каждый мусоровоз и самосвал за месяц по талонам весов, итог"),
     Report("day", "Отчёт за день", "day", ("worklog.view", "waybills.view", "fuel_fills.view"), report_day,
            desc="По водителям за один день: техника, путевой лист, спидометр, топливо, часы и заработок"),
 )}

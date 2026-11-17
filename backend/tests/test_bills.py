@@ -11,8 +11,10 @@ from PIL import Image
 from sqlalchemy import select
 
 from app.db import session_factory
-from app.models import AuditLog, RepairBill, RepairBillFile, Vehicle
+from app.models import AuditLog, LegalEntity, RepairBill, RepairBillFile, Vehicle
 from app.registry import org_tz
+from app.services import bills as bills_svc
+from app.services import ocr
 
 SAMPLE_PDF = (Path(__file__).parent / "fixtures" / "bill_sample.pdf").read_bytes()
 EMPTY_PDF = b"%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\ntrailer\n<< /Root 1 0 R >>\n%%EOF\n"
@@ -608,3 +610,173 @@ def test_money_never_loses_kopecks(make_client, world):
 def test_money_parser(raw, expected):
     from app.services.bills import to_money
     assert str(to_money(raw)) == expected
+
+
+# ---------------------------------------------------------------- «Загрузить счёт»: прочитать файл и внести счёт самой
+
+FIX = Path(__file__).parent / "fixtures"
+needs_ocr = pytest.mark.skipif(not ocr.pdf_available(), reason="на этом компьютере нет tesseract и pdftoppm: чтение сканов и фото не проверить")
+READ_TEXT = """Счет на оплату № Т-5 от 05.11.2026
+Поставщик: ИНН 7700000001, КПП 770001001, Общество с ограниченной ответственностью "Вымышленный склад", 100000, Г.ТЕСТОВО, УЛ. ПРОБНАЯ, Д. 1
+Покупатель: ИНН 5400000000, КПП 540001001, Общество с ограниченной ответственностью "Покупатель", 630000, г. Тест
+1 Фильтр 1 шт 1 000,00 1 000,00
+Итого: 1 000,00
+В том числе НДС: 180,33
+Всего к оплате: 1 000,00
+Всего наименований 1 на сумму Одна тысяча рублей 00 копеек
+"""
+
+
+def auto(c, data=SAMPLE_PDF, name="счёт.pdf", ctype="application/pdf", note="", entity=None):
+    form = {"note": note}
+    if entity is not None:
+        form["legal_entity_id"] = str(entity)
+    return c.call("POST", "/bills/auto", data=form, files=[("files", (name, data, ctype))])
+
+
+def set_inn(entity_id, inn):
+    with session_factory()() as db:
+        db.get(LegalEntity, entity_id).inn = inn
+        db.commit()
+
+
+def bill_count():
+    with session_factory()() as db:
+        return db.query(RepairBill).count()
+
+
+def test_auto_reads_text_pdf_and_creates_bill(make_client, world):
+    with session_factory()() as db:
+        db.get(Vehicle, world.va3).plate = "А315ВТ154"
+        db.commit()
+    make_client("dir_a").post("/counterparties", {"name": "ООО Вымышленный склад", "kind": "supplier", "inn": "7700000001"})
+    acc = make_client("acc_a")
+    r = auto(acc, note="замена масла, срочно")
+    assert r.status_code == 200, r.text
+    out = r.json()
+    assert out["created"] is True and out["how"] == "pdf" and out["confirmed"] is True and out["missing"] == []
+    b = acc.get(f"/bills/{out['bill']['id']}").json()
+    assert (b["number"], b["bill_date"], b["total"], b["vat"], b["vat_pct"]) == ("ТС-100", "2026-11-05", 90804.92, 16374.66, 22)
+    assert b["legal_entity_id"] == world.A and b["kind"] == "uploaded" and b["status"] == "unpaid" and b["note"] == "замена масла, срочно"
+    assert b["supplier_inn"] == "7700000001" and b["supplier_id"] and b["vehicle_id"] == world.va3 and len(b["files"]) == 1
+    assert "bill.create" in audit_actions()
+    # тот же счёт второй раз не вносится
+    again = auto(acc).json()
+    assert again["created"] is False and again["duplicate"]["id"] == b["id"] and bill_count() == 1
+
+
+@needs_ocr
+@pytest.mark.parametrize("name,ctype,how", [("bill_sample_scan.pdf", "application/pdf", "scan"), ("bill_sample_scan.png", "image/png", "photo"),
+                                            ("bill_sample_photo.jpg", "image/jpeg", "photo"), ("bill_sample_photo_rot90.jpg", "image/jpeg", "photo")])
+def test_auto_reads_scan_and_photo(make_client, world, name, ctype, how):
+    acc = make_client("acc_a")
+    r = auto(acc, (FIX / name).read_bytes(), name, ctype)
+    assert r.status_code == 200, r.text
+    out = r.json()
+    assert out["created"] is True, out["note"]
+    assert out["how"] == how and out["confirmed"] is True
+    b = acc.get(f"/bills/{out['bill']['id']}").json()
+    assert b["number"].translate(str.maketrans("TC", "ТС")) == "ТС-100"          # на фото русская «Т» и латинская T неразличимы
+    assert (b["bill_date"], b["total"], b["vat"]) == ("2026-11-05", 90804.92, 16374.66) and len(b["files"]) == 1
+
+
+def test_auto_unconfirmed_amount_from_photo_is_not_saved(make_client, world, monkeypatch):
+    acc = make_client("acc_a")
+    monkeypatch.setattr(ocr, "text_from_image", lambda data: READ_TEXT.replace("Одна тысяча рублей", "Одна тысяча восемьсот рублей"))
+    out = auto(acc, png(), "фото.png", "image/png").json()
+    assert out["created"] is False and out["confirmed"] is False and "прописью" in out["note"] and out["found"]["total"] == 1000.0
+    assert bill_count() == 0
+    # без «прописью» сумма подтверждается повтором и сходящимся НДС
+    monkeypatch.setattr(ocr, "text_from_image", lambda data: READ_TEXT.replace("Всего наименований 1 на сумму Одна тысяча рублей 00 копеек\n", ""))
+    out = auto(acc, png(), "фото.png", "image/png").json()
+    assert out["created"] is True and out["how"] == "photo" and "дважды" in out["note"] and bill_count() == 1
+    # сумма стоит один раз и подтвердить её нечем
+    once = ("Счет на оплату № Т-6 от 05.11.2026\nПоставщик: ИНН 7700000001, КПП 770001001, ООО \"Склад\", 100000, г. Тест\n"
+            "Покупатель: ИНН 5400000000, ООО \"Я\"\nИтого: 1 000,00\nВ том числе НДС: 180,33\n")
+    monkeypatch.setattr(ocr, "text_from_image", lambda data: once)
+    out = auto(acc, png(), "фото.png", "image/png").json()
+    assert out["created"] is False and "подтвердить" in out["note"] and bill_count() == 1
+
+
+def test_auto_unreadable_and_missing_parts_open_the_form(make_client, world, monkeypatch):
+    acc = make_client("acc_a")
+    monkeypatch.setattr(ocr, "text_from_image", lambda data: "что-то нечитаемое 123")
+    out = auto(acc, png(), "фото.png", "image/png").json()
+    assert out["created"] is False and out["readable"] is False and set(out["missing"]) >= {"number", "bill_date", "total", "supplier_name"}
+    # не нашёлся номер: остальное отдаётся форме
+    monkeypatch.setattr(ocr, "text_from_image", lambda data: READ_TEXT.replace("№ Т-5 ", ""))
+    out = auto(acc, png(), "фото.png", "image/png").json()
+    assert out["created"] is False and "number" in out["missing"] and out["found"]["total"] == 1000.0 and "номер счёта" in out["note"]
+    assert bill_count() == 0
+
+
+def test_auto_without_ocr_program_still_reads_pdf_text(make_client, world, monkeypatch):
+    acc = make_client("acc_a")
+    monkeypatch.setattr(ocr, "available", lambda: False)
+    monkeypatch.setattr(ocr, "pdf_available", lambda: False)
+    out = auto(acc, png(), "фото.png", "image/png").json()
+    assert out["created"] is False and out["how"] == "none" and "не включено" in out["note"]
+    assert auto(acc).json()["created"] is True                                       # PDF с текстом читается и без tesseract
+
+
+def test_auto_picks_entity_by_buyer_inn_and_asks_when_unclear(make_client, world):
+    boss = make_client("admin")
+    # у обоих юрлиц ИНН не совпадает с покупателем из счёта, машины в счёте нет в справочнике: выбрать нечем
+    out = auto(boss).json()
+    assert out["created"] is False and out["missing"] == ["legal_entity_id"] and "юрлицо" in out["note"]
+    with session_factory()() as db:
+        db.get(Vehicle, world.va3).plate = "А315ВТ154"
+        db.commit()
+    # покупатель в счёте это «Бета»: юрлицо определяется само, машина «Альфы» не привязывается
+    set_inn(world.B, "5400000000")
+    out = auto(boss).json()
+    assert out["created"] is True
+    b = boss.get(f"/bills/{out['bill']['id']}").json()
+    assert b["legal_entity_id"] == world.B and b["vehicle_id"] is None
+    # выбор человека, противоречащий покупателю в счёте: не вносим без проверки
+    out = auto(boss, entity=world.A).json()
+    assert out["created"] is False and "покупатель" in out["note"] and bill_count() == 1
+    # без ИНН покупателя в счёте человек выбирает юрлицо сам
+    set_inn(world.B, "")
+    out = auto(boss, entity=world.A).json()
+    assert out["created"] is True and boss.get(f"/bills/{out['bill']['id']}").json()["legal_entity_id"] == world.A
+
+
+def test_auto_rights_and_bad_input(make_client, world):
+    assert auto(make_client("drv1")).status_code == 403
+    assert auto(make_client("store_a")).status_code == 403
+    assert auto(make_client("acc_a"), entity=world.B).status_code == 403                    # чужое юрлицо
+    acc = make_client("acc_a")
+    assert err(auto(acc, note="я" * 501))["code"] == "too_long"
+    assert err(acc.call("POST", "/bills/auto", data={"note": ""}))["code"] == "no_file"
+    assert err(auto(acc, b"hello", "a.txt", "text/plain"))["code"] == "bad_file_type"
+    assert bill_count() == 0
+
+
+@needs_ocr
+def test_recognize_reads_scan_and_photo(make_client, world):
+    acc = make_client("acc_a")
+    for name, ctype in (("bill_sample_scan.pdf", "application/pdf"), ("bill_sample_photo_rot90.jpg", "image/jpeg")):
+        r = acc.call("POST", "/bills/recognize", files={"file": (name, (FIX / name).read_bytes(), ctype)}).json()
+        assert r["readable"] is True and r["found"]["total"] == 90804.92 and "ошибки" in r["note"] and "buyer_inn" not in r["found"]
+
+
+def test_parser_tolerates_noisy_text():
+    t = ("Счет на оплату N° 55 от 05 . 11 . 2026\nПоставщик: WHH 7700000001, 770001001, ООО \"Склад\", 100000, г. Тест, Ten.: +7 (000) 0000000\n"
+         "Покупатель: ИНН 5400000000, КПП 540001001, ООО \"Я\"\nИтого: 12 345.60 2 226.15\nВсего к оплате: 12 345.60")
+    f = bills_svc.parse_bill_text(t)
+    assert (f["number"], f["bill_date"], f["total"], f["vat"], f["vat_pct"]) == ("55", "2026-11-05", Decimal("12345.60"), Decimal("2226.15"), 22)
+    assert f["supplier_inn"] == "7700000001" and f["supplier_kpp"] == "770001001" and f["supplier_name"] == 'ООО "Склад"' and f["buyer_inn"] == "5400000000" and f["supplier_phone"] == "+7 (000) 0000000" and "Ten" not in f.get("supplier_addr", "")
+    f = bills_svc.parse_bill_text("Счет № 7 от 01.11.2026\nИтого: 1 000,00\nВсего к оплате: 1 000,00\nБез НДС")
+    assert (f["total"], f["vat"], f["vat_pct"]) == (Decimal("1000.00"), Decimal("0.00"), 0)
+
+
+def test_confirm_total_rules():
+    base = {"total": Decimal("1000.00"), "vat": Decimal("180.33"), "vat_pct": 22}
+    assert bills_svc.confirm_total("что угодно", base, "pdf")[0] is True                                   # текст PDF точен
+    assert bills_svc.confirm_total(READ_TEXT, base, "photo") == (True, "сумма прописью совпала с цифрами")
+    assert bills_svc.confirm_total(READ_TEXT.replace("Одна тысяча рублей 00", "Две тысячи рублей 00"), base, "photo")[0] is False
+    assert bills_svc.confirm_total(READ_TEXT.replace("00 копеек", "50 копеек"), base, "photo")[0] is False
+    assert bills_svc.words_match("Всего на сумму 1 000,00 руб.", Decimal("1000")) is None                   # цифры вместо слов: проверять нечем
+    assert bills_svc.confirm_total("Итого: 1 000,00", base, "scan")[0] is False                           # один раз и без слов
+    assert bills_svc.confirm_total("Итого: 1 000,00 К оплате: 1 000,00", {**base, "vat": Decimal("100.00")}, "scan")[0] is False   # НДС не сходится

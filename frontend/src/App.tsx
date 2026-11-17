@@ -34,6 +34,8 @@ import { AnnouncementCard, Announcements } from "./pages/Announcements";
 import { News, NewsCard } from "./pages/News";
 import { Timesheet } from "./pages/Timesheet";
 import { MyTime } from "./pages/MyTime";
+import { HoursEntry } from "./pages/HoursEntry";
+import { Tonnage } from "./pages/Tonnage";
 import { Attendance } from "./pages/Attendance";
 import { TimesheetPrint } from "./pages/TimesheetPrint";
 import { JobsBoard, MyJobs } from "./pages/Jobs";
@@ -93,8 +95,10 @@ export function App() {
         <Route path="jobs/mine" element={<Guard any={["jobs.view_own"]}><MyJobs /></Guard>} />
         <Route path="entries" element={<Guard any={["trips.view_own", "fuel_fills.view_own"]}><DriverEntries /></Guard>} />
         <Route path="entries/feed" element={<Guard any={["trips.view", "fuel_fills.view"]}><EntriesFeed /></Guard>} />
+        <Route path="tonnage" element={<Guard any={["weigh_tickets.view_own"]}><Tonnage /></Guard>} />
         <Route path="timesheet" element={<Guard any={["timesheet.view"]}><Timesheet /></Guard>} />
-        <Route path="my-time" element={<Guard any={["worklog.view_own", "worklog.create_own"]}><MyTime /></Guard>} />
+        <Route path="my-time" element={<Guard any={["worklog.view_own"]}><MyTime /></Guard>} />
+        <Route path="hours-entry" element={<Guard any={["worklog.enter"]}><HoursEntry /></Guard>} />
         <Route path="attendance" element={<Guard any={["attendance.view", "attendance.mark_own"]}><Attendance /></Guard>} />
         <Route path="purchases" element={<Guard any={["purchases.view"]}><Purchases /></Guard>} />
         <Route path="stock" element={<Guard any={["stock_items.view"]}><Stock /></Guard>} />

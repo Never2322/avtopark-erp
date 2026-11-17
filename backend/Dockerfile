@@ -1,13 +1,14 @@
 FROM python:3.12-slim-bookworm
 
-# Клиент PostgreSQL той же версии, что и сервер (16): без него pg_dump не сделает копию
+# Клиент PostgreSQL той же версии, что и сервер (16): без него pg_dump не сделает копию.
+# tesseract-ocr (с русским словарём) и poppler-utils читают текст со сканов и фото счетов; без них программа работает, но читает только PDF с текстом.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates curl gnupg \
  && install -d /usr/share/keyrings \
  && curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | gpg --dearmor -o /usr/share/keyrings/pgdg.gpg \
  && echo "deb [signed-by=/usr/share/keyrings/pgdg.gpg] http://apt.postgresql.org/pub/repos/apt bookworm-pgdg main" > /etc/apt/sources.list.d/pgdg.list \
  && apt-get update \
- && apt-get install -y --no-install-recommends postgresql-client-16 \
+ && apt-get install -y --no-install-recommends postgresql-client-16 tesseract-ocr tesseract-ocr-rus poppler-utils \
  && apt-get purge -y curl gnupg && apt-get autoremove -y \
  && rm -rf /var/lib/apt/lists/*
 

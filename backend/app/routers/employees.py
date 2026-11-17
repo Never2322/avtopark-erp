@@ -7,10 +7,11 @@ from sqlalchemy import and_, exists, func, or_, select
 from sqlalchemy.orm import Session
 
 from app import audit
-from app.common import fail, like, page_of, utcnow
+from app.common import fail, like, org_today, page_of, utcnow
 from app.db import get_db
 from app.deps import Principal, Scope, current, entity_filter, require
-from app.models import (Department, Employee, EmploymentAssignment, LegalEntity, Tariff, User, Vehicle, VehicleAssignment, Waybill)
+from app.models import (Department, Employee, EmploymentAssignment, LegalEntity, Tariff, User, Vehicle, VehicleAssignment, Waybill, WorkLog)
+from app.services import payroll as pay_svc, timesheet as ts_svc
 from app.services.vehicles import active_assignment_filter
 
 router = APIRouter(prefix="/employees", tags=["Сотрудники"])
@@ -95,6 +96,11 @@ def out(db: Session, p: Principal, e: Employee, detailed: bool = False) -> dict:
             data["pay"] = {"work_tariff_id": e.work_tariff_id, "repair_tariff_id": e.repair_tariff_id,
                            "work_tariff": _tname(e.work_tariff_id), "repair_tariff": _tname(e.repair_tariff_id),
                            "can_edit": p.can("employees.edit")}
+            sc = p.scope("worklog.view")
+            if sc:                                                          # сколько человек уже заработал в этом месяце (по внесённым часам)
+                first = org_today().replace(day=1)
+                data["pay"]["earned"] = {"month": first.strftime("%Y-%m"), "title": f"{ts_svc.MONTHS[first.month - 1]} {first.year}",
+                                         **pay_svc.month_totals(db, e.id, first, first.replace(day=ts_svc.month_days(first)), sc.cond(WorkLog.legal_entity_id))}
         data["assignments"] = [{"id": a.id, "legal_entity_id": a.legal_entity_id, "legal_entity": ents.get(a.legal_entity_id, ""),
                                 "position": a.position, "started_on": a.started_on.isoformat() if a.started_on else None,
                                 "ended_on": a.ended_on.isoformat() if a.ended_on else None} for a in sorted(e.assignments, key=lambda a: a.id)]

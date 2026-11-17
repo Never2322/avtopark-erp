@@ -5,6 +5,7 @@ import io
 import logging
 import re
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
+from difflib import SequenceMatcher
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -13,6 +14,8 @@ from app.common import fail
 from app.enums import BILL_KINDS, BILL_MAX_ITEMS, BILL_STATUSES, BILL_UNITS
 from app.models import RepairBill
 from app.parts_seed import norm
+from app.services import ocr
+from app.services.words import amount_in_words
 
 CENT = Decimal("0.01")
 MAX_MONEY = Decimal("9999999999.99")       # как в «Money»: не больше 12 знаков до запятой
@@ -20,6 +23,11 @@ MAX_QTY = Decimal("1000000")
 MONTHS_GEN = ["января", "февраля", "марта", "апреля", "мая", "июня", "июля", "августа", "сентября", "октября", "ноября", "декабря"]
 NBSP = "  "
 MONEY = r"\d{1,3}(?:[ " + NBSP + r"]\d{3})+,\d{2}|\d+,\d{2}"
+# со скана и фото запятая в копейках нередко читается точкой
+MONEY_OCR = r"\d{1,3}(?:[ " + NBSP + r"]\d{3})+[,.]\d{2}|\d+[,.]\d{2}"
+# знак номера распознаётся по-разному: №, N, No, N°
+NUM = r"(?:№|N[º°oо]?\.?|Nе)"
+DATE_NUM = r"(\d{1,2})\s*[.\-/]\s*(\d{1,2})\s*[.\-/]\s*(\d{4})"
 
 
 # --------------------------------------------------------------------------
@@ -121,7 +129,7 @@ def pdf_text(data: bytes) -> str:
 
 
 def _kop_values(text: str) -> list[int]:
-    return [int(re.sub(r"\D", "", m.replace(",", ""))) for m in re.findall(MONEY, text)]
+    return [int(re.sub(r"\D", "", m)) for m in re.findall(MONEY_OCR, text)]
 
 
 def _plate_key(text: str) -> str:
@@ -139,8 +147,7 @@ def parse_bill_text(text: str, vehicles=(), suppliers=()) -> dict:
     flat = re.sub(r"\s+", " ", text or "").strip()
     if not flat:
         return out
-    m = re.search(r"Сч[её]т(?:[- ]договор|[- ]оферта|\s+на\s+оплату)?\s*(?:№|N|No\.?)\s*([^\s,;]+)\s+от\s+"
-                  r"(\d{1,2})[.\-/](\d{1,2})[.\-/](\d{4})", flat, re.I)
+    m = re.search(r"Сч[её]т(?:[- ]договор|[- ]оферта|\s+на\s+оплату)?\s*" + NUM + r"\s*([^\s,;]+)\s+от\s+" + DATE_NUM, flat, re.I)
     if m:
         out["number"] = m.group(1)
         try:
@@ -148,7 +155,7 @@ def parse_bill_text(text: str, vehicles=(), suppliers=()) -> dict:
         except ValueError:
             pass
     else:
-        m = re.search(r"Сч[её]т(?:\s+на\s+оплату)?\s*(?:№|N|No\.?)\s*([^\s,;]+)\s+от\s+«?(\d{1,2})»?\s+(" + "|".join(MONTHS_GEN) + r")\s+(\d{4})",
+        m = re.search(r"Сч[её]т(?:\s+на\s+оплату)?\s*" + NUM + r"\s*([^\s,;]+)\s+от\s+«?(\d{1,2})»?\s+(" + "|".join(MONTHS_GEN) + r")\s+(\d{4})",
                       flat, re.I)
         if m:
             out["number"] = m.group(1)
@@ -158,7 +165,7 @@ def parse_bill_text(text: str, vehicles=(), suppliers=()) -> dict:
                 pass
     # сумма
     total = vat = None
-    m = re.search(r"(?:Всего\s+к\s+оплате|Итого\s+к\s+оплате|К\s+оплате)[^\d]{0,30}(" + MONEY + ")", flat, re.I)
+    m = re.search(r"(?:Всего\s+к\s+оплате|Итого\s+к\s+оплате|К\s+оплате)[^\d]{0,30}(" + MONEY_OCR + ")", flat, re.I)
     if m:
         total = _kop_values(m.group(1))[0]
     tabbed = re.sub(r"[ \t]+", " ", text)
@@ -166,7 +173,7 @@ def parse_bill_text(text: str, vehicles=(), suppliers=()) -> dict:
     amounts = _kop_values(line.group(0)) if line else []
     if total is None and amounts:
         total = max(amounts)
-    m = re.search(r"НДС[^\d\n]{0,40}(" + MONEY + ")", tabbed, re.I)
+    m = re.search(r"НДС[^\d\n]{0,40}(" + MONEY_OCR + ")", tabbed, re.I)
     if m:
         vat = _kop_values(m.group(1))[0]
     elif len(amounts) >= 2 and total:
@@ -185,13 +192,27 @@ def parse_bill_text(text: str, vehicles=(), suppliers=()) -> dict:
                 if abs(ratio - pct) < 0.6:
                     out["vat_pct"] = pct
                     break
+    if "vat" not in out and total and re.search(r"без\s+ндс|ндс\s+не\s+облага|не\s+облагается\s+ндс", flat, re.I):
+        out["vat"] = Decimal("0.00")
+        out["vat_pct"] = 0
+    # покупатель: по его ИНН определяется юрлицо, на которое выставлен счёт
+    mb = re.search(r"(?:Покупатель|Плательщик|Заказчик)\s*:\s*(.{5,400})", flat, re.I)
+    if mb:
+        binn = re.search(r"ИНН\s*:?\s*(\d{12}|\d{10})\b", mb.group(1)) or re.search(r"(?<!\d)(\d{12}|\d{10})(?!\d)", mb.group(1))
+        if binn:
+            out["buyer_inn"] = binn.group(1)
     # поставщик
     m = re.search(r"(?:Поставщик|Продавец|Исполнитель)\s*:\s*(.+?)\s*(?:Сч[её]т\s+на\s+оплату|Сч[её]т\s*(?:№|N)|Покупатель|Плательщик|Заказчик|$)", flat, re.I)
     if m:
         block = m.group(1)
         inn = re.search(r"ИНН\s*:?\s*(\d{12}|\d{10})\b", block)
-        kpp = re.search(r"КПП\s*:?\s*(\d{9})\b", block)
-        phone = re.search(r"тел\.?\s*:?\s*([+\d][\d\s()+\-]{6,24}\d)", block, re.I)
+        labeled = inn is not None
+        if not labeled:                                        # слово «ИНН» на фото могло исказиться: берём первое число из 10 или 12 цифр
+            inn = re.search(r"(?<!\d)(\d{12}|\d{10})(?!\d)", block)
+            if inn:
+                block = block[inn.start():]
+        kpp = re.search(r"КПП\s*:?\s*(\d{9})\b", block) or (None if labeled else re.search(r"(?<!\d)(\d{9})(?!\d)", block))
+        phone = re.search(r"[тt][еe][лn]\.?\s*:?\s*([+\d][\d\s()+\-]{6,24}\d)", block, re.I)
         if inn:
             out["supplier_inn"] = inn.group(1)
         if kpp:
@@ -199,7 +220,9 @@ def parse_bill_text(text: str, vehicles=(), suppliers=()) -> dict:
         if phone:
             out["supplier_phone"] = phone.group(1).strip()
         rest = re.sub(r"(?:ИНН|КПП)\s*:?\s*\d+\s*,?\s*", "", block)
-        rest = re.sub(r"\s*тел\.?.*$", "", rest, flags=re.I).strip(" ,")
+        if not labeled and inn:
+            rest = re.sub(r"^\d{10,12}\s*,?\s*(?:\d{9}\s*,?\s*)?", "", rest)
+        rest = re.sub(r"\s*[тt][еe][лn]\.?.*$", "", rest, flags=re.I).strip(" ,")
         cut = re.search(r",\s*\d{6}\b", rest)
         name = rest[:cut.start()] if cut else re.split(r"(?<=[\"»”])\s*,\s*", rest, maxsplit=1)[0]
         name = name.strip(" ,")
@@ -237,6 +260,73 @@ def parse_bill_text(text: str, vehicles=(), suppliers=()) -> dict:
                 out["supplier_id"] = sid
                 break
     return out
+
+
+def extract_text(files) -> tuple[str, str]:
+    """Текст всех приложенных файлов и то, как он получен: «pdf» (текст внутри файла, читается точно), «scan» (PDF-скан, распознан),
+    «photo» (фото, распознано), «none» (прочитать нечего). Если файлов несколько, это страницы одного счёта."""
+    rank = {"pdf": 0, "scan": 1, "photo": 2}
+    how, parts = "pdf", []
+    for f in files:
+        if f.content_type == "application/pdf":
+            text, src = pdf_text(f.data), "pdf"
+            if ocr.score(text) < 20:                           # текста нет (скан) или он «битый»: пробуем распознать страницы как картинки
+                alt = ocr.text_from_scanned_pdf(f.data)
+                if ocr.score(alt) > ocr.score(text):
+                    text, src = alt, "scan"
+        else:
+            text, src = ocr.text_from_image(f.data), "photo"
+        if text.strip():
+            parts.append(text)
+            how = max(how, src, key=rank.__getitem__)
+    text = "\n\n".join(parts)
+    return text, (how if text.strip() else "none")
+
+
+def _letters(s: str) -> str:
+    return re.sub(r"[^а-я]", "", s.lower().replace("ё", "е"))
+
+
+def words_match(text: str, total: Decimal) -> bool | None:
+    """Совпадает ли «сумма прописью» из текста с цифрами. None: прописью в тексте нет (или стоят цифры), проверять нечем."""
+    flat = re.sub(r"\s+", " ", text or "")
+    m = re.search(r"(?:на\s+сумму|прописью)\s*:?\s*(.{8,240})", flat, re.I)
+    if not m:
+        return None
+    seg = m.group(1)
+    head = _letters(re.split(r"\d", seg, maxsplit=1)[0])
+    if len(head) < 6:                                          # после «на сумму» стоят цифры, не слова
+        return None
+    cut = head.find("рубл")
+    head = head[:cut] if cut > 0 else head
+    ours = re.split(r"\s+руб", amount_in_words(total), maxsplit=1, flags=re.I)[0]
+    if SequenceMatcher(None, _letters(ours), head).ratio() < 0.9:
+        return False
+    kop = re.search(r"(\d{1,2})\s*коп", seg, re.I)
+    if kop and int(kop.group(1)) != int((total * 100) % 100):
+        return False
+    return True
+
+
+def confirm_total(text: str, found: dict, how: str) -> tuple[bool, str]:
+    """Можно ли доверять прочитанной сумме без проверки человеком. Текст из PDF точен. Со скана и фото цифры могли исказиться,
+    поэтому нужно подтверждение: сумма прописью совпала с цифрами, либо сумма встречается в счёте дважды и НДС с ней сходится."""
+    total = found.get("total")
+    if total is None:
+        return False, "сумма не прочитана"
+    if how == "pdf":
+        return True, "текст PDF"
+    w = words_match(text, total)
+    if w is True:
+        return True, "сумма прописью совпала с цифрами"
+    if w is False:
+        return False, "сумма прописью не совпадает с цифрами"
+    vat, pct = found.get("vat"), found.get("vat_pct")
+    vat_ok = vat is not None and pct is not None and abs(vat_included(total, pct) - vat) <= Decimal("0.02")
+    seen = sum(1 for v in _kop_values(text) if v == int(total * 100))
+    if seen >= 2 and vat_ok:
+        return True, "сумма встречается в счёте дважды, НДС сходится"
+    return False, "сумму со скана или фото не удалось подтвердить: цифры могли прочитаться с ошибкой"
 
 
 # --------------------------------------------------------------------------

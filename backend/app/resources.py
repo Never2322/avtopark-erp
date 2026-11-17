@@ -11,7 +11,7 @@ from app.enums import (MAINTENANCE_KINDS, TIRE_SEASONS, VEHICLE_FINANCE_KINDS, V
                        FUEL_MAX_LITERS, JOB_DATE_WINDOW_DAYS, JOB_STATES, ORDER_STATUSES, PAYMENT_KINDS, RENTAL_DIRECTIONS, TARIFF_KINDS, TARIFF_UNITS, PAY_TARIFF_KINDS, PAY_TARIFF_UNITS, WORKLOG_BACKDATE_DAYS, WORKLOG_KINDS, WORKLOG_SOURCES,
                        STOCK_UNITS, VAT_RATES)
 from app.models import (ControlEvent, MaintenanceItem, VehicleFinance, VehicleRepair, VehicleTire, CalendarEvent, EmployeeEvent, CashAccount, CashOp, Constant, Counterparty, Document, Employee, EmployeePayment, EntryPhoto, Fine, FuelCard,
-                        FuelFill, WorkLog, Job, JobPhoto, MiscExpense, Order, PartCatalog, PpeIssue, PpeNorm, Rental, StockItem, Tariff, Trip, Vehicle, Warehouse)
+                        FuelFill, WeighTicket, WorkLog, Job, JobPhoto, MiscExpense, Order, PartCatalog, PpeIssue, PpeNorm, Rental, StockItem, Tariff, Trip, Vehicle, Warehouse)
 from app.registry import MAX_MONEY, Col, F, Invalid, R, org_tz, register
 from app.parts_seed import norm as part_key
 from app.services import control as control_svc
@@ -20,6 +20,7 @@ from app.services import ppe as ppe_calc
 from app.services import notify as notify_svc
 from app.services import payroll as payroll_svc
 from app.services import stock as stock_svc
+from app.services import weigh as weigh_svc
 from app.services import reminders as rem
 from app.services.people import user_names
 from app.services.vehicles import current_driver_id
@@ -910,6 +911,75 @@ register(R(
 ))
 
 
+# ================================================================ тоннаж: талоны весов с полигона
+
+def _ticket_prepare(db, p, v, obj, m):
+    e: dict = {}
+    for name in ("doc_number",):
+        if name in v:
+            v[name] = " ".join((v[name] or "").split())
+    if "note" in v:
+        v["note"] = (v["note"] or "").strip()
+    entry_check_common(db, p, v, obj, m, "ticket_date", "weigh_tickets.create", e)
+    if (obj is None or ("vehicle_id" in v and v["vehicle_id"] != obj.vehicle_id)) and "vehicle_id" not in e:
+        veh = db.get(Vehicle, m["vehicle_id"])
+        if veh is not None and not veh.tonnage:
+            e["vehicle_id"] = "У этой машины не ведётся тоннаж: поставьте галочку «Вести тоннаж» в карточке техники"
+    if "tons" in v:
+        was = obj.tons if obj is not None else None
+        if v["tons"] is not None and v["tons"] > weigh_svc.MAX_TONS:
+            e["tons"] = f"Больше {weigh_svc.MAX_TONS} т за одну ходку: проверьте цифры"
+        elif v["tons"] != was:
+            # вес, который вписал человек, программа больше не перечитывает и не подменяет
+            v["tons_source"] = "manual" if v["tons"] is not None else ""
+            v["tons_guess"] = None
+    if e:
+        raise Invalid(e)
+
+
+def _ticket_computed(db, objs):
+    photos = photo_counts(db, objs, EntryPhoto.weigh_ticket_id)
+    now = dt.datetime.now(dt.timezone.utc)
+    out = {}
+    for o in objs:
+        if o.tons is not None:
+            state = {"text": "Внесён вручную" if o.tons_source == "manual" else "Прочитан с фото", "tone": "success" if o.tons_source != "manual" else "info"}
+        elif o.read_at is None and now - o.created_at < dt.timedelta(minutes=10):
+            state = {"text": "Читаю фото…", "tone": "neutral"}
+        else:
+            state = {"text": "Нужно внести", "tone": "warning"}
+        guess = f"Программа увидела {weigh_svc.fmt_t(o.tons_guess)} т. " if o.tons is None and o.tons_guess is not None else ""
+        out[o.id] = {"photos": photos.get(o.id, 0) or "", "tons_state": state, "read_note": ("" if o.tons_source == "manual" else o.read_note) or guess.strip()}
+    return out
+
+
+def _ticket_filter(q, state, today):
+    if state == "none":
+        return q.where(WeighTicket.tons.is_(None))
+    return q.where(WeighTicket.tons.is_not(None))
+
+
+register(R(
+    key="weigh_tickets", title="Журнал тоннажа", one="талон", model=WeighTicket, entity_from="vehicle",
+    fields=[
+        F("ticket_date", "Дата", "date", required=True),
+        F("vehicle_id", "Техника", "ref", ref="vehicle", required=True, hint="Машина с галочкой «Вести тоннаж» (мусоровозы и самосвалы включены сами)"),
+        F("tons", "Тоннаж (нетто), т", "decimal", places=3, lo=Decimal("0.001"), sum=True,
+          hint="Если программа не смогла прочитать вес с фото, впишите его по фото талона. Брутто и тару писать не нужно"),
+        F("driver_id", "Водитель", "ref", ref="employee", hint="Если пусто, подставится водитель, закреплённый за машиной", more=True),
+        F("doc_number", "Номер талона", max=60, more=True),
+        F("note", "Заметка", "textarea", max=500, list=False, more=True),
+        F("client_id", "Код отправки", max=64, auto=True, list=False),
+    ],
+    cols=[Col("tons_state", "Тоннаж внесён", "badge"), Col("read_note", "Что прочитала программа", "text"), Col("photos", "Фото", "text")],
+    photos=("ticket", "Фото талона"),
+    states={"none": "Тоннаж не внесён", "set": "Тоннаж внесён"}, state_filter=_ticket_filter,
+    search=("note", "doc_number", "read_note"),
+    search_refs=(("vehicle_id", Vehicle, ("plate", "make", "model")), ("driver_id", Employee, ("last_name", "first_name"))),
+    date="ticket_date", order=("-ticket_date", "-id"), prepare=_ticket_prepare, computed=_ticket_computed,
+))
+
+
 # ================================================================ часы работы и ремонта (зарплатный табель)
 
 def _wl_prepare(db, p, v, obj, m):
@@ -917,20 +987,34 @@ def _wl_prepare(db, p, v, obj, m):
     if emp is None:
         raise Invalid({"employee_id": "Выберите значение из списка"})
     creating = obj is None
-    driver = (v.get("source") or (obj.source if obj is not None else "")) == "driver"
+    limited = (v.get("source") or (obj.source if obj is not None else "")) in ("driver", "mechanic")   # ставку этот человек не выбирает
     errors = payroll_svc.check_entry(
         db, emp=emp, entity_id=m.get("legal_entity_id"), work_date=m.get("work_date"), kind=m.get("kind"), hours=m.get("hours"),
         vehicle_id=m.get("vehicle_id"), description=m.get("description") or "", today=job_today(),
-        backdate_days=WORKLOG_BACKDATE_DAYS if driver and creating else None, exclude_id=None if creating else obj.id)
+        backdate_days=WORKLOG_BACKDATE_DAYS if limited and creating else None, exclude_id=None if creating else obj.id)
     if errors:
         raise Invalid(errors)
     if "description" in v:
         v["description"] = (v["description"] or "").strip()
+    chosen = m.get("tariff_id")                                    # тариф, который выбрал человек в форме
     if creating:
-        v.update(payroll_svc.snapshot(db, emp, m["kind"]))
         v.setdefault("source", "staff")
-    elif obj.tariff_id is None:
-        v.update(payroll_svc.snapshot(db, emp, obj.kind))        # тариф назначили позже: запись получает ставку при правке
+        if chosen:
+            v.update(payroll_svc.snapshot_of(db.get(Tariff, chosen)))
+        else:
+            snap = payroll_svc.snapshot(db, emp, m["kind"])        # не выбран: тариф из карточки сотрудника
+            if snap["tariff_id"] is None and v["source"] == "staff":
+                raise Invalid({"tariff_id": "Выберите тариф: в карточке сотрудника для него тариф не назначен"})
+            v.update(snap)
+    elif chosen and chosen != obj.tariff_id:
+        v.update(payroll_svc.snapshot_of(db.get(Tariff, chosen)))  # сменили тариф: ставка берётся новая
+    elif not chosen and (obj.tariff_manual or obj.tariff_id is None):
+        snap = payroll_svc.snapshot(db, emp, obj.kind)             # тариф убрали или его не было: тариф из карточки
+        if snap["tariff_id"] is None and obj.source == "staff":
+            raise Invalid({"tariff_id": "Выберите тариф: в карточке сотрудника для него тариф не назначен"})
+        v.update(snap)
+    else:
+        v.pop("tariff_id", None)                                   # тариф прежний: ставка записи не меняется
 
 
 def _wl_computed(db, objs):
@@ -944,8 +1028,9 @@ register(R(
         F("work_date", "Дата", "date", required=True, locked=True),
         F("employee_id", "Сотрудник", "ref", ref="employee", required=True, locked=True),
         F("kind", "Что делал", "enum", options=WORKLOG_KINDS, default="work", required=True, locked=True, filter=True),
+        F("vehicle_id", "Техника", "ref", ref="vehicle", hint="Какую технику водил или ремонтировал. Можно не указывать"),
+        F("tariff_id", "Тариф", "ref", ref="pay_tariff", hint="По нему считаются деньги: ставка × часы. Если не выбрать, возьмётся тариф из карточки сотрудника"),
         F("hours", "Часов", "decimal", places=1, lo=Decimal("0.1"), required=True, exact=True, hint="Например 8 или 2,5"),
-        F("vehicle_id", "Техника", "ref", ref="vehicle", hint="Можно не указывать"),
         F("description", "Что делали", "textarea", max=500, hint="Для ремонта обязательно: что именно делали"),
         F("client_id", "Код отправки", max=64, auto=True, list=False),
     ],

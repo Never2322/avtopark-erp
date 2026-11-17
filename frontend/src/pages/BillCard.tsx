@@ -1,6 +1,6 @@
 // Карточка счёта на ремонт: данные, строки, файлы, оплата, архив.
 import { useRef, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Archive, ArchiveRestore, ArrowLeft, Banknote, FileText, PackagePlus, Paperclip, Pencil, Printer, Trash2 } from "lucide-react";
 import { api, get, post } from "../api";
@@ -49,6 +49,7 @@ export function BillCard() {
   const { id } = useParams();
   const bid = Number(id);
   const nav = useNavigate();
+  const auto = (useLocation().state as { auto?: { how: string; note: string } } | null)?.auto;
   const qc = useQueryClient();
   const toast = useToast();
   const { can } = useAuth();
@@ -84,6 +85,7 @@ export function BillCard() {
           {b.can.void && <Button variant="danger" icon={Archive} onClick={() => setModal("void")}>В архив</Button>}
           {b.can.restore && <Button icon={ArchiveRestore} loading={restore.isPending} onClick={() => restore.mutate()}>Вернуть из архива</Button>}
         </>} />
+      {auto && <Alert tone={auto.how === "pdf" ? "info" : "warning"}>{auto.note || "Счёт прочитан из файла автоматически."} Если что-то не так, нажмите «Изменить».</Alert>}
       {b.archived && <Alert tone="warning">Счёт в архиве{b.archive_reason ? `: ${b.archive_reason}` : ""}. В итоги расходов на ремонт он не входит.</Alert>}
       {b.status === "cancelled" && !b.archived && <Alert tone="info">Счёт отменён: в итоги расходов на ремонт он не входит.</Alert>}
       <div className="grid cols-2" style={{ marginTop: 16, alignItems: "start" }}>

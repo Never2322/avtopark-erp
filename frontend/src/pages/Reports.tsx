@@ -58,11 +58,12 @@ function show(kind: string, key: string, v: Value, total = false): string {
   if (typeof v === "string") return kind === "date" ? fmtDate(v) : kind === "datetime" ? fmtDateTime(v) : v;
   if (kind === "money") return v === 0 && !total ? "—" : fmtMoney(v);
   if (kind === "dec") return v === 0 && !total ? "—" : fmtNum(v, 1);
+  if (kind === "ton") return v === 0 && !total ? "—" : fmtNum(v, 2);
   if (kind === "int") return fmtNum(v, 0);
   return String(v);
 }
 
-const isNumeric = (kind: string) => kind === "money" || kind === "dec" || kind === "int";
+const isNumeric = (kind: string) => kind === "money" || kind === "dec" || kind === "int" || kind === "ton";
 
 /* ---------------- диаграмма ---------------- */
 
@@ -80,12 +81,14 @@ function BarChart({ chart }: { chart: ChartData }) {
   const y = (v: number) => T + (H - T - B) * (1 - v / max);
   const ticks = [0, 0.25, 0.5, 0.75, 1].map((k) => k * max);
   const labelled = n <= 14;
+  const tons = chart.unit === "т";                       // тонны с десятыми: 0,8 т не должно стать «1»
+  const tickDec = tons && max < 8 ? 1 : 0, valDec = tons ? 1 : 0;
   return (
     <svg className="report-chart" viewBox={`0 0 ${W} ${H}`} role="img" aria-label={`Диаграмма, ${chart.unit}`}>
       {ticks.map((t) => (
         <g key={t}>
           <line x1={L} x2={W - R} y1={y(t)} y2={y(t)} stroke="var(--border)" strokeWidth={1} />
-          <text x={L - 8} y={y(t) + 4} textAnchor="end" fontSize={11} fill="var(--text-2)">{fmtNum(t, 0)}</text>
+          <text x={L - 8} y={y(t) + 4} textAnchor="end" fontSize={11} fill="var(--text-2)">{fmtNum(t, tickDec)}</text>
         </g>
       ))}
       <text x={L} y={12} textAnchor="start" fontSize={11} fill="var(--text-2)">{chart.unit}</text>
@@ -96,7 +99,7 @@ function BarChart({ chart }: { chart: ChartData }) {
             <rect x={x} y={top} width={bw} height={Math.max(H - B - top, v > 0 ? 1 : 0)} rx={3} fill="var(--mint)" opacity={0.9}>
               <title>{`${chart.titles[i] ?? chart.labels[i]}: ${fmtNum(v, 1)} ${chart.unit}`}</title>
             </rect>
-            {labelled && v > 0 && <text x={x + bw / 2} y={top - 4} textAnchor="middle" fontSize={10} fill="var(--text)">{fmtNum(v, 0)}</text>}
+            {labelled && v > 0 && <text x={x + bw / 2} y={top - 4} textAnchor="middle" fontSize={10} fill="var(--text)">{fmtNum(v, valDec)}</text>}
             <text x={x + bw / 2} y={H - B + 14} fontSize={11} fill="var(--text-2)" textAnchor="end" transform={`rotate(-35 ${x + bw / 2} ${H - B + 14})`}>{chart.labels[i]}</text>
           </g>
         );

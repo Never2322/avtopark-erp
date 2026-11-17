@@ -14,11 +14,12 @@ import { Alert, Badge, Button, Card, ConfirmModal, Empty, Field, Modal, PageHead
 
 interface Pic { id: number; name: string; has_thumb: boolean }
 export interface Entry {
-  id: number; kind: "trip" | "fuel"; kind_label: string; date: string; vehicle_id: number; vehicle_id_label: string; driver_id_label: string;
+  id: number; kind: "trip" | "fuel" | "ticket"; kind_label: string; date: string; vehicle_id: number; vehicle_id_label: string; driver_id_label: string;
   created_by: string; created_at: string; mine: boolean; legal_entity: string; note: string;
   route?: string; customer?: string; cargo?: string; cargo_kg?: number | null; doc_number?: string; km?: number | null;
   liters?: number; amount?: number; odometer?: number | null; full_tank?: boolean; station?: string; per_l?: number | null;
   consumption?: string; norm?: number | null; check?: { text: string; tone: Tone }; check_notes?: string[];
+  tons?: number | null; tons_state?: { text: string; tone: Tone }; read_note?: string;
   pics: Pic[]; can: { photo: boolean; remove_photo: boolean; delete: boolean };
 }
 interface MyVehicle { id: number; label: string; legal_entity_id: number; tank_liters: number | null; fuel_norm: number | null }
@@ -29,9 +30,9 @@ interface Feed {
 }
 
 const photoUrl = (id: number, thumb = false) => `/api/entries/photos/${id}${thumb ? "?thumb=true" : ""}`;
-const plateOf = (label: string) => label.split(" · ")[0];
+export const plateOf = (label: string) => label.split(" · ")[0];
 const shift = (iso: string, days: number) => { const d = new Date(iso + "T12:00:00"); d.setDate(d.getDate() + days); return d.toISOString().slice(0, 10); };
-const newId = () => (typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`);
+export const newId = () => (typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`);
 
 /** Всё, что меняет запись, обновляет и страницу водителя, и ленту, и журналы. */
 function useRefresh() {
@@ -41,12 +42,12 @@ function useRefresh() {
 
 /* ---------------- фото ---------------- */
 
-function EntryPhotos({ e, onChanged, max = 3 }: { e: Entry; onChanged: () => void; max?: number }) {
+export function EntryPhotos({ e, onChanged, max = 3 }: { e: Entry; onChanged: () => void; max?: number }) {
   const toast = useToast();
   const input = useRef<HTMLInputElement>(null);
   const [view, setView] = useState<Pic | null>(null);
   const [removing, setRemoving] = useState<Pic | null>(null);
-  const title = e.kind === "trip" ? "Накладная" : "Чек";
+  const title = e.kind === "trip" ? "Накладная" : e.kind === "ticket" ? "Талон весов" : "Чек";
   const add = useMutation({
     mutationFn: async (files: File[]) => { const f = new FormData(); (await shrinkAll(files)).forEach((x) => f.append("files", x)); return upload(`/entries/${e.kind}/${e.id}/photos`, f); },
     onSuccess: onChanged,
@@ -390,11 +391,11 @@ export function EntriesFeed() {
 
 /* ---------------- фото из журналов рейсов и заправок ---------------- */
 
-function EntryPhotosModal({ kind, id, onClose }: { kind: "trip" | "fuel"; id: number; onClose: () => void }) {
+function EntryPhotosModal({ kind, id, onClose }: { kind: "trip" | "fuel" | "ticket"; id: number; onClose: () => void }) {
   const q = useQuery({ queryKey: ["entry-one", kind, id], queryFn: () => get<{ item: Entry }>(`/entries/${kind}/${id}`) });
   const refresh = useRefresh();
   return (
-    <Modal title={kind === "trip" ? "Рейс: накладная" : "Заправка: чек"} onClose={onClose} footer={<Button variant="primary" onClick={onClose}>Закрыть</Button>}>
+    <Modal title={kind === "trip" ? "Рейс: накладная" : kind === "ticket" ? "Талон весов: фото" : "Заправка: чек"} onClose={onClose} footer={<Button variant="primary" onClick={onClose}>Закрыть</Button>}>
       <QueryState q={q}>
         {q.data && (q.data.item.pics.length === 0 && !q.data.item.can.photo
           ? <p className="muted">Фото к этой записи нет.</p>
@@ -404,7 +405,7 @@ function EntryPhotosModal({ kind, id, onClose }: { kind: "trip" | "fuel"; id: nu
   );
 }
 
-export function EntryPhotosButton({ kind, id, count }: { kind: "trip" | "fuel"; id: number; count?: number | string }) {
+export function EntryPhotosButton({ kind, id, count }: { kind: "trip" | "fuel" | "ticket"; id: number; count?: number | string }) {
   const [open, setOpen] = useState(false);
   return (
     <>

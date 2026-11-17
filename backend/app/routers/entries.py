@@ -1,20 +1,21 @@
 # -*- coding: utf-8 -*-
-"""Записи водителей: рейсы и заправки с фото накладной и чека.
+"""Записи водителей: рейсы и заправки с фото накладной и чека, талоны весов (тоннаж) с фото талона.
 
-Общие операции для сотрудников (список, правка, архив, выгрузка) делает общий механизм разделов (app/registry.py, разделы «trips»
-и «fuel_fills»). Здесь то, чего он не умеет:
+Общие операции для сотрудников (список, правка, архив, выгрузка) делает общий механизм разделов (app/registry.py, разделы «trips»,
+«fuel_fills» и «weigh_tickets»). Здесь то, чего он не умеет:
 - страница водителя: записи только по технике, закреплённой за ним сейчас; внести запись вместе с фото одним запросом;
 - повторная отправка с телефона (код client_id) не создаёт вторую запись;
 - водитель может убрать только свою запись и только в первые сутки; сотрудник — любую через архив раздела;
 - фото не стираются: их «убирают» с отметкой кто и когда;
-- лента «Записи водителей» для диспетчера: рейсы и заправки вперемешку за выбранные дни.
+- лента «Записи водителей» для диспетчера: рейсы и заправки вперемешку за выбранные дни (талоны весов в ленту не входят: у них своя
+  вкладка «Тоннаж», см. routers/tonnage.py).
 """
 import datetime as dt
 import json
 import urllib.parse
 from dataclasses import dataclass
 
-from fastapi import APIRouter, Depends, File, Form, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, UploadFile
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
@@ -25,10 +26,11 @@ from app.common import fail, utcnow
 from app.db import get_db
 from app.deps import Principal, current, entity_filter
 from app.enums import ENTRY_DELETE_HOURS, ENTRY_MAX_PHOTOS
-from app.models import EntryPhoto, FuelFill, StoredFile, Trip, Vehicle, VehicleSpecs
+from app.models import EntryPhoto, FuelFill, StoredFile, Trip, Vehicle, VehicleSpecs, WeighTicket
 from app.registry import RESOURCES, _vehicle_label, rows_out, save
 from app.resources import job_today
 from app.routers.dossier import read_uploads, store
+from app.services import weigh as weigh_svc
 from app.services.people import user_names
 from app.services.vehicles import assigned_vehicle_ids
 
@@ -52,7 +54,10 @@ class Kind:
 KINDS = {
     "trip": Kind("trip", "trips", Trip, "trip_id", "trip_date", "Рейс"),
     "fuel": Kind("fuel", "fuel_fills", FuelFill, "fuel_fill_id", "fill_date", "Заправка"),
+    "ticket": Kind("ticket", "weigh_tickets", WeighTicket, "weigh_ticket_id", "ticket_date", "Талон весов"),
 }
+LISTED = ("trip", "fuel")            # эти виды идут в «Мои записи» и в ленту; талоны весов живут на своей вкладке «Тоннаж»
+TICKET_FIELDS = ("vehicle_id", "ticket_date", "note")    # водитель в талоне задаёт только машину и заметку (дата ставится сама); тонны читаются с фото
 
 
 def kind_of(kind: str) -> Kind:
@@ -152,7 +157,7 @@ def my_entries(p: Principal = Depends(current), db: Session = Depends(get_db)):
     since = job_today() - dt.timedelta(days=MY_DAYS)
     items: list[dict] = []
     can = {}
-    for k in KINDS.values():
+    for k in (KINDS[x] for x in LISTED):
         view = p.scope(f"{k.res}.view_own") | p.scope(f"{k.res}.view")
         can[k.key] = bool(vehicles) and p.can(f"{k.res}.create_own") and p.employee_id is not None
         if not (ids and view):
@@ -182,9 +187,10 @@ def attach_photos(db: Session, p: Principal, k: Kind, obj, prepared) -> int:
 
 
 @router.post("/mine/{kind}", status_code=201)
-def add_mine(kind: str, data: str = Form(...), files: list[UploadFile] = File(default=[]), p: Principal = Depends(current),
-             db: Session = Depends(get_db)):
-    """Водитель вносит рейс или заправку. data — поля записи в виде JSON, files — фото накладной или чека."""
+def add_mine(kind: str, background: BackgroundTasks, data: str = Form(...), files: list[UploadFile] = File(default=[]),
+             p: Principal = Depends(current), db: Session = Depends(get_db)):
+    """Водитель вносит рейс, заправку или талон весов. data — поля записи в виде JSON, files — фото накладной, чека или талона.
+    У талона водитель задаёт только машину и заметку: тонны программа читает с фото (в фоне, после ответа)."""
     k = kind_of(kind)
     code = f"{k.res}.create_own"
     if not p.can(code):
@@ -199,6 +205,10 @@ def add_mine(kind: str, data: str = Form(...), files: list[UploadFile] = File(de
         raise fail(422, "bad_data", "Не удалось прочитать форму: обновите страницу и повторите")
     cid = str(raw.get("client_id") or "")[:64]
     body = {key: val for key, val in raw.items() if key not in ("driver_id", "legal_entity_id", "client_id")}
+    ticket = k.key == "ticket"
+    if ticket:
+        body = {key: val for key, val in body.items() if key in TICKET_FIELDS}
+        body.setdefault("ticket_date", job_today().isoformat())
     prepared = read_uploads(files, images_only=True, required=False)
     if len(prepared) > ENTRY_MAX_PHOTOS:
         raise fail(422, "too_many_photos", f"Не больше {ENTRY_MAX_PHOTOS} фото к одной записи", "files")
@@ -207,7 +217,11 @@ def add_mine(kind: str, data: str = Form(...), files: list[UploadFile] = File(de
         # та же отправка пришла второй раз (телефон не получил ответ): записи не дублируем, но дозагружаем фото, если их ещё нет
         if prepared and not live_photos(db, k, [dup.id]).get(dup.id) and own_fresh(db, p, k, dup):
             attach_photos(db, p, k, dup, prepared)
+            if ticket:
+                background.add_task(weigh_svc.read_ticket, dup.id)
         return {"item": item_out(db, p, k, dup), "warnings": [], "duplicate": True}
+    if ticket and not prepared:
+        raise fail(422, "no_file", "Приложите фото талона", "files")
     try:
         vid = int(body.get("vehicle_id"))
     except (TypeError, ValueError):
@@ -217,6 +231,8 @@ def add_mine(kind: str, data: str = Form(...), files: list[UploadFile] = File(de
     obj, warnings = save(db, RESOURCES[k.res], p, body, None, code=code, extra={"driver_id": p.employee_id, "client_id": cid})
     if prepared:
         attach_photos(db, p, k, obj, prepared)
+    if ticket:
+        background.add_task(weigh_svc.read_ticket, obj.id)
     return {"item": item_out(db, p, k, obj), "warnings": warnings, "duplicate": False}
 
 
@@ -238,7 +254,7 @@ def delete_mine(kind: str, oid: int, p: Principal = Depends(current), db: Sessio
 # ---------------------------------------------------------------- фото
 
 @router.post("/{kind}/{oid}/photos")
-def add_photos(kind: str, oid: int, files: list[UploadFile] = File(default=[]), p: Principal = Depends(current),
+def add_photos(kind: str, oid: int, background: BackgroundTasks, files: list[UploadFile] = File(default=[]), p: Principal = Depends(current),
                db: Session = Depends(get_db)):
     k = kind_of(kind)
     obj = get_obj(db, p, k, oid)
@@ -249,13 +265,15 @@ def add_photos(kind: str, oid: int, files: list[UploadFile] = File(default=[]), 
     if have + len(prepared) > ENTRY_MAX_PHOTOS:
         raise fail(422, "too_many_photos", f"Не больше {ENTRY_MAX_PHOTOS} фото к одной записи", "files")
     attach_photos(db, p, k, obj, prepared)
+    if k.key == "ticket" and obj.tons is None:
+        background.add_task(weigh_svc.read_ticket, obj.id)         # вес ещё не определён: новое фото может помочь
     return {"item": item_out(db, p, k, obj)}
 
 
 def get_photo(db: Session, p: Principal, pid: int) -> tuple[EntryPhoto, Kind, object]:
     ph = db.get(EntryPhoto, pid)
     if ph is not None:
-        k = KINDS["trip"] if ph.trip_id else KINDS["fuel"]
+        k = KINDS["trip"] if ph.trip_id else KINDS["ticket"] if ph.weigh_ticket_id else KINDS["fuel"]
         obj = db.get(k.model, getattr(ph, k.photo_col))
         if obj is not None and can_view(db, p, k, obj):
             return ph, k, obj
@@ -298,7 +316,7 @@ def remove_photo(pid: int, body: RemoveIn, p: Principal = Depends(current), db: 
 def feed(date_from: str | None = None, date_to: str | None = None, kind: str = "", vehicle_id: int | None = None,
          problems: bool = False, legal_entity_id: int | None = None, p: Principal = Depends(current), db: Session = Depends(get_db)):
     """Рейсы и заправки вперемешку, свежие сверху. «Только подозрительные» — заправки, у которых есть замечания по литрам или расходу."""
-    kinds = [k for k in KINDS.values() if (not kind or kind == k.key) and p.scope(f"{k.res}.view")]
+    kinds = [k for k in (KINDS[x] for x in LISTED) if (not kind or kind == k.key) and p.scope(f"{k.res}.view")]
     if not kinds and not p.scope("trips.view") and not p.scope("fuel_fills.view"):
         raise fail(403, "forbidden", "Нет права смотреть записи водителей")
     try:

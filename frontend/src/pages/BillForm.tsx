@@ -1,5 +1,5 @@
 // Новый счёт на ремонт (выписать в программе или внести счёт поставщика) и правка счёта.
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, FileSearch, Paperclip, X } from "lucide-react";
@@ -9,6 +9,7 @@ import { useAuth } from "../auth";
 import { useVehicleOptions } from "../components/pickers";
 import { BILL_UNITS, emptyPart, filledParts, PartsEditor, type PartRow } from "../components/PartsEditor";
 import { Alert, Button, Card, Field, NotFound, PageHeader, QueryState, Spinner, useForm, useToast } from "../ui";
+import { clearHandoff, peekHandoff } from "./billAuto";
 import { useBillMeta, type BillMeta } from "./Bills";
 
 interface Detail {
@@ -46,20 +47,24 @@ function Body({ edit, meta, prefill, kind: kind0 }: { edit?: Detail; meta: BillM
   const { can, entityId } = useAuth();
   const kind = edit ? (edit.kind as "issued" | "uploaded") : kind0;
   const issued = kind === "issued";
+  // Если человек пришёл из окна «Загрузить счёт», здесь уже есть прочитанное и приложенные файлы
+  const [handoff] = useState(() => (!edit && !prefill && kind === "uploaded" ? peekHandoff() : null));
+  const hf = handoff?.found ?? {};
   const f = useForm({
-    number: edit?.number ?? "", bill_date: edit?.bill_date ?? todayIso(), supplier_id: edit?.supplier_id ? String(edit.supplier_id) : "",
-    supplier_name: edit?.supplier_name ?? "", supplier_inn: edit?.supplier_inn ?? "", supplier_kpp: edit?.supplier_kpp ?? "", supplier_addr: edit?.supplier_addr ?? "",
-    supplier_phone: edit?.supplier_phone ?? "", bank_name: edit?.bank_name ?? "", bik: edit?.bik ?? "", corr_account: edit?.corr_account ?? "", account: edit?.account ?? "",
-    basis: edit?.basis ?? prefill?.basis ?? "", vehicle_id: String(edit?.vehicle_id ?? prefill?.vehicle_id ?? ""), request_id: String(edit?.request_id ?? prefill?.request_id ?? ""),
-    legal_entity_id: String(edit?.legal_entity_id ?? prefill?.legal_entity_id ?? (meta.entities.length === 1 ? meta.entities[0].id : meta.entities.some((x) => x.id === entityId) ? entityId : "")),
-    vat_pct: String(edit?.vat_pct ?? 22), total: edit ? String(edit.total).replace(".", ",") : "", vat: "", paid: false, paid_date: "", note: edit?.note ?? "",
+    number: edit?.number ?? hf.number ?? "", bill_date: edit?.bill_date ?? hf.bill_date ?? todayIso(), supplier_id: edit?.supplier_id ? String(edit.supplier_id) : hf.supplier_id ? String(hf.supplier_id) : "",
+    supplier_name: edit?.supplier_name ?? hf.supplier_name ?? "", supplier_inn: edit?.supplier_inn ?? hf.supplier_inn ?? "", supplier_kpp: edit?.supplier_kpp ?? hf.supplier_kpp ?? "", supplier_addr: edit?.supplier_addr ?? hf.supplier_addr ?? "",
+    supplier_phone: edit?.supplier_phone ?? hf.supplier_phone ?? "", bank_name: edit?.bank_name ?? hf.bank_name ?? "", bik: edit?.bik ?? hf.bik ?? "", corr_account: edit?.corr_account ?? hf.corr_account ?? "", account: edit?.account ?? hf.account ?? "",
+    basis: edit?.basis ?? prefill?.basis ?? hf.basis ?? "", vehicle_id: String(edit?.vehicle_id ?? prefill?.vehicle_id ?? hf.vehicle_id ?? ""), request_id: String(edit?.request_id ?? prefill?.request_id ?? ""),
+    legal_entity_id: String(edit?.legal_entity_id ?? prefill?.legal_entity_id ?? hf.legal_entity_id ?? (handoff?.legalEntityId || (meta.entities.length === 1 ? meta.entities[0].id : meta.entities.some((x) => x.id === entityId) ? entityId : ""))),
+    vat_pct: String(edit?.vat_pct ?? hf.vat_pct ?? 22), total: edit ? String(edit.total).replace(".", ",") : hf.total != null ? String(hf.total).replace(".", ",") : "", vat: !edit && hf.vat != null ? String(hf.vat).replace(".", ",") : "",
+    paid: false, paid_date: "", note: edit?.note ?? handoff?.note ?? "",
   });
   const [rows, setRows] = useState<PartRow[]>(() =>
     edit?.items.length ? edit.items.map((i) => ({ name: i.name, article: i.article, qty: i.qty_text, unit: i.unit, price: String(i.price).replace(".", ",") }))
       : prefill?.items.length ? prefill.items.map((i) => ({ ...i })) : [emptyPart(true)]);
-  const [files, setFiles] = useState<File[]>([]);
-  const [recNote, setRecNote] = useState<{ tone: "info" | "warning"; text: string } | null>(null);
-  const [showBank, setShowBank] = useState(!!(edit && (edit.bank_name || edit.bik || edit.account)) || issued);
+  const [files, setFiles] = useState<File[]>(handoff?.files ?? []);
+  const [recNote, setRecNote] = useState<{ tone: "info" | "warning"; text: string } | null>(handoff ? { tone: "warning", text: handoff.message } : null);
+  const [showBank, setShowBank] = useState(!!(edit && (edit.bank_name || edit.bik || edit.account)) || issued || !!(handoff && (hf.bank_name || hf.bik || hf.account || hf.supplier_addr || hf.supplier_phone)));
   const fileRef = useRef<HTMLInputElement>(null);
   const vehicles = useVehicleOptions(f.values.legal_entity_id ? Number(f.values.legal_entity_id) : undefined);
   const suppliers = useQuery({ queryKey: ["opt-supplier"], queryFn: () => get<{ items: { id: number; label: string }[] }>("/options/supplier"), retry: false, staleTime: 60_000 });
@@ -70,6 +75,15 @@ function Body({ edit, meta, prefill, kind: kind0 }: { edit?: Detail; meta: BillM
   const pct = Number(f.values.vat_pct);
   const calc = useMemo(() => preview(rows, pct), [rows, pct]);
   const lockedEntity = !!(edit || prefill || f.values.vehicle_id);
+
+  // Подсветить то, что программа не прочитала или в чём не уверена; пришли мы из окна «Загрузить счёт»
+  useEffect(() => {
+    if (!handoff) return;
+    clearHandoff();
+    const errs: Record<string, string> = { ...handoff.errors };
+    for (const k of handoff.missing) errs[k] ||= k === "legal_entity_id" ? "Выберите юрлицо" : "Впишите: программа не смогла прочитать";
+    if (Object.keys(errs).length) f.fail(new ApiError(422, "auto_read", handoff.message, null, errs));
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const recognize = useMutation({
     mutationFn: (file: File) => { const fd = new FormData(); fd.append("file", file); return api<{ found: Found; readable: boolean; note: string }>("POST", "/bills/recognize", fd); },
@@ -121,8 +135,8 @@ function Body({ edit, meta, prefill, kind: kind0 }: { edit?: Detail; meta: BillM
     if (!list) return;
     const add = [...list];
     setFiles((s) => [...s, ...add].slice(0, 10));
-    const pdf = add.find((x) => x.type === "application/pdf" || x.name.toLowerCase().endsWith(".pdf"));
-    if (pdf && !edit && !f.values.number && !f.values.total) recognize.mutate(pdf);
+    const readable = add.find((x) => x.type === "application/pdf" || x.type.startsWith("image/") || /\.(pdf|jpe?g|png|webp)$/i.test(x.name));
+    if (readable && !edit && !f.values.number && !f.values.total) recognize.mutate(readable);
     if (fileRef.current) fileRef.current.value = "";
   };
   const e = f.errors;
@@ -149,7 +163,7 @@ function Body({ edit, meta, prefill, kind: kind0 }: { edit?: Detail; meta: BillM
                   <ul className="file-list">
                     {files.map((x, i) => (
                       <li key={i}><Paperclip size={14} aria-hidden /> <span className="grow">{x.name} <span className="muted small">{fmtSize(x.size)}</span></span>
-                        {(x.type === "application/pdf" || x.name.toLowerCase().endsWith(".pdf")) && <Button size="sm" icon={FileSearch} loading={recognize.isPending} onClick={() => recognize.mutate(x)}>Прочитать данные</Button>}
+                        <Button size="sm" icon={FileSearch} loading={recognize.isPending} onClick={() => recognize.mutate(x)}>Прочитать данные</Button>
                         <Button variant="ghost" size="sm" icon={X} aria-label={`Убрать файл ${x.name}`} onClick={() => setFiles((s) => s.filter((_, k) => k !== i))} />
                       </li>
                     ))}
@@ -157,7 +171,7 @@ function Body({ edit, meta, prefill, kind: kind0 }: { edit?: Detail; meta: BillM
                 )}
                 {e.files && <span className="err" role="alert">{e.files}</span>}
                 {recNote && <Alert tone={recNote.tone}>{recNote.text}</Alert>}
-                <div className="muted small">Данные из PDF программа читает сама, но только если в файле есть текст. С фото и сканов читать пока не умеет: впишите данные вручную.</div>
+                <div className="muted small">Данные из PDF, скана и фото программа читает сама. С фото и сканов бывают ошибки в цифрах: проверьте номер, дату и сумму.</div>
               </div>
             </Card>
           )}

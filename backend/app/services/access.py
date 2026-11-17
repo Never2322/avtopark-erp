@@ -57,3 +57,10 @@ def reading_allowed(p: Principal, db: Session, v: Vehicle) -> bool:
     if p.can("readings.create", v.legal_entity_id):
         return True
     return p.can("readings.create_own", v.legal_entity_id) and v.id in assigned_vehicle_ids(db, p.employee_id)
+
+
+def status_allowed(p: Principal, db: Session, v: Vehicle) -> bool:
+    """Менять статус машины: сотрудник офиса с правом на юрлицо или водитель, за которым она закреплена сейчас."""
+    if p.can("vehicle_status.change", v.legal_entity_id):
+        return True
+    return p.can("vehicle_status.change_own", v.legal_entity_id) and v.id in assigned_vehicle_ids(db, p.employee_id)

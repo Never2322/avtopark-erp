@@ -15,7 +15,7 @@ from app.deps import Principal, current, entity_filter, require
 from app.enums import READING_KINDS, REQUEST_OPEN, VEHICLE_CATEGORIES, VEHICLE_DOC_KINDS, VEHICLE_STATUSES, status_label
 from app.models import (Department, DossierDoc, Employee, LegalEntity, MaintenanceItem, ServiceRequest, User, Vehicle, VehicleAssignment, VehicleStatusHistory,
                         VehicleType, Waybill)
-from app.services import access, readings as readings_svc
+from app.services import access, notify, readings as readings_svc, weigh as weigh_svc
 from app.services.vehicles import active_assignment_filter, change_status, employee_in_entity
 
 router = APIRouter(prefix="/vehicles", tags=["Транспорт"])
@@ -32,6 +32,9 @@ class VehicleIn(BaseModel):
     year: int | None = Field(default=None, ge=1950, le=2100)
     department_id: int | None = None
     note: str = Field(default="", max_length=2000)
+    # «Вести тоннаж»: у водителя этой машины появляется вкладка «Тоннаж» (талоны весов). Не передано: у новой машины решает тип
+    # (мусоровоз и самосвал: да), у существующей остаётся как есть.
+    tonnage: bool | None = None
 
 
 class VehicleCreate(VehicleIn):
@@ -64,8 +67,14 @@ def clean_vehicle(db: Session, body: VehicleIn, entity_id: int, vehicle_id: int 
     if vin and not VIN_RE.match(vin):
         raise fail(422, "bad_vin", "VIN состоит из 17 символов: цифры и латинские буквы, кроме I, O, Q", "vin")
     data["vin"] = vin or None
-    if not db.get(VehicleType, body.type_id):
+    vtype = db.get(VehicleType, body.type_id)
+    if not vtype:
         raise fail(422, "bad_type", "Выберите тип техники", "type_id")
+    if data.get("tonnage") is None:
+        if vehicle_id is None:
+            data["tonnage"] = weigh_svc.type_tonnage(vtype)
+        else:
+            data.pop("tonnage", None)
     if body.department_id is not None:
         d = db.get(Department, body.department_id)
         if not d or d.legal_entity_id != entity_id:
@@ -107,7 +116,7 @@ def out(db: Session, p: Principal, v: Vehicle, drivers: dict | None = None, deta
         "status_changed_at": v.status_changed_at.isoformat() if v.status_changed_at else None,
         "current_km": float(v.current_km) if v.current_km is not None else None,
         "current_hours": float(v.current_hours) if v.current_hours is not None else None,
-        "driver": d, "archived": v.archived_at is not None,
+        "driver": d, "archived": v.archived_at is not None, "tonnage": v.tonnage,
     }
     if detailed:
         e = v.legal_entity_id
@@ -115,7 +124,7 @@ def out(db: Session, p: Principal, v: Vehicle, drivers: dict | None = None, deta
         data["actions"] = {
             "edit": p.can("vehicles.edit", e) and not v.archived_at,
             "archive": p.can("vehicles.archive", e),
-            "change_status": p.can("vehicle_status.change", e) and not v.archived_at,
+            "change_status": access.status_allowed(p, db, v) and not v.archived_at,
             "assign": p.can("assignments.manage", e) and not v.archived_at,
             "add_reading": access.reading_allowed(p, db, v) and not v.archived_at,
             "correct_reading": p.can("readings.correct", e),
@@ -352,12 +361,18 @@ def restore_vehicle(vid: int, p: Principal = Depends(require("vehicles.archive")
 
 
 @router.post("/{vid}/status")
-def set_status(vid: int, body: StatusIn, p: Principal = Depends(require("vehicle_status.change")), db: Session = Depends(get_db)):
+def set_status(vid: int, body: StatusIn, p: Principal = Depends(current), db: Session = Depends(get_db)):
+    if not (p.can("vehicle_status.change") or p.can("vehicle_status.change_own")):
+        raise fail(403, "forbidden", "Нет доступа к этому действию")
     v = get_vehicle(db, p, vid)
-    if not p.can("vehicle_status.change", v.legal_entity_id):
-        raise fail(403, "forbidden", "Нет права менять статус техники этого юрлица")
+    if not access.status_allowed(p, db, v):
+        raise fail(403, "forbidden", "Статус можно менять только у своей машины, закреплённой за вами" if not p.can("vehicle_status.change", v.legal_entity_id)
+                   else "Нет права менять статус техники этого юрлица")
+    old = v.status
     changed = change_status(db, p, v, body.status, body.reason)
     v.updated_by_id = p.id
+    if changed and not p.can("vehicle_status.change", v.legal_entity_id):       # поменял водитель: механику, диспетчеру и директору сообщаем
+        notify.on_vehicle_status(db, v, old, body.status, body.reason, p.id)
     db.commit()
     data = out(db, p, v, detailed=True)
     data["changed"] = changed

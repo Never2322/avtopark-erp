@@ -211,6 +211,8 @@ class Vehicle(Audited, Base):
     department_id: Mapped[int | None] = mapped_column(ForeignKey("departments.id"))
     status: Mapped[str] = mapped_column(String(20), default="in_work", server_default="in_work")
     status_changed_at: Mapped[dt.datetime | None] = mapped_column(TS)
+    # Водитель этой машины прикладывает талоны весов с полигона: у него появляется вкладка «Тоннаж» (мусоровозы и самосвалы включены сами).
+    tonnage: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"))
     # Текущие показания пересчитываются из журнала показаний, руками не правятся.
     current_km: Mapped[Decimal | None] = mapped_column(Numeric(12, 1))
     current_hours: Mapped[Decimal | None] = mapped_column(Numeric(12, 1))
@@ -847,12 +849,38 @@ class FuelFill(Audited, Voidable, Base):
     )
 
 
+class WeighTicket(Audited, Voidable, Base):
+    """Талон весов с полигона: одна ходка. Водитель прикладывает только фото и заметку; тоннаж программа читает с фото сама
+    (tons_source «read») или его вносит сотрудник, глядя на фото («manual»). Пока тоннаж пуст, талон в отчёт не входит, а считается отдельно."""
+    __tablename__ = "weigh_tickets"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    legal_entity_id: Mapped[int] = mapped_column(ForeignKey("legal_entities.id"), index=True)
+    vehicle_id: Mapped[int] = mapped_column(ForeignKey("vehicles.id"), index=True)
+    driver_id: Mapped[int | None] = mapped_column(ForeignKey("employees.id"))
+    ticket_date: Mapped[dt.date] = mapped_column(Date, index=True)
+    tons: Mapped[Decimal | None] = mapped_column(Numeric(8, 3))                   # нетто, тонн
+    tons_source: Mapped[str] = mapped_column(String(10), default="", server_default="")
+    tons_guess: Mapped[Decimal | None] = mapped_column(Numeric(8, 3))             # что программа увидела, но не смогла подтвердить
+    doc_number: Mapped[str] = mapped_column(String(60), default="", server_default="")
+    read_note: Mapped[str] = mapped_column(String(300), default="", server_default="")
+    read_at: Mapped[dt.datetime | None] = mapped_column(TS)                       # когда программа закончила читать фото
+    note: Mapped[str] = mapped_column(String(500), default="", server_default="")
+    client_id: Mapped[str] = mapped_column(String(64), default="", server_default="")
+    __table_args__ = (
+        CheckConstraint("tons IS NULL OR (tons > 0 AND tons <= 200)", name="tons"),
+        CheckConstraint("tons_source IN ('', 'read', 'manual')", name="tons_source"),
+        Index("ix_weigh_tickets_vehicle_date", "vehicle_id", "ticket_date"),
+        Index("uq_weigh_tickets_client", "created_by_id", "client_id", unique=True, postgresql_where=text("client_id <> ''")),
+    )
+
+
 class EntryPhoto(Base):
-    """Фото к рейсу (накладная) или заправке (чек). Принадлежит ровно одной записи. Убирается с отметкой, не стирается."""
+    """Фото к рейсу (накладная), заправке (чек) или талону весов. Принадлежит ровно одной записи. Убирается с отметкой, не стирается."""
     __tablename__ = "entry_photos"
     id: Mapped[int] = mapped_column(primary_key=True)
     trip_id: Mapped[int | None] = mapped_column(ForeignKey("trips.id"), index=True)
     fuel_fill_id: Mapped[int | None] = mapped_column(ForeignKey("fuel_fills.id"), index=True)
+    weigh_ticket_id: Mapped[int | None] = mapped_column(ForeignKey("weigh_tickets.id"), index=True)
     file_id: Mapped[int] = mapped_column(ForeignKey("stored_files.id"), index=True)
     added_at: Mapped[dt.datetime] = mapped_column(TS, server_default=func.now())
     added_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
@@ -860,7 +888,7 @@ class EntryPhoto(Base):
     removed_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
     remove_reason: Mapped[str] = mapped_column(String(300), default="", server_default="")
     file: Mapped[StoredFile] = relationship()
-    __table_args__ = (CheckConstraint("(trip_id IS NOT NULL) <> (fuel_fill_id IS NOT NULL)", name="owner"),)
+    __table_args__ = (CheckConstraint("(trip_id IS NOT NULL)::int + (fuel_fill_id IS NOT NULL)::int + (weigh_ticket_id IS NOT NULL)::int = 1", name="owner"),)
 
 
 # ---------------------------------------------------------------- детали, «что купить», счета на ремонт
@@ -984,6 +1012,8 @@ class WorkLog(Audited, Voidable, Base):
     tariff_name: Mapped[str] = mapped_column(String(160), default="", server_default="")
     unit: Mapped[str] = mapped_column(String(8), default="hour", server_default="hour")
     rate: Mapped[Decimal] = mapped_column(Money, default=0, server_default="0")
+    # тариф выбрал человек в офисе при внесении (а не взят из карточки сотрудника): при смене вида «работа/ремонт» он остаётся
+    tariff_manual: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"))
     source: Mapped[str] = mapped_column(String(8), default="staff", server_default="staff")
     client_id: Mapped[str] = mapped_column(String(64), default="", server_default="")
     __table_args__ = (

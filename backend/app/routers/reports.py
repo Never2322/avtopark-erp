@@ -23,7 +23,7 @@ from app.services.xlsx import xlsx_book
 
 router = APIRouter(prefix="/reports", tags=["Отчёты"])
 XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-KIND_FORMAT = {"money": "money", "dec": "dec", "int": "int"}
+KIND_FORMAT = {"money": "money", "dec": "dec", "int": "int", "ton": "ton"}
 
 
 def report_or_404(p: Principal, name: str) -> svc.Report:

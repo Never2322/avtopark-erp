@@ -3,16 +3,17 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { CalendarCheck, ClipboardList, Fuel, Gauge, Hourglass, Route as RouteIcon, Truck, Wrench } from "lucide-react";
+import { CalendarCheck, ClipboardList, Fuel, Gauge, Hourglass, Route as RouteIcon, Truck, Wallet, Weight, Wrench } from "lucide-react";
 import { get } from "../api";
 import { useAuth } from "../auth";
-import { fmtDate, fmtDateTime, fmtNum, plural } from "../format";
+import { fmtDate, fmtDateTime, fmtMoney, fmtNum, plural } from "../format";
 import { OutboxList } from "../components/Outbox";
 import { Alert, Badge, Button, Card, Empty, PageHeader, QueryState, RequestStatus, VehicleStatus } from "../ui";
 import { EntryCard, EntryModal, type Mine as EntriesData } from "./Entries";
 import { JobCard, useRefresh, type Mine as JobsData } from "./Jobs";
-import { TimeButtons } from "./MyTime";
 import { AttendanceCard } from "./Attendance";
+import { TicketModal, TonnageBlock, useTonnage } from "./Tonnage";
+import { VehicleStatusButton } from "../components/VehicleStatusButton";
 
 interface HomeVehicle {
   id: number; plate: string; label: string; type: string; status: string; status_label: string; status_since: string | null; primary_reading: string;
@@ -20,9 +21,11 @@ interface HomeVehicle {
   requests: { id: number; number: number; title: string; status: string; status_label: string; priority: string; priority_label: string }[];
   fuel: { date: string; liters: number; per100: number | null; norm: number | null; over_pct: number | null } | null;
 }
+export interface Earned { month: string; title: string; work_h: number; repair_h: number; work: number; repair: number; total: number; no_rate: number; entries: number }
 interface Home {
   today: string; name: string; has_vehicle: boolean; vehicles: HomeVehicle[];
-  can: { requests: boolean; waybills: boolean; trip: boolean; fuel: boolean; jobs: boolean; reading: boolean };
+  can: { requests: boolean; waybills: boolean; trip: boolean; fuel: boolean; jobs: boolean; reading: boolean; tonnage?: boolean; status?: boolean };
+  earned?: Earned | null;
 }
 
 const longDate = (iso: string) => {
@@ -30,7 +33,7 @@ const longDate = (iso: string) => {
   return t.charAt(0).toUpperCase() + t.slice(1);
 };
 
-function VehicleBlock({ v, canRequest }: { v: HomeVehicle; canRequest: boolean }) {
+function VehicleBlock({ v, canRequest, canStatus }: { v: HomeVehicle; canRequest: boolean; canStatus: boolean }) {
   const reading = v.primary_reading === "km" ? v.current_km : v.current_hours;
   return (
     <Card className="vehicle-home">
@@ -64,8 +67,29 @@ function VehicleBlock({ v, canRequest }: { v: HomeVehicle; canRequest: boolean }
           </ul>
         </div>
       )}
-      {canRequest && <div><Link className="btn sm" to={`/requests?new=1&vehicle=${v.id}`}><Wrench size={14} aria-hidden /> Запрос на деталь по этой машине</Link></div>}
+      {(canStatus || canRequest) && (
+        <div className="row wrap" style={{ gap: 8 }}>
+          {canStatus && <VehicleStatusButton id={v.id} plate={v.plate} status={v.status} />}
+          {canRequest && <Link className="btn sm" to={`/requests?new=1&vehicle=${v.id}`}><Wrench size={14} aria-hidden /> Запрос на деталь по этой машине</Link>}
+        </div>
+      )}
     </Card>
+  );
+}
+
+/** Сколько водитель заработал в этом месяце по часам, которые внёс он сам или директор (до вычета налогов). */
+function EarnedBlock({ e }: { e: Earned }) {
+  return (
+    <section className="stack-sm">
+      <h2 className="row" style={{ gap: 8 }}><Wallet size={18} aria-hidden /> Заработано за {e.title} <Link className="small" to="/my-time">Мои часы</Link></h2>
+      <div className="kpi-row earned">
+        <Card><span className="muted small">Всего</span><span className="pay-big">{fmtMoney(e.total)} ₽</span><span className="muted small">до вычета налогов</span></Card>
+        <Card><span className="muted small">Работа</span><span className="pay-big">{fmtNum(e.work_h)} ч</span><span className="small">{fmtMoney(e.work)} ₽</span></Card>
+        <Card><span className="muted small">Ремонт</span><span className="pay-big">{fmtNum(e.repair_h)} ч</span><span className="small">{fmtMoney(e.repair)} ₽</span></Card>
+      </div>
+      {e.no_rate > 0 && <Alert tone="warning">По {e.no_rate} {plural(e.no_rate, "записи", "записям", "записям")} часов нет тарифа, поэтому они пока без суммы. Попросите директора назначить вам тариф: сумма посчитается сама.</Alert>}
+      {e.entries === 0 && <p className="muted small">Часов за этот месяц пока нет. Когда их внесёт директор или вы сами, здесь появится сумма.</p>}
+    </section>
   );
 }
 
@@ -77,8 +101,10 @@ export function DriverHome() {
   const jobs = useQuery({ queryKey: ["jobs-mine"], queryFn: () => get<JobsData>("/jobs/mine"), refetchInterval: 60_000, enabled: home.data?.can.jobs ?? false });
   const refreshJobs = useRefresh();
   const [form, setForm] = useState<"trip" | "fuel" | null>(null);
+  const [ticket, setTicket] = useState(false);
+  const tonnage = useTonnage(undefined, home.data?.can.tonnage ?? false);
   const h = home.data;
-  const refreshEntries = () => { for (const k of ["entries-mine", "driver-home", "dashboard"]) qc.invalidateQueries({ queryKey: [k] }); };
+  const refreshEntries = () => { for (const k of ["entries-mine", "driver-home", "dashboard", "tonnage"]) qc.invalidateQueries({ queryKey: [k] }); };
 
   const todayJobs = jobs.data ? jobs.data.items.filter((j) => j.job_date <= jobs.data!.today) : [];
   const tomorrow = jobs.data ? jobs.data.items.filter((j) => j.job_date > jobs.data!.today).length : 0;
@@ -94,20 +120,24 @@ export function DriverHome() {
             <OutboxList />
             <AttendanceCard />
             {!h.has_vehicle ? (
-              <Card><Empty icon={Truck} title="За вами не закреплена техника">Попросите диспетчера закрепить за вами машину: тогда здесь появятся задания, рейсы и заправки.</Empty></Card>
+              <>
+                <Card><Empty icon={Truck} title="За вами не закреплена техника">Попросите диспетчера закрепить за вами машину: тогда здесь появятся задания, рейсы и заправки.</Empty></Card>
+                {h.earned && <EarnedBlock e={h.earned} />}
+              </>
             ) : (
               <>
                 <div className="entry-quick">
                   <Button variant="primary" size="lg" icon={RouteIcon} disabled={!h.can.trip || !entries.data?.can.trip} onClick={() => setForm("trip")}>Рейс</Button>
                   <Button variant="primary" size="lg" icon={Fuel} disabled={!h.can.fuel || !entries.data?.can.fuel} onClick={() => setForm("fuel")}>Заправка</Button>
-                  <TimeButtons kinds={["repair", "work"]} size="lg" />
+                  {h.can.tonnage && <Button variant="primary" size="lg" icon={Weight} disabled={!tonnage.data?.can.create || !tonnage.data.vehicles.length} onClick={() => setTicket(true)}>Талон весов</Button>}
                   {h.can.requests && <Link className="btn lg" to={single ? `/requests?new=1&vehicle=${single.id}` : "/requests?new=1"}><Wrench size={16} aria-hidden /> Обращение</Link>}
                   {h.can.waybills && <Link className="btn lg" to="/waybills"><ClipboardList size={16} aria-hidden /> Путевые листы</Link>}
-                  {can("worklog.create_own") && <Link className="btn lg" to="/my-time"><Hourglass size={16} aria-hidden /> Мои часы</Link>}
+                  {can("worklog.view_own") && <Link className="btn lg" to="/my-time"><Hourglass size={16} aria-hidden /> Мои часы</Link>}
                 </div>
 
+                {h.earned && <EarnedBlock e={h.earned} />}
 
-                <div className="grid cols-2 vehicles-grid">{h.vehicles.map((v) => <VehicleBlock key={v.id} v={v} canRequest={h.can.requests} />)}</div>
+                <div className="grid cols-2 vehicles-grid">{h.vehicles.map((v) => <VehicleBlock key={v.id} v={v} canRequest={h.can.requests} canStatus={!!h.can.status} />)}</div>
 
                 {h.can.jobs && (
                   <section className="stack-sm">
@@ -123,6 +153,8 @@ export function DriverHome() {
                   </section>
                 )}
 
+                {h.can.tonnage && <TonnageBlock onAdd={() => setTicket(true)} />}
+
                 {lastEntries.length > 0 && (
                   <section className="stack-sm">
                     <h2 className="row" style={{ gap: 8 }}>Последние записи <Link className="small" to="/entries">Все записи</Link></h2>
@@ -135,6 +167,7 @@ export function DriverHome() {
           </div>
         )}
       </QueryState>
+      {tonnage.data && ticket && <TicketModal data={tonnage.data} onClose={() => setTicket(false)} onDone={refreshEntries} />}
       {entries.data && form && <EntryModal kind={form} data={entries.data} onClose={() => setForm(null)} onDone={refreshEntries} />}
     </>
   );

@@ -336,6 +336,8 @@ select.input { appearance: none; background-image: linear-gradient(45deg, transp
   .grid.cols-4 { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; }
   .kpi .value { font-size: 24px; }
   .topbar .search { display: none; }
+  .topbar { gap: 8px; }
+  .topbar-entity { min-width: 0; max-width: 130px; }
   .modal-foot { flex-wrap: wrap; }
 }
 @media (prefers-reduced-motion: reduce) {
@@ -506,24 +508,11 @@ select.input { appearance: none; background-image: linear-gradient(45deg, transp
 .ts-day.off, .ts-td.off { background: rgba(244, 114, 94, 0.09) !important; }
 .ts-day.today, .ts-td.today { box-shadow: inset 0 0 0 1px var(--mint); }
 .ts-sum { min-width: 52px; text-align: right; padding: 4px 8px !important; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.ts-cell { display: block; width: 34px; height: 34px; border: 0; border-radius: 0; text-align: center; font: inherit; font-size: 12px; padding: 0; background: transparent; color: inherit; outline-offset: -2px; }
-.ts-cell:focus { outline: 2px solid var(--mint); background: var(--card); }
-.ts-cell.day { background: rgba(16, 185, 129, 0.16); }
-.ts-cell.absence { background: rgba(245, 158, 11, 0.2); }
-.ts-cell.other { background: rgba(100, 116, 139, 0.16); }
-.ts-cell.bad { background: rgba(239, 68, 68, 0.22); outline: 1px solid #ef4444; }
-.ts-cell.edited { font-weight: 700; box-shadow: inset 0 -2px 0 var(--mint); }
-.ts-legend { display: flex; flex-wrap: wrap; gap: 8px; }
-.ts-chip { border: 1px solid var(--border); border-radius: 999px; background: var(--card); color: inherit; padding: 4px 12px; font: inherit; font-size: 13px; cursor: pointer; }
-.ts-chip:disabled { cursor: default; }
-.ts-chip b { display: inline-block; min-width: 22px; }
-.ts-chip.day { border-color: rgba(16, 185, 129, 0.5); }
-.ts-chip.absence { border-color: rgba(245, 158, 11, 0.6); }
 .ts-ptable { font-size: 10px; table-layout: auto; }
 .ts-ptable th, .ts-ptable td { padding: 2px 1px !important; }
 .ts-ptable th.wd { font-weight: 400; font-size: 9px; }
 .ts-ptable .off { background: #eee; }
-.ts-ptable .ts-p { min-width: 20px; white-space: nowrap; }
+.ts-ptable .ts-p { min-width: 24px; white-space: nowrap; text-align: right; }
 .ts-print { max-width: 1123px; }
 @media (max-width: 640px) { .ts-wrap { max-height: none; } .ts-table .ts-name { min-width: 130px; max-width: 150px; } }
 
@@ -800,6 +789,13 @@ a.stat:hover { background: var(--hover); border-color: var(--border-strong); tex
 .seg-btn.on { background: rgba(53, 199, 181, 0.16); color: var(--text); font-weight: 600; box-shadow: inset 0 -2px 0 var(--mint); }
 .seg-btn:focus-visible { outline: 2px solid var(--mint); outline-offset: -2px; }
 .pay-kpis .card { display: flex; flex-direction: column; gap: 2px; }
+.kpi-row, .ton-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(104px, 1fr)); gap: 10px; }
+.kpi-row .pay-big { white-space: nowrap; }
+@media (max-width: 520px) {
+  .kpi-row.earned { grid-template-columns: 1fr 1fr; }
+  .kpi-row.earned > :first-child { grid-column: 1 / -1; }
+}
+.kpi-row .card, .ton-kpis .card { display: flex; flex-direction: column; gap: 2px; padding: 12px 14px; }
 .pay-big { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.2; }
 .time-list { list-style: none; margin: 0; padding: 0; }
 .time-row { display: flex; flex-direction: column; gap: 4px; padding: 12px 16px; border-bottom: 1px solid var(--border); }
@@ -841,3 +837,28 @@ a.stat:hover { background: var(--hover); border-color: var(--border-strong); tex
 .theme-toggle { flex: none; }
 .login-wrap { position: relative; }
 .login-wrap .theme-toggle { position: absolute; top: 14px; right: 14px; }
+
+/* Запись часов: сколько денег выйдет */
+.calc-box { border: 1px solid var(--border); border-radius: 10px; background: var(--surface); padding: 12px 14px; }
+.calc-rows { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 10px; }
+.calc-rows > div { display: flex; flex-direction: column; gap: 2px; }
+.calc-sum { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.25; }
+@media (max-width: 560px) { .calc-rows { grid-template-columns: minmax(0, 1fr); } }
+
+/* Табель-деньги: клетка дня с суммой */
+.ts-money-table { font-size: 11.5px; }
+.ts-money-table .ts-day { min-width: 48px; width: 48px; }
+.ts-amt { min-width: 48px; width: 48px; height: 34px; text-align: right; padding: 0 5px !important; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ts-amt a { display: block; line-height: 34px; color: var(--text); text-decoration: none; }
+.ts-amt a:hover { background: rgba(53, 199, 181, 0.14); text-decoration: underline; }
+.ts-amt.off { background: rgba(244, 114, 94, 0.09) !important; }
+.ts-amt.today { box-shadow: inset 0 0 0 1px var(--mint); }
+.ts-empty-row th, .ts-empty-row td { color: var(--text-2); }
+.ts-money-table tfoot .ts-amt { line-height: 34px; color: var(--text); }
+/* «Часов» и «Итого» остаются на виду справа, пока листаешь дни */
+.ts-money-table .ts-hours, .ts-money-table .ts-total { position: sticky; z-index: 1; background: var(--card); }
+.ts-money-table thead .ts-hours, .ts-money-table thead .ts-total { z-index: 3; background: var(--surface); }
+.ts-money-table .ts-total { right: 0; min-width: 92px; width: 92px; border-left: 1px solid var(--text-2); }
+.ts-money-table .ts-hours { right: 92px; min-width: 56px; width: 56px; }
+.ts-money-table tfoot .ts-hours, .ts-money-table tfoot .ts-total { z-index: 3; background: var(--surface); }
+@media (max-width: 640px) { .ts-money-table .ts-hours { display: none; } }

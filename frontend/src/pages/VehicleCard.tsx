@@ -71,8 +71,9 @@ function EditModal({ v, onClose }: { v: Detail; onClose: () => void }) {
   const qc = useQueryClient();
   const toast = useToast();
   const f = useForm({ type_id: String(v.type.id), plate: v.plate, internal_no: v.internal_no, make: v.make, model: v.model, vin: v.vin ?? "", year: v.year ? String(v.year) : "", note: v.note });
+  const [tonnage, setTonnage] = useState(!!v.tonnage);
   const m = useMutation({
-    mutationFn: () => patch(`/vehicles/${v.id}`, { ...f.values, type_id: Number(f.values.type_id), year: numOrNull(f.values.year), department_id: v.department_id }),
+    mutationFn: () => patch(`/vehicles/${v.id}`, { ...f.values, type_id: Number(f.values.type_id), year: numOrNull(f.values.year), department_id: v.department_id, tonnage }),
     onSuccess: () => { qc.invalidateQueries(); toast.success("Сохранено"); onClose(); },
     onError: f.fail,
   });
@@ -91,6 +92,10 @@ function EditModal({ v, onClose }: { v: Detail; onClose: () => void }) {
           <Field label="VIN" error={f.errors.vin}><input className="input" value={f.values.vin} onChange={(e) => f.set("vin", e.target.value)} maxLength={17} /></Field>
           <Field label="Год выпуска" error={f.errors.year}><input className="input" inputMode="numeric" value={f.values.year} onChange={(e) => f.set("year", e.target.value)} /></Field>
           <Field label="Заметка" full error={f.errors.note}><textarea className="input" value={f.values.note} onChange={(e) => f.set("note", e.target.value)} /></Field>
+          <div className="full">
+            <label className="check"><input type="checkbox" checked={tonnage} onChange={(e) => setTonnage(e.target.checked)} /> <span>Вести тоннаж</span></label>
+            <div className="muted small">Водитель этой машины увидит вкладку «Тоннаж» и будет присылать фото талонов весов. Старые талоны останутся, если галочку снять.</div>
+          </div>
         </div>
         <div className="muted small">Пробег и моточасы здесь не правятся: они считаются из журнала показаний.</div>
       </div>
@@ -351,6 +356,7 @@ export function VehicleCard() {
               <dt>VIN</dt><dd className="mono">{v.vin || "—"}</dd>
               <dt>Год выпуска</dt><dd>{v.year ?? "—"}</dd>
               <dt>Юрлицо</dt><dd>{v.legal_entity}</dd>
+              <dt>Тоннаж</dt><dd>{v.tonnage ? "Ведётся: водитель присылает фото талонов" : <span className="muted">не ведётся</span>}</dd>
               <dt>Заметка</dt><dd>{v.note || <span className="muted">нет</span>}</dd>
             </dl>
           </Card>

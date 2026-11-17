@@ -24,6 +24,7 @@ from app.models import (Department, Employee, EmploymentAssignment, LegalEntity,
                         UserRole, Vehicle, VehicleAssignment, VehicleType, Waybill)
 from app.security import hash_password, temp_password
 from app.services import backup
+from app.services import weigh as weigh_svc
 from app.services.numbering import next_number
 from app.services.readings import add_reading
 from app.services.vehicles import change_status
@@ -121,7 +122,7 @@ def cmd_seed_demo(args) -> int:
         cars = []
         for plate, make, model, tcode, (kind, value), idx in DEMO["vehicles"]:
             v = Vehicle(legal_entity_id=entities[idx].id, type_id=types[tcode].id, plate=plate, make=make, model=model,
-                        created_by_id=admin.id, updated_by_id=admin.id)
+                        tonnage=weigh_svc.type_tonnage(types[tcode]), created_by_id=admin.id, updated_by_id=admin.id)
             db.add(v)
             db.flush()
             add_reading(db, who, v, kind, Decimal(value), recorded_at=utcnow_minus(30), note="Начальное значение")

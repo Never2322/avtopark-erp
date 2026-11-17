@@ -7,7 +7,6 @@ import { useAuth } from "../auth";
 import { fmtDate } from "../format";
 import { Page, useDebounced, useEntityParam, useUrlState } from "../hooks";
 import { VehicleSelect } from "../components/pickers";
-import { TimeButtons } from "./MyTime";
 import { emptyPart, filledParts, PartsEditor, type PartRow } from "../components/PartsEditor";
 import { Alert, Badge, Button, Card, Empty, Field, FilterChips, Modal, PageHeader, Pagination, Priority, QueryState, RequestStatus, Table, useForm, useToast } from "../ui";
 
@@ -99,10 +98,7 @@ export function Requests() {
   return (
     <>
       <PageHeader title="Обращения и ремонты" sub={list.data ? `Открытых: ${list.data.open_total}` : undefined}
-        actions={<>
-          {can("requests.create") && <Button variant="primary" icon={Plus} onClick={() => setCreating({})}>Запрос на деталь</Button>}
-          <TimeButtons kinds={["repair"]} />
-        </>} />
+        actions={can("requests.create") && <Button variant="primary" icon={Plus} onClick={() => setCreating({})}>Запрос на деталь</Button>} />
       <Card flush>
         <div className="toolbar" style={{ padding: "14px 14px 0" }}>
           <div style={{ position: "relative", minWidth: 240, flex: "1 1 240px", maxWidth: 360 }}>

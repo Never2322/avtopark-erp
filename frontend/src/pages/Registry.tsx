@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArchiveRestore, Archive, Camera, Download, Plus, Search, X, type LucideIcon, Inbox } from "lucide-react";
 import { get, patch, post, qs, upload } from "../api";
 import { shrinkAll } from "../images";
+import { WorklogPreview } from "../components/WorklogPreview";
 import { useAuth } from "../auth";
 import { fmtDate, fmtDateTime, fmtMoney, fmtNum, todayIso } from "../format";
 import { Page, useDebounced, useEntityParam } from "../hooks";
@@ -12,24 +13,24 @@ import { Alert, Badge, Button, Card, ConfirmModal, Empty, Field, FilterChips, Mo
 
 interface FieldMeta {
   name: string; label: string; kind: string; required: boolean; ref: string | null; hint: string; options: { value: string; label: string }[] | null;
-  list: boolean; filter: boolean; sum: boolean; locked: boolean; wide: boolean; show_if: [string, string] | null; suggest: boolean; max: number; default: unknown; more?: boolean;
+  list: boolean; filter: boolean; sum: boolean; locked: boolean; wide: boolean; show_if: [string, string] | null; suggest: boolean; max: number; default: unknown; more?: boolean; places?: number;
 }
 export interface Meta {
   key: string; title: string; one: string; scope: "entity" | "global"; entity_from: string | null; date_field: string | null;
   states: { value: string; label: string }[]; fields: FieldMeta[]; columns: { name: string; label: string; kind: string; sum: boolean; first: boolean }[];
   entities: { id: number; name: string }[]; suggestions: Record<string, string[]>;
   can: { view: boolean; create: boolean; edit: boolean; void: boolean };
-  photos?: { kind: "trip" | "fuel"; label: string } | null;
+  photos?: { kind: "trip" | "fuel" | "ticket"; label: string } | null;
 }
 export type Row = Record<string, any> & { id: number; can_edit: boolean; can_void: boolean; archived: boolean; archive_reason: string; legal_entity?: string; legal_entity_id?: number };
 interface Listing extends Page<Row> { totals: Record<string, number> }
 
-export function cell(f: { name: string; kind: string; options?: FieldMeta["options"] }, r: Row) {
+export function cell(f: { name: string; kind: string; options?: FieldMeta["options"]; places?: number }, r: Row) {
   const v = r[f.name];
   if (v === null || v === undefined || v === "") return <span className="muted">—</span>;
   switch (f.kind) {
     case "money": return <span className="nowrap">{fmtMoney(v)}</span>;
-    case "decimal": return fmtNum(v, 1);
+    case "decimal": return fmtNum(v, (f.places ?? 0) >= 3 ? 2 : 1);   // тонны и другие значения с тремя знаками показываем с двумя, остальное с одним
     case "int": case "number": return fmtNum(v, 0);
     case "date": return fmtDate(v);
     case "datetime": return fmtDateTime(v);
@@ -102,9 +103,9 @@ export function Registry({ resource, sub, icon, emptyHint, actions }: { resource
 
   const totalsLine = useMemo(() => {
     if (!m || !list.data) return [];
-    const items: { label: string; value: number }[] = [];
-    for (const f of m.fields) if (f.sum && f.name in list.data.totals) items.push({ label: f.label, value: list.data.totals[f.name] });
-    for (const c of m.columns) if (c.sum && c.name in list.data.totals) items.push({ label: c.label, value: list.data.totals[c.name] });
+    const items: { label: string; value: number; money: boolean }[] = [];
+    for (const f of m.fields) if (f.sum && f.name in list.data.totals) items.push({ label: f.label, value: list.data.totals[f.name], money: f.kind === "money" });
+    for (const c of m.columns) if (c.sum && c.name in list.data.totals) items.push({ label: c.label, value: list.data.totals[c.name], money: c.kind === "money" });
     return items;
   }, [m, list.data]);
 
@@ -155,7 +156,7 @@ export function Registry({ resource, sub, icon, emptyHint, actions }: { resource
                 <>
                   {totalsLine.length > 0 && (
                     <div className="row wrap" style={{ padding: "0 14px 12px", gap: 18 }}>
-                      {totalsLine.map((t) => <span key={t.label} className="muted">{t.label.replace(/, ₽$/, "")}: <strong style={{ color: "var(--text)" }}>{fmtMoney(t.value)} ₽</strong></span>)}
+                      {totalsLine.map((t) => <span key={t.label} className="muted">{t.money ? t.label.replace(/, ₽$/, "") : t.label}: <strong style={{ color: "var(--text)" }}>{t.money ? `${fmtMoney(t.value)} ₽` : fmtNum(t.value, 2)}</strong></span>)}
                       <span className="muted small">по всем записям списка</span>
                     </div>
                   )}
@@ -193,7 +194,7 @@ function toLocalInput(iso: string): string {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
-const GLOBAL_REFS = new Set(["counterparty", "customer", "supplier", "tariff", "ppe"]);
+const GLOBAL_REFS = new Set(["counterparty", "customer", "supplier", "tariff", "pay_tariff", "ppe"]);
 
 function initialValues(meta: Meta, row: Row | null, entityId: number | null, defaults?: Record<string, string>): Values {
   const v: Values = {};
@@ -214,15 +215,17 @@ function initialValues(meta: Meta, row: Row | null, entityId: number | null, def
 }
 
 function RefSelect({ f, value, onChange, entityId, row, error, disabled }: { f: FieldMeta; value: string; onChange: (v: string) => void; entityId?: number | null; row: Row | null; error?: string; disabled?: boolean }) {
-  const q = useQuery({ queryKey: ["options", f.ref, entityId ?? null], queryFn: () => get<{ items: { id: number; label: string; legal_entity?: string }[] }>(`/options/${f.ref}`, { legal_entity_id: GLOBAL_REFS.has(f.ref ?? "") ? undefined : entityId ?? undefined }), staleTime: 30_000 });
+  const q = useQuery({ queryKey: ["options", f.ref, entityId ?? null], queryFn: () => get<{ items: { id: number; label: string; legal_entity?: string; group?: string }[] }>(`/options/${f.ref}`, { legal_entity_id: GLOBAL_REFS.has(f.ref ?? "") ? undefined : entityId ?? undefined }), staleTime: 30_000 });
   const items = q.data?.items ?? [];
   const known = items.some((i) => String(i.id) === value);
   const multi = new Set(items.map((i) => i.legal_entity)).size > 1;
+  const groups = f.ref === "pay_tariff" ? [...new Set(items.map((i) => i.group ?? ""))] : null;       // тарифы оплаты показываем по группам
+  const option = (i: (typeof items)[number]) => <option key={i.id} value={i.id}>{i.label}{multi && i.legal_entity ? ` · ${i.legal_entity}` : ""}</option>;
   return (
     <select className="input" value={value} disabled={disabled} aria-invalid={!!error} onChange={(e) => onChange(e.target.value)}>
-      <option value="">{q.isLoading ? "Загрузка…" : f.required ? "Выберите…" : "—"}</option>
+      <option value="">{q.isLoading ? "Загрузка…" : f.ref === "pay_tariff" ? "Из карточки сотрудника" : f.required ? "Выберите…" : "—"}</option>
       {value && !known && !q.isLoading && <option value={value}>{row?.[f.name + "_label"] || "Выбрано ранее"}</option>}
-      {items.map((i) => <option key={i.id} value={i.id}>{i.label}{multi && i.legal_entity ? ` · ${i.legal_entity}` : ""}</option>)}
+      {groups ? groups.map((g) => <optgroup key={g} label={g}>{items.filter((i) => (i.group ?? "") === g).map(option)}</optgroup>) : items.map(option)}
     </select>
   );
 }
@@ -327,6 +330,7 @@ export function RecordModal({ meta, row, onClose, onSaved, defaults, hide }: { m
           )}
           {meta.fields.filter((f) => visible(f) && !f.more).map(renderField)}
         </div>
+        {meta.key === "worklog" && !readOnly && !row?.archived && <WorklogPreview values={values} editingId={row?.id} />}
         {photos && (
           <div className="field full">
             <span className="label">{photos.label}</span>

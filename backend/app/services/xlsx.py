@@ -13,9 +13,9 @@ from xml.sax.saxutils import escape
 _BAD_XML = re.compile("[\x00-\x08\x0b\x0c\x0e-\x1f]")
 _BAD_SHEET = re.compile(r"[\[\]:*?/\\]")
 
-# индексы стилей в cellXfs: обычные 0–4, жирные 5–9
+# индексы стилей в cellXfs: обычные 0–4 (4 — тонны, два знака), жирные 5–9
 _PLAIN, _HEAD = 0, 5
-_KIND_STYLE = {None: 0, "text": 0, "money": 1, "dec": 2, "int": 3}
+_KIND_STYLE = {None: 0, "text": 0, "money": 1, "dec": 2, "int": 3, "ton": 4}
 _BOLD_OFFSET = 5
 
 
@@ -136,12 +136,12 @@ def xlsx_book(sheets) -> bytes:
             '<xf numFmtId="4" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>'
             '<xf numFmtId="164" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>'
             '<xf numFmtId="3" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>'
-            '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>'
+            '<xf numFmtId="2" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>'
             '<xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/>'
             '<xf numFmtId="4" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1" applyNumberFormat="1"/>'
             '<xf numFmtId="164" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1" applyNumberFormat="1"/>'
             '<xf numFmtId="3" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1" applyNumberFormat="1"/>'
-            '<xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/>'
+            '<xf numFmtId="2" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1" applyNumberFormat="1"/>'
             "</cellXfs></styleSheet>"),
     }
     for i, sheet in enumerate(sheets):

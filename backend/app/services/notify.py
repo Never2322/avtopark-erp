@@ -24,7 +24,7 @@ from app.config import get_settings
 from app.db import engine, session_factory
 from app.deps import Principal, load_grants
 from app.enums import (NOTIFICATION_DIGEST_FROM, NOTIFICATION_KEEP_DAYS, NOTIFICATION_KEYED_KEEP_DAYS, NOTIFICATION_KINDS,
-                       REQUEST_STATUSES)
+                       REQUEST_STATUSES, VEHICLE_STATUSES)
 from app.models import (Employee, Notification, Permission, RolePermission, ServiceRequest, User, UserRole, VehicleAssignment)
 from app.services import channels
 from app.services.vehicles import active_assignment_filter
@@ -191,6 +191,15 @@ def on_job_progress(db: Session, job, what: str, actor_id: int | None) -> None:
     plate = job.vehicle.plate if getattr(job, "vehicle", None) else ""
     text_ = short(f"{job.address}. {job.result_note}".strip(". "), 300)
     push(db, users_with(db, "jobs.edit", job.legal_entity_id), "job", f"{what}: {plate}".strip(": "), text_, "/jobs", job.legal_entity_id, actor_id)
+
+
+@safe
+def on_vehicle_status(db: Session, v, old: str, new: str, reason: str, actor_id: int | None) -> None:
+    """Водитель сам отметил, что машина на линии или в ремонте: тем, кто ведёт технику и ремонты."""
+    ids = users_with_any(db, ("vehicle_status.change", "requests.edit"), v.legal_entity_id)
+    label = VEHICLE_STATUSES.get(new, new).lower()
+    title = f"{v.plate}: водитель отметил — {label}"
+    push(db, ids, "info", title, short(reason) if reason else f"Раньше было: {VEHICLE_STATUSES.get(old, old).lower()}.", f"/vehicles/{v.id}", v.legal_entity_id, actor_id)
 
 
 @safe

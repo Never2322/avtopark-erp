@@ -3,7 +3,7 @@ import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import {
   BellRing, Building2, CalendarCheck, CalendarClock, CalendarDays, ChevronDown, ClipboardList, DatabaseBackup, Gauge, LayoutDashboard, LogOut, Menu, ScrollText, Search, ShieldCheck,
-  Truck, User as UserIcon, UserCheck, UserCog, UserSquare2, Users, UsersRound, Wrench, FolderOpen, Fuel, NotebookPen, ShoppingCart, ReceiptText, Megaphone, Newspaper, Boxes, ArrowLeftRight, BarChart3, FileUp, Hourglass, MapPin, Send, type LucideIcon,
+  Truck, User as UserIcon, UserCheck, UserCog, UserSquare2, Users, UsersRound, Wrench, FolderOpen, Fuel, NotebookPen, ShoppingCart, ReceiptText, Megaphone, Newspaper, Boxes, ArrowLeftRight, BarChart3, FileUp, Hourglass, MapPin, Send, Weight, type LucideIcon,
 } from "lucide-react";
 import { ConnectionBar, useOutboxSync } from "./Outbox";
 import { BellMenu, useNotifSummary } from "./Bell";
@@ -13,7 +13,7 @@ import { get } from "../api";
 import { SECTIONS } from "../sections";
 import { Empty } from "../ui";
 
-interface Item { to: string; label: string; icon: LucideIcon; any: string[]; end?: boolean; badge?: "pending" | "reminders" | "news"; unless?: string[] }
+interface Item { to: string; label: string; icon: LucideIcon; any: string[]; end?: boolean; badge?: "pending" | "reminders" | "news"; unless?: string[]; all?: string[]; feature?: "tonnage" }
 const sectionItems = (...keys: string[]): Item[] =>
   keys.map((k) => SECTIONS.find((x) => x.key === k)!).map((x) => ({ to: x.path, label: x.label, icon: x.icon, any: [`${x.key}.view`] }));
 
@@ -39,7 +39,8 @@ const NAV: { title: string; items: Item[] }[] = [
       { to: "/employees", label: "Сотрудники", icon: Users, any: ["employees.view"] },
       { to: "/dossier/employees", label: "Личные дела водителей", icon: UserSquare2, any: ["employee_files.view"] },
       { to: "/timesheet", label: "Табель", icon: CalendarDays, any: ["timesheet.view"] },
-      { to: "/my-time", label: "Мои часы", icon: Hourglass, any: ["worklog.view_own", "worklog.create_own"], unless: ["worklog.view"] },
+      { to: "/my-time", label: "Мои часы", icon: Hourglass, any: ["worklog.view_own"], unless: ["worklog.view"] },
+      { to: "/hours-entry", label: "Внести часы", icon: Hourglass, any: ["worklog.enter"], unless: ["worklog.create"] },
       { to: "/attendance", label: "Выход на работу", icon: UserCheck, any: ["attendance.view", "attendance.mark_own"] },
       ...sectionItems("worklog", "employee_events", "ppe", "ppe_norms"),
     ],
@@ -83,6 +84,14 @@ const NAV: { title: string; items: Item[] }[] = [
       { to: "/entries", label: "Мои записи", icon: NotebookPen, any: ["trips.view_own", "fuel_fills.view_own"], unless: ["trips.view", "fuel_fills.view"], end: true },
       { to: "/entries/feed", label: "Записи водителей", icon: Fuel, any: ["trips.view", "fuel_fills.view"] },
       ...sectionItems("trips", "fuel_fills"),
+    ],
+  },
+  {
+    title: "Тоннаж",
+    items: [
+      { to: "/tonnage", label: "Тоннаж", icon: Weight, any: ["weigh_tickets.view_own"], unless: ["weigh_tickets.view"], feature: "tonnage", end: true },
+      ...sectionItems("weigh_tickets"),
+      { to: "/reports/tonnage", label: "Тоннаж за месяц", icon: BarChart3, any: ["weigh_tickets.view"], all: ["reports.view"] },
     ],
   },
   { title: "Заказы", items: sectionItems("orders", "documents") },
@@ -156,7 +165,7 @@ export function Shell() {
           Автопарк
         </div>
         {NAV.map((g) => {
-          const items = g.items.filter((i) => canAny(...i.any) && !(i.unless && canAny(...i.unless)));
+          const items = g.items.filter((i) => canAny(...i.any) && !(i.unless && canAny(...i.unless)) && (!i.all || i.all.every((k) => can(k))) && (!i.feature || me!.features?.[i.feature]));
           if (!items.length) return null;
           return (
             <nav className="nav-group" key={g.title} aria-label={g.title}>
@@ -190,7 +199,7 @@ export function Shell() {
           <ThemeToggle />
           <BellMenu />
           {me!.legal_entities.length > 1 && (
-            <select className="input compact" aria-label="Юридическое лицо" value={entityId ?? ""} onChange={(e) => setEntityId(e.target.value ? Number(e.target.value) : null)}>
+            <select className="input compact topbar-entity" aria-label="Юридическое лицо" value={entityId ?? ""} onChange={(e) => setEntityId(e.target.value ? Number(e.target.value) : null)}>
               <option value="">Все юрлица</option>
               {me!.legal_entities.map((e) => <option key={e.id} value={e.id}>{e.short_name}</option>)}
             </select>

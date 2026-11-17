@@ -2,12 +2,13 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { Download, FilePlus2, Paperclip, ReceiptText, Search, Upload } from "lucide-react";
+import { Download, FilePlus2, FileUp, Paperclip, ReceiptText, Search, Upload } from "lucide-react";
 import { get, qs } from "../api";
 import { fmtDate, fmtMoney } from "../format";
 import { Page, useDebounced, useEntityParam, useUrlState } from "../hooks";
 import { useVehicleOptions } from "../components/pickers";
 import { Badge, Button, Card, Empty, FilterChips, PageHeader, Pagination, QueryState, Table, Tabs } from "../ui";
+import { BillAuto } from "./BillAuto";
 
 export interface BillRow {
   id: number; legal_entity_id: number; legal_entity: string; kind: string; kind_label: string; number: string; bill_date: string; supplier_name: string; supplier_inn: string;
@@ -77,6 +78,7 @@ export function Bills() {
   const meta = useBillMeta();
   const [s, setS] = useUrlState({ q: "", month: "", status: "", vehicle: "", archived: "", tab: "list", page: "1" });
   const [text, setText] = useState(s.q);
+  const [auto, setAuto] = useState(false);
   const debounced = useDebounced(text);
   const vehicles = useVehicleOptions(entity);
   useEffect(() => { if (debounced !== s.q) setS({ q: debounced }); }, [debounced]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -94,8 +96,9 @@ export function Bills() {
       <PageHeader title="Счета на ремонт" sub="Что выставили поставщики за запчасти и работы, сколько заплатили и сколько ещё должны"
         actions={<>
           {can?.export && s.tab === "list" && <a className="btn" href={`/api/bills/export.csv${qs({ ...params, page: undefined, page_size: undefined })}`}><Download size={16} aria-hidden /> В Excel</a>}
-          {can?.create && <Button icon={Upload} onClick={() => nav("/bills/new?kind=uploaded")}>Внести счёт поставщика</Button>}
-          {can?.create && <Button variant="primary" icon={FilePlus2} onClick={() => nav("/bills/new?kind=issued")}>Выписать счёт</Button>}
+          {can?.create && <Button variant="primary" icon={FileUp} onClick={() => setAuto(true)}>Загрузить счёт</Button>}
+          {can?.create && <Button icon={Upload} onClick={() => nav("/bills/new?kind=uploaded")}>Внести вручную</Button>}
+          {can?.create && <Button icon={FilePlus2} onClick={() => nav("/bills/new?kind=issued")}>Выписать счёт</Button>}
         </>} />
       <Tabs tabs={[{ id: "list", label: "Счета" }, { id: "summary", label: "Сколько потратили" }]} value={s.tab as "list" | "summary"} onChange={(v) => setS({ tab: v })} />
       <Card flush>
@@ -136,7 +139,7 @@ export function Bills() {
               {d && (d.items.length === 0 ? (
                 <Empty icon={ReceiptText} title={filtered ? "Ничего не найдено" : "Счетов за этот период нет"}>
                   {filtered ? <Button onClick={() => { setText(""); setS({ q: "", status: "", vehicle: "", archived: "" }); }}>Сбросить фильтры</Button>
-                    : can?.create ? "Выпишите счёт или внесите тот, что прислал поставщик." : "Когда счета появятся, они будут здесь."}
+                    : can?.create ? "Нажмите «Загрузить счёт» и приложите файл или фото счёта: программа прочитает его сама. Или выпишите счёт здесь." : "Когда счета появятся, они будут здесь."}
                 </Empty>
               ) : (
                 <>
@@ -157,6 +160,7 @@ export function Bills() {
           </>
         ) : <SummaryTab entity={entity} vehicle={s.vehicle} />}
       </Card>
+      {auto && meta.data && <BillAuto meta={meta.data} entity={entity} onClose={() => setAuto(false)} />}
     </>
   );
 }

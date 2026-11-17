@@ -84,6 +84,7 @@ export const tradeActions = (resource: string): RowActions | undefined => {
   if (resource === "cash") return (r) => (r.kind === "transfer" ? null : { width: 1, node: <PrintLink to={`/print/cash/${r.id}`} label="Печать ордера" /> });
   if (resource === "trips") return (r) => ({ width: 1, node: <EntryPhotosButton kind="trip" id={r.id} count={r.photos} /> });
   if (resource === "fuel_fills") return (r) => ({ width: 1, node: <EntryPhotosButton kind="fuel" id={r.id} count={r.photos} /> });
+  if (resource === "weigh_tickets") return (r) => ({ width: 1, node: <EntryPhotosButton kind="ticket" id={r.id} count={r.photos} /> });
   if (resource === "ppe") return ppeActions;
   if (resource === "maintenance") return maintenanceActions;
   return undefined;
