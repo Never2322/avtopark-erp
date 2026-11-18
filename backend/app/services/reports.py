@@ -330,10 +330,14 @@ def report_costs(c: Ctx) -> dict:
                "cost": fl(cost), "result": fl(income - cost), "per_km": fl(cost / km) if km > 0 and cost else None}
         if active(row, v, ["cost", "orders", "rent_out"]):
             rows.append(row)
+    free = c.money and c.db.scalar(select(func.coalesce(func.sum(RepairBill.total), 0)).where(
+        RepairBill.vehicle_id.is_(None), RepairBill.archived_at.is_(None), c.money.cond(RepairBill.legal_entity_id), RepairBill.bill_date >= c.d_from, RepairBill.bill_date <= c.d_to))
+    if free:                                             # счета без машины (например, запчасти на склад) не пропадают из затрат
+        rows.append({"name": "Без привязки к технике", "bills": fl(free), "cost": fl(free), "result": -fl(free)})
     tbl = table(cols, rows)
     ch = chart([short(r["name"].split(" · ")[0]) for r in rows], [r["cost"] for r in rows], "₽", [r["name"] for r in rows])
     return {"title": "Затраты и доходы по технике", "table": tbl, "chart": ch, "extras": [],
-            "note": "Топливо по заправкам, ремонт по счетам на ремонт (по дате счёта) и по фактическим затратам закрытых обращений, у которых нет счёта "
+            "note": "Строка «Без привязки к технике»: счета на ремонт и запчасти, у которых не выбрана машина. Топливо по заправкам, ремонт по счетам на ремонт (по дате счёта) и по фактическим затратам закрытых обращений, у которых нет счёта "
                     "(чтобы не считать дважды), штрафы только те, что платит компания, аренда по суткам внутри периода. Доходы: выполненные заказы без НДС "
                     "и аренда, которую сдаём. Детали со склада показаны справочно и в затраты не входят: они уже учтены в счетах, по которым их принимали."}
 

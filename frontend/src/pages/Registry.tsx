@@ -78,6 +78,12 @@ export function Registry({ resource, sub, icon, emptyHint, actions }: { resource
   const [edit, setEdit] = useState<Row | "new" | null>(null);
   const [voiding, setVoiding] = useState<Row | null>(null);
   const [restoring, setRestoring] = useState<Row | null>(null);
+  // ссылка вида «?new=1» сразу открывает окно добавления (например, кнопка «Общий расход» в разделе «Расходы»)
+  useEffect(() => {
+    if (read("new") !== "1" || !m) return;
+    if (m.can.create) setEdit("new");
+    change({ new: "" });
+  }, [m]); // eslint-disable-line react-hooks/exhaustive-deps
   const qc = useQueryClient();
   const toast = useToast();
   const refresh = () => { qc.invalidateQueries({ queryKey: ["reg", resource] }); qc.invalidateQueries({ queryKey: ["options"] }); qc.invalidateQueries({ queryKey: ["reg-meta", resource] }); };

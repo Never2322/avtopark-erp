@@ -2,7 +2,7 @@
 """Главная: только настоящие данные и только то, на что у человека есть право. Разделы без права не попадают в ответ."""
 import datetime as dt
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from sqlalchemy import and_, func, select
 from sqlalchemy.orm import Session
 
@@ -16,6 +16,7 @@ from app.routers import requests_ as req_router
 from app.routers import waybills as wb_router
 from app.services import access
 from app.services import control as control_svc
+from app.services import expenses as exp_svc
 from app.services import reminders as reminders_svc
 from app.services import reports as rep
 
@@ -43,22 +44,18 @@ def jobs_summary(db: Session, p: Principal, legal_entity_id: int | None) -> dict
 
 
 def expenses(db: Session, p: Principal, legal_entity_id: int | None) -> dict | None:
-    """Затраты по месяцам за полгода: топливо, ремонт, прочее. Только тем, у кого есть право на деньги в отчётах."""
+    """Расходы по месяцам за полгода: топливо, ремонт (счета, в том числе без машины, и обращения без счёта), прочее (штрафы, аренда, общие расходы, затраты по технике).
+    Те же суммы, что в разделе «Расходы». Только тем, у кого есть право на деньги в отчётах."""
     if not (p.can("reports.money") and p.can("vehicles.view")):
         return None
     today, now = org_today(), dt.datetime.now(dt.timezone.utc)
-    months, ids = [], None
+    months = []
     for y, m in rep.last_months(today, 6):
         a, b = rep.month_bounds(y, m)
         c = rep.Ctx(db=db, p=p, entity=legal_entity_id, d_from=a, d_to=b, today=today, now=now)
-        if ids is None:
-            try:
-                ids = [v.id for v in rep.load_vehicles(c)]
-            except HTTPException:
-                return None
-        parts = rep.money_parts(c, ids)
-        tot = lambda *keys: round(sum(sum(parts.get(k, {}).values()) for k in keys), 2)
-        fuel, repair, other = tot("fuel"), tot("bills", "requests"), tot("fines", "rent_in")
+        s = exp_svc.sums(c, a, b)
+        fuel, repair = round(s["fuel"], 2), round(s["bills"] + s["requests"], 2)
+        other = round(s["fines"] + s["rent_in"] + s["misc"] + s["vehicle_finance"], 2)
         months.append({"label": rep.MONTHS_SHORT[m], "fuel": fuel, "repair": repair, "other": other, "total": round(fuel + repair + other, 2)})
     cur, prev = months[-1]["total"], months[-2]["total"]
     return {"months": months, "month_total": cur, "prev_total": prev,

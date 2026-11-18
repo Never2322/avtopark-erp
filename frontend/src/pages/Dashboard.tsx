@@ -215,7 +215,7 @@ export function Dashboard() {
               {d.vehicles && total > 0 && <Stat to="/vehicles?status=in_repair" icon={Wrench} tone="error" value={String(d.vehicles.attention)} label="В ремонте" bar={pct(d.vehicles.attention)} foot={`${pct(d.vehicles.attention)}%`} />}
               {d.maintenance && <Stat to="/reminders" icon={CalendarCheck} tone="warning" value={String(d.maintenance.soon)} label="ТО скоро" />}
               {exp && (
-                <Stat to="/reports/costs" icon={Wallet} tone="info" value={exp.month_total >= 1_000_000 ? `${fmtNum(exp.month_total / 1_000_000, 1)}\u00a0млн\u00a0₽` : rub(exp.month_total)} label="Расходы за месяц"
+                <Stat to="/expenses" icon={Wallet} tone="info" value={exp.month_total >= 1_000_000 ? `${fmtNum(exp.month_total / 1_000_000, 1)}\u00a0млн\u00a0₽` : rub(exp.month_total)} label="Расходы за месяц"
                   foot={exp.delta_pct === null ? "в прошлом месяце не было" : (
                     <span className={exp.delta_pct > 0 ? "bad" : "good"}>{exp.delta_pct > 0 ? <ArrowUp size={13} aria-hidden /> : <ArrowDown size={13} aria-hidden />} {exp.delta_pct > 0 ? "+" : ""}{exp.delta_pct}% к прошлому месяцу</span>
                   )} />
@@ -241,7 +241,7 @@ export function Dashboard() {
             {(exp || d.waybills) && (
               <div className={exp && d.waybills ? "dash-2-1" : "grid"}>
                 {exp && (
-                  <Card title="Расходы компании" icon={Wallet} actions={<span className="muted small">за 6 месяцев · <Link to="/reports/costs">подробнее</Link></span>}>
+                  <Card title="Расходы компании" icon={Wallet} actions={<span className="muted small">за 6 месяцев · <Link to="/expenses">подробнее</Link></span>}>
                     {exp.months.every((m) => m.total === 0)
                       ? <Empty icon={Wallet} title="Расходов за полгода пока нет">Они появятся после заправок, счетов на ремонт и штрафов.</Empty>
                       : <ExpensesChart months={exp.months} />}
