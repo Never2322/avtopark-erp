@@ -65,6 +65,10 @@ ACTIONS = {
     "timesheet.save": "Табель: изменены отметки", "timesheet.fill": "Табель: месяц заполнен автоматически",
     "timesheet.export": "Выгрузка табеля",
     "reminders.export": "Выгрузка напоминаний", "reports.export": "Выгрузка отчёта",
+    "repair_photos.create": "Фото ремонта: добавлен результат ремонта", "repair_photos.update": "Фото ремонта: изменено описание",
+    "repair_photos.photo.add": "Фото ремонта: добавлены фото", "repair_photos.photo.remove": "Фото ремонта: фото убрано",
+    "repair_photos.confirm": "Фото ремонта: ремонт подтверждён", "repair_photos.unconfirm": "Фото ремонта: подтверждение снято",
+    "repair_photos.void": "Фото ремонта: запись в архиве", "repair_photos.restore": "Фото ремонта: запись возвращена из архива",
 }
 
 

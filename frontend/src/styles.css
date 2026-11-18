@@ -1038,3 +1038,55 @@ a.stat:hover { background: var(--hover); border-color: var(--border-strong); tex
 .day-chip input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; }
 .day-chip.on { background: var(--mint); border-color: var(--mint); color: var(--mint-ink); }
 .day-chip:focus-within { outline: 2px solid var(--mint); outline-offset: 2px; }
+
+/* ---- фото ремонта ---- */
+.rp-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 14px; }
+.rp-card { display: flex; flex-direction: column; gap: 12px; padding: 12px; min-width: 0; border-left: 3px solid var(--warning); }
+.rp-card.is-ok { border-left-color: var(--success); }
+.rp-card.is-gone { border-left-color: var(--border-strong); opacity: 0.85; }
+.rp-thumbs { display: grid; gap: 3px; width: 100%; padding: 0; border: 0; border-radius: 10px; overflow: hidden; background: var(--well); cursor: pointer; }
+.rp-thumbs.n1 { grid-template-columns: minmax(0, 1fr); }
+.rp-thumbs.n2, .rp-thumbs.n3, .rp-thumbs.n4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.rp-th { position: relative; display: block; aspect-ratio: 4 / 3; background: var(--well); overflow: hidden; }
+.rp-thumbs.n1 .rp-th { aspect-ratio: 16 / 9; }
+.rp-thumbs.n3 .rp-th:first-child { grid-column: 1 / -1; aspect-ratio: 16 / 9; }
+.rp-th img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.rp-more { position: absolute; inset: 0; display: grid; place-items: center; background: rgba(5, 12, 15, 0.62); color: #fff; font-size: 22px; font-weight: 700; }
+.rp-body { display: flex; flex-direction: column; gap: 8px; min-width: 0; flex: 1 1 auto; }
+.rp-top { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 10px; }
+.rp-plate { font-size: 17px; }
+.rp-model { font-size: 13px; }
+.rp-date { margin-left: auto; font-weight: 600; font-size: 13px; }
+.rp-what { margin: 0; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; white-space: pre-wrap; }
+.rp-badges { display: flex; flex-wrap: wrap; gap: 6px; }
+.rp-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.rp-actions .btn { flex: 1 1 130px; min-height: 40px; }
+.rp-date-pick { display: inline-flex; align-items: center; gap: 6px; }
+.rp-date-pick .input { min-width: 0; }
+.rp-tools { display: flex; flex-wrap: wrap; gap: 8px; }
+.rp-viewer { position: relative; display: grid; place-items: center; background: #05090b; border-radius: 10px; padding: 6px; min-height: 160px; }
+.rp-viewer img { max-width: 100%; max-height: 52vh; object-fit: contain; display: block; }
+.rp-nav { position: absolute; top: 50%; transform: translateY(-50%); width: 42px; height: 42px; display: grid; place-items: center; border-radius: 50%; border: 0; cursor: pointer; background: var(--scan-x-bg); color: var(--text); }
+.rp-nav:disabled { opacity: 0.35; cursor: default; }
+.rp-nav.prev { left: 8px; }
+.rp-nav.next { right: 8px; }
+.rp-count { position: absolute; left: 10px; bottom: 10px; padding: 2px 9px; border-radius: 999px; font-size: 12px; font-weight: 600; background: var(--scan-x-bg); color: var(--text); }
+.rp-strip { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 4px; }
+.rp-strip-item { flex: none; width: 76px; aspect-ratio: 4 / 3; padding: 0; border: 2px solid transparent; border-radius: 8px; overflow: hidden; background: var(--well); cursor: pointer; opacity: 0.7; }
+.rp-strip-item.on { border-color: var(--mint); opacity: 1; }
+.rp-strip-item img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.rp-facts { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 8px 16px; margin: 0; }
+.rp-facts dt { color: var(--text-2); }
+.rp-facts dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.rp-text { white-space: pre-wrap; }
+.rp-removed { margin: 4px 0 0; padding-left: 18px; }
+.rp-foot { display: flex; gap: 8px; width: 100%; align-items: center; justify-content: flex-end; }
+@media (max-width: 520px) {
+  .rp-grid { grid-template-columns: minmax(0, 1fr); }
+  .rp-facts { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+  .rp-facts dd { margin-bottom: 8px; }
+  .rp-foot .btn { flex: 1 1 0; }
+  .rp-date-pick { flex: 1 1 140px; }
+  .rp-date-pick .input { flex: 1 1 auto; width: 100%; }
+  .rp-viewer img { max-height: 46vh; }
+}

@@ -39,6 +39,7 @@ import { Tonnage } from "./pages/Tonnage";
 import { Hauls } from "./pages/Hauls";
 import { MyRoutes } from "./pages/MyRoutes";
 import { RouteBoard } from "./pages/RouteBoard";
+import { RepairPhotos } from "./pages/RepairPhotos";
 import { Attendance } from "./pages/Attendance";
 import { TimesheetPrint } from "./pages/TimesheetPrint";
 import { JobsBoard, MyJobs } from "./pages/Jobs";
@@ -103,6 +104,7 @@ export function App() {
         <Route path="hauls" element={<Guard any={["hauls.use_own"]}><Hauls /></Guard>} />
         <Route path="my-routes" element={<Guard any={["route_plan.view_own"]}><MyRoutes /></Guard>} />
         <Route path="route-board" element={<Guard any={["route_plan.view"]}><RouteBoard /></Guard>} />
+        <Route path="repair-photos" element={<Guard any={["repair_photos.view"]}><RepairPhotos /></Guard>} />
         <Route path="timesheet" element={<Guard any={["timesheet.view"]}><Timesheet /></Guard>} />
         <Route path="my-time" element={<Guard any={["worklog.view_own"]}><MyTime /></Guard>} />
         <Route path="hours-entry" element={<Guard any={["worklog.enter"]}><HoursEntry /></Guard>} />

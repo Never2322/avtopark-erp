@@ -2,7 +2,7 @@ import { ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import {
-  BellRing, Building2, CalendarCheck, CalendarClock, CalendarDays, ChevronDown, ChevronRight, ClipboardList, DatabaseBackup, Gauge, LayoutDashboard, LogOut, Menu, ScrollText, Search, ShieldCheck,
+  BellRing, Building2, Camera, CalendarCheck, CalendarClock, CalendarDays, ChevronDown, ChevronRight, ClipboardList, DatabaseBackup, Gauge, LayoutDashboard, LogOut, Menu, ScrollText, Search, ShieldCheck,
   Truck, User as UserIcon, UserCheck, UserCog, UserSquare2, Users, UsersRound, Wrench, FolderOpen, Fuel, NotebookPen, ShoppingCart, ReceiptText, Receipt, Megaphone, Newspaper, Boxes, ArrowLeftRight, BarChart3, FileUp, Hourglass, ListOrdered, MapPin, Signpost, CalendarRange, Send, Settings, Wallet, Weight, X, type LucideIcon,
 } from "lucide-react";
 import { ConnectionBar, useOutboxSync } from "./Outbox";
@@ -81,6 +81,7 @@ const NAV: Group[] = [
     items: [
       ...withSub("Ремонт", [
         { to: "/requests", label: "Обращения и ремонты", icon: Wrench, any: ["requests.view", "requests.view_own"], words: "поломка заявка на ремонт" },
+        { to: "/repair-photos", label: "Фото ремонта", icon: Camera, any: ["repair_photos.view"], words: "после ремонта результат отфотать подтверждено что отремонтировали история" },
         { to: "/purchases", label: "Что купить", icon: ShoppingCart, any: ["purchases.view"], words: "закупка запчасти список" },
         ...sectionItems("parts"),
       ]),

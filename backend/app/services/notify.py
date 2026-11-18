@@ -161,6 +161,24 @@ def on_parts_from_stock(db: Session, r: ServiceRequest, name: str, actor_id: int
          r.legal_entity_id, actor_id)
 
 
+def _repair_url(r) -> str:
+    return f"/repair-photos?open={r.id}"
+
+
+@safe
+def on_repair_added(db: Session, r, plate: str, actor_id: int | None) -> None:
+    """Механик отфотографировал ремонт: тем, кто подтверждает (и может открыть раздел), ремонт ждёт подтверждения."""
+    ids = users_with(db, "repair_photos.confirm", r.legal_entity_id) & users_with(db, "repair_photos.view", r.legal_entity_id)
+    push(db, ids, "info", f"Фото ремонта ждёт подтверждения: {plate}", short(r.what), _repair_url(r), r.legal_entity_id, actor_id)
+
+
+@safe
+def on_repair_confirmed(db: Session, r, plate: str, actor_id: int | None) -> None:
+    """Директор подтвердил ремонт: тому, кто его добавил, если он может открыть раздел."""
+    if r.created_by_id and r.created_by_id in users_with(db, "repair_photos.view", r.legal_entity_id):
+        push(db, [r.created_by_id], "info", f"Ремонт подтверждён: {plate}", short(r.what), _repair_url(r), r.legal_entity_id, actor_id)
+
+
 @safe
 def on_stock_low(db: Session, item, left, actor_id: int | None) -> None:
     """Товар заканчивается: тем, кто может менять товары юрлица. На один товар не чаще раза в день."""

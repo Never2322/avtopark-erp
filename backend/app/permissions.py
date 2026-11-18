@@ -94,6 +94,8 @@ PERMISSIONS: list[tuple[str, str, str]] = [
     ("attendance.mark_own", "Выход на работу", "Отмечать, выйду ли я сам на работу, и видеть свои ответы"),
     *_crud("garbage_routes", "Маршруты мусоровозов", "маршруты мусоровозов (название и улицы)"),
     *_crud("route_plan", "Маршруты мусоровозов", "расписание маршрутов (какой мусоровоз на каком маршруте и в какие дни)"),
+    *_crud("repair_photos", "Фото ремонта", "фото ремонта (техника после ремонта и что отремонтировали)"),
+    ("repair_photos.confirm", "Фото ремонта", "Подтверждать результат ремонта кнопкой «Подтверждено» и снимать подтверждение"),
     ("route_plan.view_own", "Маршруты мусоровозов", "Видеть свои маршруты: в какой день какой маршрут и по каким улицам едет закреплённая машина"),
     ("hauls.use_own", "Счётчик ходок", "Считать свои ходки на самосвале: личный счётчик водителя, офис и директор его не видят"),
     *_crud("ppe", "СИЗ", "выдачу СИЗ"),
@@ -280,4 +282,7 @@ ROLE_DEFAULTS["driver"] += ["weigh_tickets.view_own", "weigh_tickets.create_own"
 ROLE_DEFAULTS["director"] += _all("garbage_routes", "route_plan")
 ROLE_DEFAULTS["dispatcher"] += _all("garbage_routes", "route_plan", only=_WORK)
 ROLE_DEFAULTS["driver"] += ["route_plan.view_own"]
+# Фото ремонта: директор видит, добавляет, подтверждает и убирает в архив; механик фотографирует и описывает ремонт, но не подтверждает.
+ROLE_DEFAULTS["director"] += _all("repair_photos") + ["repair_photos.confirm"]
+ROLE_DEFAULTS["mechanic"] += _all("repair_photos", only=_WORK)
 assert all(c in PERMISSION_CODES for codes in ROLE_DEFAULTS.values() for c in codes)

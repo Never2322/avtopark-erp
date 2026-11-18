@@ -1488,3 +1488,36 @@ class RoutePlan(Audited, Voidable, Base):
                         "OR (kind = 'date' AND on_date IS NOT NULL AND NOT (mon OR tue OR wed OR thu OR fri OR sat OR sun))", name="shape"),
         Index("ix_route_plans_date", "on_date"),
     )
+
+
+# ---------------------------------------------------------------- фото ремонта
+
+class RepairResult(Audited, Voidable, Base):
+    """Результат ремонта: техника отфотографирована после ремонта, записано, что сделано. Директор подтверждает.
+    Подтверждённая запись не меняется (ни текст, ни фото), пока подтверждение не снято. Запись не стирается: её убирают в архив."""
+    __tablename__ = "repair_results"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    legal_entity_id: Mapped[int] = mapped_column(ForeignKey("legal_entities.id"), index=True)
+    vehicle_id: Mapped[int] = mapped_column(ForeignKey("vehicles.id"), index=True)
+    request_id: Mapped[int | None] = mapped_column(ForeignKey("service_requests.id", ondelete="SET NULL"), index=True)
+    repair_date: Mapped[dt.date] = mapped_column(Date)
+    what: Mapped[str] = mapped_column(Text)
+    confirmed_at: Mapped[dt.datetime | None] = mapped_column(TS)
+    confirmed_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    vehicle: Mapped[Vehicle] = relationship()
+    photos: Mapped[list["RepairResultPhoto"]] = relationship(order_by="RepairResultPhoto.id")
+    __table_args__ = (Index("ix_repair_results_date", "repair_date"),)
+
+
+class RepairResultPhoto(Base):
+    """Фото к результату ремонта. Не стирается: убирается с отметкой, кто и почему."""
+    __tablename__ = "repair_result_photos"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    result_id: Mapped[int] = mapped_column(ForeignKey("repair_results.id"), index=True)
+    file_id: Mapped[int] = mapped_column(ForeignKey("stored_files.id"), index=True)
+    added_at: Mapped[dt.datetime] = mapped_column(TS, server_default=func.now())
+    added_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    removed_at: Mapped[dt.datetime | None] = mapped_column(TS)
+    removed_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    remove_reason: Mapped[str] = mapped_column(String(300), default="", server_default="")
+    file: Mapped[StoredFile] = relationship()

@@ -162,6 +162,8 @@ BILL_KINDS = {"issued": "Выписан в программе", "uploaded": "П�
 BILL_STATUSES = {"unpaid": "Не оплачен", "paid": "Оплачен", "cancelled": "Отменён"}
 BILL_MAX_ITEMS = 100
 BILL_MAX_FILES = 10
+REPAIR_PHOTO_MAX = 20                # фото к одному результату ремонта
+REPAIR_WHAT_MAX = 2000               # сколько знаков в описании «что отремонтировали»
 BILL_YEAR_MIN, BILL_YEAR_MAX = 2000, 2100
 
 
