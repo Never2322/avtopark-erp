@@ -1,5 +1,5 @@
 // Разделы, которые рисует общий экран Registry. Поля и правила каждого приходят с сервера.
-import { Hourglass, CalendarCheck, CalendarPlus, Disc3, Hammer, PiggyBank, Timer, ClipboardCheck, ClipboardList, HardHat, ListChecks, CreditCard, FileText, FileWarning, Fuel, Handshake, HandCoins, KeyRound, Landmark, Boxes, Package, Receipt, Route, Sigma, Tag, Wallet, Warehouse, Weight, Wrench, type LucideIcon } from "lucide-react";
+import { CalendarRange, Signpost, Hourglass, CalendarCheck, CalendarPlus, Disc3, Hammer, PiggyBank, Timer, ClipboardCheck, ClipboardList, HardHat, ListChecks, CreditCard, FileText, FileWarning, Fuel, Handshake, HandCoins, KeyRound, Landmark, Boxes, Package, Receipt, Route, Sigma, Tag, Wallet, Warehouse, Weight, Wrench, type LucideIcon } from "lucide-react";
 
 export interface Section { key: string; path: string; label: string; icon: LucideIcon; sub: string; empty?: string }
 
@@ -19,6 +19,8 @@ export const SECTIONS: Section[] = [
   { key: "rentals", path: "/rentals", label: "Дополнительные работы", icon: KeyRound, sub: "Сдаём технику в аренду или берём у других. Одну машину нельзя отдать дважды на одни дни" },
   { key: "maintenance", path: "/maintenance", label: "Техобслуживание", icon: Wrench, sub: "СО, ТО-1, ТО-2 по каждой машине: срок по дате и по пробегу. Когда срок подходит, приходит напоминание. Кнопка «Выполнено» закрывает ТО и создаёт следующее", empty: "Добавьте плановое ТО: вид, что сделать и срок по дате или пробегу." },
   { key: "vehicle_events", path: "/vehicle-events", label: "Контроль мероприятий", icon: Timer, sub: "Всё, что нужно не пропустить по технике: тахограф, поверка, замена ремня. Срок по дате, пробегу или моточасам", empty: "Добавьте мероприятие и срок: напомним заранее." },
+  { key: "garbage_routes", path: "/garbage-routes", label: "Маршруты", icon: Signpost, sub: "Маршруты мусоровозов: название и улицы, по которым едет машина. Из них составляется расписание", empty: "Добавьте первый маршрут: название и перечень улиц" },
+  { key: "route_plan", path: "/route-plan", label: "Расписание маршрутов", icon: CalendarRange, sub: "Какой мусоровоз на каком маршруте: по дням недели или на одну дату. Запись на дату заменяет обычное расписание этого маршрута в тот день", empty: "Поставьте мусоровоз на маршрут: выберите дни недели или одну дату" },
   { key: "tires", path: "/tires", label: "Шины", icon: Disc3, sub: "Какие шины стоят на технике и какие сняты: сезон, размер, пробег на шине", empty: "Добавьте шины: марка, размер, сезон и дата установки." },
   { key: "vehicle_repairs", path: "/vehicle-repairs", label: "Ремонтные работы", icon: Hammer, sub: "Что делали с техникой и какие детали ставили, со стоимостью", empty: "Добавьте ремонт или деталь: дата, название, стоимость." },
   { key: "vehicle_finance", path: "/vehicle-finance", label: "Затраты на спецтехнику", icon: PiggyBank, sub: "Доходы и расходы по каждой машине. Итог показывает, сколько техника принесла или стоила", empty: "Добавьте доход или расход по машине." },

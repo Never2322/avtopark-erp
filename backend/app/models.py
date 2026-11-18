@@ -19,7 +19,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, deferred, mapped_column, relationship
 
 from app.db import Base
-from app.enums import (ATTENDANCE_SOURCES, TARIFF_KINDS, WORKLOG_KINDS, WORKLOG_SOURCES, ALL_STATUS_CODES, MAINTENANCE_KINDS, OUTBOX_CHANNELS, OUTBOX_STATES, TIRE_SEASONS, VEHICLE_FINANCE_KINDS, VEHICLE_REPAIR_KINDS, ALL_DOC_KINDS, ANNOUNCEMENT_AUDIENCES, NOTIFICATION_KINDS, CALENDAR_COLORS, CALENDAR_REMIND_MAX, EMPLOYEE_EVENT_KINDS, BACKUP_STATUSES, BILL_KINDS, BILL_STATUSES, CASH_ACCOUNT_KINDS, CASH_OP_KINDS, COUNTERPARTY_KINDS, DOC_TYPES, FINE_PAYERS,
+from app.enums import (ATTENDANCE_SOURCES, TARIFF_KINDS, WORKLOG_KINDS, WORKLOG_SOURCES, ALL_STATUS_CODES, MAINTENANCE_KINDS, OUTBOX_CHANNELS, OUTBOX_STATES, TIRE_SEASONS, ROUTE_PLAN_KINDS, VEHICLE_FINANCE_KINDS, VEHICLE_REPAIR_KINDS, ALL_DOC_KINDS, ANNOUNCEMENT_AUDIENCES, NOTIFICATION_KINDS, CALENDAR_COLORS, CALENDAR_REMIND_MAX, EMPLOYEE_EVENT_KINDS, BACKUP_STATUSES, BILL_KINDS, BILL_STATUSES, CASH_ACCOUNT_KINDS, CASH_OP_KINDS, COUNTERPARTY_KINDS, DOC_TYPES, FINE_PAYERS,
                        JOB_STAGES, JOB_STATES, ORDER_STATUSES, VAT_RATES,
                        PAYMENT_KINDS, RENTAL_DIRECTIONS, TARIFF_UNITS, TIMESHEET_CODES, READING_KINDS, READING_SOURCES, REQUEST_PRIORITIES, REQUEST_STATUSES, STOCK_MOVE_KINDS,
                        REVIEW_STATES, VEHICLE_CATEGORIES, VEHICLE_STATUSES, WAYBILL_SHIFTS, WAYBILL_STATUSES, check_in)
@@ -1445,4 +1445,46 @@ class Outbox(Base):
         CheckConstraint(check_in("channel", OUTBOX_CHANNELS), name="channel"),
         CheckConstraint(check_in("state", OUTBOX_STATES), name="state"),
         Index("ix_outbox_due", "state", "next_try_at"),
+    )
+
+
+# ---------------------------------------------------------------- маршруты мусоровозов
+
+class GarbageRoute(Audited, Voidable, Base):
+    """Маршрут вывоза мусора: название и перечень улиц, по которым едет мусоровоз."""
+    __tablename__ = "garbage_routes"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    legal_entity_id: Mapped[int] = mapped_column(ForeignKey("legal_entities.id"), index=True)
+    name: Mapped[str] = mapped_column(String(120))
+    streets: Mapped[str] = mapped_column(Text, default="", server_default="")
+    note: Mapped[str] = mapped_column(Text, default="", server_default="")
+    __table_args__ = (
+        Index("uq_garbage_routes_name_active", "legal_entity_id", text("lower(name)"), unique=True, postgresql_where=text("archived_at IS NULL")),
+    )
+
+
+class RoutePlan(Audited, Voidable, Base):
+    """Расписание: какой мусоровоз на каком маршруте. kind=weekly: по дням недели (галочки пн…вс);
+    kind=date: на одну дату, и такая запись заменяет обычное расписание этого маршрута в этот день."""
+    __tablename__ = "route_plans"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    legal_entity_id: Mapped[int] = mapped_column(ForeignKey("legal_entities.id"), index=True)
+    route_id: Mapped[int] = mapped_column(ForeignKey("garbage_routes.id"), index=True)
+    vehicle_id: Mapped[int] = mapped_column(ForeignKey("vehicles.id"), index=True)
+    kind: Mapped[str] = mapped_column(String(6), default="weekly", server_default="weekly")
+    mon: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"))
+    tue: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"))
+    wed: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"))
+    thu: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"))
+    fri: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"))
+    sat: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"))
+    sun: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"))
+    on_date: Mapped[dt.date | None] = mapped_column(Date)
+    note: Mapped[str] = mapped_column(Text, default="", server_default="")
+    route: Mapped[GarbageRoute] = relationship()
+    __table_args__ = (
+        CheckConstraint(check_in("kind", ROUTE_PLAN_KINDS), name="kind"),
+        CheckConstraint("(kind = 'weekly' AND on_date IS NULL AND (mon OR tue OR wed OR thu OR fri OR sat OR sun)) "
+                        "OR (kind = 'date' AND on_date IS NOT NULL AND NOT (mon OR tue OR wed OR thu OR fri OR sat OR sun))", name="shape"),
+        Index("ix_route_plans_date", "on_date"),
     )

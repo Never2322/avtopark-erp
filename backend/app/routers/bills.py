@@ -20,7 +20,8 @@ from sqlalchemy import and_, case, func, or_, select
 from sqlalchemy.orm import Session
 
 from app import audit
-from app.common import csv_text, fail, like, page_of, utcnow
+from app.common import fail, like, page_of, utcnow
+from app.exporting import check_format, table_response
 from app.db import get_db
 from app.deps import Principal, current, require
 from app.enums import BILL_KINDS, BILL_MAX_FILES, BILL_STATUSES, BILL_UNITS, BILL_YEAR_MAX, BILL_YEAR_MIN, REQUEST_STATUSES, VAT_RATES
@@ -268,29 +269,30 @@ def export_rows(db: Session, cond: list) -> list[RepairBill]:
     return list(db.scalars(select(RepairBill).where(*cond).order_by(RepairBill.bill_date, RepairBill.id).limit(5000)))
 
 
-@router.get("/bills/export.csv")
-def export_csv(month: str | None = None, vehicle_id: int | None = None, status: str = "", kind: str = "", q: str = "", legal_entity_id: int | None = None,
-               archived: bool = False, p: Principal = Depends(require("bills.export")), db: Session = Depends(get_db)):
+@router.get("/bills/export.{fmt}")
+def export_file(fmt: str, month: str | None = None, vehicle_id: int | None = None, status: str = "", kind: str = "", q: str = "", legal_entity_id: int | None = None,
+                archived: bool = False, p: Principal = Depends(require("bills.export")), db: Session = Depends(get_db)):
+    check_format(fmt)
     if month is None:
         t = today()
         month = f"{t.year:04d}-{t.month:02d}"
     cond = filters(p, "bills.export", month=month, vehicle_id=vehicle_id, status=status, kind=kind, q=q, legal_entity_id=legal_entity_id, archived=archived)
     objs = export_rows(db, cond)
     vehicles, requests, ents, _ = lookups(db, objs)
-    rows = [["Юрлицо", "№ счёта", "Дата", "Поставщик", "ИНН", "Машина", "Обращение №", "Основание", "Сумма, ₽", "в т.ч. НДС, ₽", "Состояние", "Дата оплаты",
-             "Как внесён"]]
+    rows: list[list] = [["Юрлицо", "№ счёта", "Дата", "Поставщик", "ИНН", "Машина", "Обращение №", "Основание", "Сумма, ₽", "в т.ч. НДС, ₽", "Состояние",
+                         "Дата оплаты", "Как внесён"]]
     for b in objs:
-        rows.append([ents.get(b.legal_entity_id, ""), b.number, b.bill_date.strftime("%d.%m.%Y"), b.supplier_name, b.supplier_inn,
-                     vehicle_label(vehicles.get(b.vehicle_id)), requests[b.request_id].number if b.request_id in requests else "", b.basis,
-                     money_cell(b.total), money_cell(b.vat), BILL_STATUSES[b.status], b.paid_date.strftime("%d.%m.%Y") if b.paid_date else "",
+        rows.append([ents.get(b.legal_entity_id) or None, b.number, b.bill_date, b.supplier_name, b.supplier_inn or None,
+                     vehicle_label(vehicles.get(b.vehicle_id)) or None, requests[b.request_id].number if b.request_id in requests else None, b.basis or None,
+                     b.total.quantize(svc.CENT), b.vat.quantize(svc.CENT), BILL_STATUSES[b.status], b.paid_date,
                      "выписан в программе" if b.kind == "issued" else "получен от поставщика"])
     live = [b for b in objs if b.status != "cancelled"]
-    rows.append(["Итого (без отменённых)", "", "", "", "", "", "", "", money_cell(sum((b.total for b in live), Decimal(0))),
-                 money_cell(sum((b.vat for b in live), Decimal(0))), "", "", ""])
+    rows.append(["Итого (без отменённых)", None, None, None, None, None, None, None, sum((b.total for b in live), Decimal(0)).quantize(svc.CENT),
+                 sum((b.vat for b in live), Decimal(0)).quantize(svc.CENT), None, None, None])
     audit.log(db, p, "bill.export", "bill", None, legal_entity_id, rows=len(objs), month=month)
     db.commit()
-    fname = "bills-" + (month if month and month != "all" else "all") + ".csv"
-    return Response(csv_text(rows), media_type="text/csv; charset=utf-8", headers={"Content-Disposition": f'attachment; filename="{fname}"'})
+    stem = "bills-" + (month if month and month != "all" else "all")
+    return table_response(fmt, stem, "Счета на ремонт", rows, [None, None, "date", None, None, None, None, None, "money", "money", None, "date", None])
 
 
 @router.get("/bills/summary")

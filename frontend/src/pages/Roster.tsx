@@ -36,7 +36,7 @@ const SHORT: Record<string, string> = { no_driver: "Нет водителя", fu
 function exportUrl(params: Record<string, string | number | undefined>) {
   const q = new URLSearchParams();
   for (const [k, v] of Object.entries(params)) if (v !== undefined && v !== "") q.set(k, String(v));
-  return `/api/roster/export.csv${q.toString() ? "?" + q : ""}`;
+  return `/api/roster/export.xlsx${q.toString() ? "?" + q : ""}`;
 }
 
 export function Roster() {

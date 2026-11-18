@@ -26,7 +26,7 @@ export function Reminders() {
       <PageHeader title="Напоминания" sub="Что уже наступило и что наступит в ближайшие дни: сроки документов, штрафы, аренда, СИЗ, события сотрудников, неоплаченные счета и ваши напоминания. Видно только то, к чему у вас есть доступ"
         actions={<>
           <Link className="btn" to="/calendar"><CalendarDays size={16} aria-hidden /> Календарь</Link>
-          {d && d.counts.total > 0 && <a className="btn" href={`/api/reminders/export.csv${qs({ legal_entity_id: entity })}`} download><Download size={16} aria-hidden /> В Excel</a>}
+          {d && d.counts.total > 0 && <a className="btn" href={`/api/reminders/export.xlsx${qs({ legal_entity_id: entity })}`} download><Download size={16} aria-hidden /> В Excel</a>}
         </>} />
       <div className="toolbar">
         <FilterChips value={f.level} onChange={(v) => setF({ level: v })}

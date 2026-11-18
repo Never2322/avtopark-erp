@@ -12,7 +12,7 @@ from app.config import get_settings
 from app.db import get_db
 from app.deps import COOKIE, Principal, client_ip, current_even_if_password_temporary
 from app.models import Employee, LegalEntity, LoginAttempt, Role, User, UserRole, UserSession
-from app.services import hauls as hauls_svc
+from app.services import hauls as hauls_svc, routes as routes_svc
 from app.services import weigh as weigh_svc
 from app.security import DUMMY_HASH, hash_password, new_token, password_problem, token_hash, verify_password
 
@@ -49,7 +49,7 @@ def me_payload(db: Session, p: Principal) -> dict:
         "org_timezone": s.org_timezone,
         # что включено именно этому человеку, а не его роли: вкладка «Тоннаж» нужна, когда за ним закреплена машина с галочкой «Вести тоннаж»,
         # а «Счётчик ходок» только водителю, за которым закреплён самосвал
-        "features": {"tonnage": weigh_svc.has_tonnage(db, p), "hauls": hauls_svc.has_hauls(db, p)},
+        "features": {"tonnage": weigh_svc.has_tonnage(db, p), "hauls": hauls_svc.has_hauls(db, p), "routes": routes_svc.has_routes(db, p)},
     }
 
 

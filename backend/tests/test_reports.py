@@ -12,7 +12,7 @@ from sqlalchemy import select
 from app.db import session_factory
 from app.models import (AuditLog, Counterparty, Fine, FuelFill, MiscExpense, Order, Rental, RepairBill, ServiceRequest, StockItem, StockMove, Trip,
                         Vehicle, VehicleReading, VehicleSpecs, VehicleStatusHistory, VehicleType, Waybill, Warehouse)
-from app.services.xlsx import xlsx_book
+from app.services.xlsx import serial, xlsx_book
 
 UTC = dt.timezone.utc
 MAY = "2026-05"
@@ -342,10 +342,11 @@ def sheets_of(data: bytes) -> dict[str, list[list]]:
         rows = []
         for r in re.findall(r"<row [^>]*>(.*?)</row>", xml):
             cells = []
-            for ref, body in re.findall(r'<c r="([A-Z]+)\d+"[^>]*>(.*?)</c>', r):
+            for ref, body in re.findall(r'<c r="([A-Z]+)\d+"[^>]*?(?:/>|>(.*?)</c>)', r):
                 t = re.search(r"<t[^>]*>(.*?)</t>", body)
                 v = re.search(r"<v>(.*?)</v>", body)
-                cells.append(t.group(1) if t else float(v.group(1)))
+                if t or v:                                                                           # пустые ячейки с оформлением пропускаем
+                    cells.append(t.group(1) if t else float(v.group(1)))
             rows.append(cells)
         out[name] = rows
     return out
@@ -363,7 +364,7 @@ def test_excel_export_month(make_client, world):
     k100 = [x for x in summary if str(x[0]).startswith("К100")][0]
     assert 26700.0 in k100 and summary[-1][0] == "Итого"
     fines = book["Штрафы"]
-    assert fines[1][0] == "11.05.2026" and "=SUM(A1)" in fines[1]                                   # текст, не формула
+    assert fines[1][0] == serial(dt.date(2026, 5, 11)) and "=SUM(A1)" in fines[1]                    # дата настоящей датой; текст, не формула
     about = dict((x[0], x[1]) for x in book["О отчёте"][1:] if len(x) > 1)
     assert about["Отчёт"] == "Итоги месяца" and about["Период"] == "2026-05" and "Сформирован" in about
     with session_factory()() as db:
@@ -407,12 +408,15 @@ def test_csv_export(make_client, world):
 
 def test_xlsx_writer_is_safe():
     data = xlsx_book([("Сводка/итог: очень длинное название листа больше тридцати одного знака", [["A", "Б"], ["=1+1", 1.5], ["x\x00y", float("nan")]], [None, "money"]),
-                      ("Сводка/итог: очень длинное название листа больше тридцати одного знака", [["Итого", 3]], ["", "int"])])
+                      ("Сводка/итог: очень длинное название листа больше тридцати одного знака", [["Название", "Сумма"], ["Итого", 3]], [None, "int"])])
     z = zipfile.ZipFile(io.BytesIO(data))
     assert z.testzip() is None
     names = re.findall(r'<sheet name="([^"]*)"', z.read("xl/workbook.xml").decode())
     assert len(names) == 2 and len(set(n.lower() for n in names)) == 2 and all(len(n) <= 31 and "/" not in n and ":" not in n for n in names)
     s1 = z.read("xl/worksheets/sheet1.xml").decode()
     assert "<f>" not in s1 and "=1+1" in s1 and "\x00" not in s1 and "nan" not in s1
-    assert z.read("xl/worksheets/sheet2.xml").decode().count('s="8"') == 1                             # «Итого» жирным числом
+    s2, styles = z.read("xl/worksheets/sheet2.xml").decode(), z.read("xl/styles.xml").decode()
+    total = int(re.search(r'<c r="B2" s="(\d+)"><v>3</v>', s2).group(1))
+    xf = re.findall(r"<xf [^>]*>", re.search(r"<cellXfs.*?</cellXfs>", styles, re.S).group(0))[total]
+    assert 'fontId="1"' in xf                                                                         # «Итого» жирным числом
     assert xlsx_book([])[:2] == b"PK"

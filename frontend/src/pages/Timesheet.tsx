@@ -63,7 +63,7 @@ export function Timesheet() {
         actions={sheet && (
           <>
             {sheet.can_add && <Link className="btn" to="/worklog"><Plus size={16} aria-hidden /> Внести часы</Link>}
-            {sheet.can_export && <a className="btn" href={`/api/timesheet/export.csv${qs({ month, legal_entity_id: entity })}`} download><Download size={16} aria-hidden /> В Excel</a>}
+            {sheet.can_export && <a className="btn" href={`/api/timesheet/export.xlsx${qs({ month, legal_entity_id: entity })}`} download><Download size={16} aria-hidden /> В Excel</a>}
             <Link className="btn" to={`/print/timesheet${qs({ month, entity })}`} target="_blank"><Printer size={16} aria-hidden /> Печать</Link>
           </>
         )} />

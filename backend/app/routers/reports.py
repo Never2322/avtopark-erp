@@ -19,11 +19,11 @@ from app.deps import Principal, require
 from app.models import LegalEntity
 from app.services import reports as svc
 from app.services.reminders import local_today, org_tz
+from app.exporting import XLSX_MIME, local_naive
 from app.services.xlsx import xlsx_book
 
 router = APIRouter(prefix="/reports", tags=["Отчёты"])
-XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-KIND_FORMAT = {"money": "money", "dec": "dec", "int": "int", "ton": "ton"}
+KIND_FORMAT = {"money": "money", "dec": "dec", "int": "int", "ton": "ton", "date": "date", "datetime": "datetime"}
 
 
 def report_or_404(p: Principal, name: str) -> svc.Report:
@@ -74,13 +74,24 @@ def show_value(kind: str, key: str, v):
     return v
 
 
-def sheet_of(tbl: dict) -> tuple[list[list], list]:
+def native_value(kind: str, key: str, v):
+    """Значение ячейки для книги Excel: дата — настоящей датой (по ней работают сортировка и фильтр), остальное как на экране."""
+    if kind == "date" and v:
+        return dt.date.fromisoformat(v[:10])
+    if kind == "datetime" and v:
+        return local_naive(dt.datetime.fromisoformat(v))
+    return show_value(kind, key, v)
+
+
+def sheet_of(tbl: dict, native: bool = False) -> tuple[list[list], list]:
+    """Таблица отчёта для файла. native=True — для Excel: даты настоящими датами; иначе строкой (CSV)."""
     cols = tbl["columns"]
     rows = [[c["label"] for c in cols]]
-    rows += [[show_value(c["kind"], c["key"], v) for c, v in zip(cols, r)] for r in tbl["rows"]]
+    value = native_value if native else show_value
+    rows += [[value(c["kind"], c["key"], v) for c, v in zip(cols, r)] for r in tbl["rows"]]
     if tbl.get("totals"):
         rows.append(list(tbl["totals"]))
-    return rows, [KIND_FORMAT.get(c["kind"]) for c in cols]
+    return rows, [KIND_FORMAT.get(c["kind"]) if native or c["kind"] not in ("date", "datetime") else None for c in cols]
 
 
 def csv_number(v):
@@ -117,7 +128,7 @@ def export_xlsx(name: str, legal_entity_id: int | None = None, month: str | None
     stamp = utcnow().astimezone(org_tz()).strftime("%d.%m.%Y %H:%M")
     sheets = []
     for title, tbl in (res.get("sheets") or [(res["title"], res["table"])] + [(e["title"], e) for e in res["extras"]]):
-        rows, kinds = sheet_of(tbl)
+        rows, kinds = sheet_of(tbl, native=True)
         sheets.append((title, rows, kinds))
     sheets.append(("О отчёте", info_sheet(db, res, stamp)))
     audit.log(db, p, "reports.export", "report", None, legal_entity_id, report=name, period=res["period"], format="xlsx")

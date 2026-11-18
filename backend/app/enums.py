@@ -212,6 +212,8 @@ STOCK_UNITS = PART_UNITS
 
 # ---------------------------------------------------------------- вкладки техники: шины, ремонты, финансы, ТО, контроль
 TIRE_SEASONS = {"summer": "Лето", "winter": "Зима", "all": "Всесезонные"}
+ROUTE_PLAN_KINDS = {"weekly": "По дням недели", "date": "На одну дату"}      # расписание маршрутов мусоровозов
+WEEKDAY_FIELDS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")            # поля дней недели в расписании (понедельник = 0)
 VEHICLE_REPAIR_KINDS = {"repair": "Работа", "part": "Деталь", "material": "Материал"}
 VEHICLE_FINANCE_KINDS = {"expense": "Расход", "income": "Доход"}
 MAINTENANCE_KINDS = {"so": "СО", "to1": "ТО-1", "to2": "ТО-2", "other": "Другое"}

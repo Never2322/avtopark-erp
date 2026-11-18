@@ -394,6 +394,8 @@ select.input { appearance: none; background-image: linear-gradient(45deg, transp
 
 /* ---- печатные формы: белый лист независимо от тёмной темы сайта ---- */
 .row-actions { display: inline-flex; align-items: center; gap: 2px; }
+/* Если выделить таблицу на экране и вставить в Excel, кнопки, значки и подписи для чтения с экрана не должны попасть в ячейки: данные — да, элементы интерфейса — нет. Для готового файла есть кнопка «В Excel». */
+.table .row-actions, .table .btn, .table button, .table svg, .table .sr-only, .table [data-nocopy] { user-select: none; -webkit-user-select: none; }
 .print-root { min-height: 100vh; background: #e7ecee; padding: 16px; }
 .print-bar { max-width: 794px; margin: 0 auto 12px; display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
 .print-root .alert { max-width: 794px; margin: 0 auto 12px; }
@@ -980,3 +982,59 @@ a.stat:hover { background: var(--hover); border-color: var(--border-strong); tex
 .exp-hint { margin: 0; padding: 0 18px 12px; }
 .card.flush > .exp-hint:last-child { padding-top: 12px; }
 @media (max-width: 700px) { .exp-kpis { grid-template-columns: minmax(0, 1fr); } .exp-total .exp-big { font-size: 28px; } }
+
+
+/* Маршруты мусоровозов: «Мои маршруты» (водитель) и «Маршруты по дням» (директор, диспетчер) */
+.rt-date { margin: -4px 0 10px; }
+.rt-date::first-letter, .rt-nav-day strong::first-letter { text-transform: uppercase; }
+.rt-list { display: flex; flex-direction: column; gap: 12px; }
+.rt-route { display: flex; flex-direction: column; gap: 6px; padding: 14px 16px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+.rt-route-head { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.rt-name { font-size: 20px; line-height: 1.25; }
+.rt-streets { margin-top: 4px; }
+.rt-streets > summary { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; cursor: pointer; padding: 6px 0; font-weight: 600; min-height: 32px; }
+.rt-streets > summary .rt-peek { font-weight: 400; min-width: 0; overflow-wrap: anywhere; }
+.rt-streets[open] > summary .rt-peek { display: none; }
+.rt-streets ol { margin: 4px 0 0; padding-left: 26px; columns: 2 220px; column-gap: 28px; }
+.rt-streets li { padding: 3px 0; break-inside: avoid; overflow-wrap: anywhere; }
+.rt-nostreets { margin: 4px 0 0; }
+.rt-days { display: flex; flex-direction: column; gap: 18px; }
+.rt-day h3 { margin: 0 0 8px; font-size: 16px; }
+.rt-wd { display: inline-block; min-width: 30px; font-weight: 800; color: var(--mint); text-transform: uppercase; }
+.rt-free { margin: 14px 0 0; }
+.rt-week { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+.rt-wk { display: flex; flex-direction: column; gap: 6px; padding: 12px 14px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+.rt-wk h3 { margin: 0; font-size: 15px; text-transform: uppercase; letter-spacing: .02em; }
+.rt-wk.now { border-color: var(--mint); box-shadow: inset 0 0 0 1px var(--mint); }
+.rt-wk-item { display: flex; flex-direction: column; gap: 2px; }
+.rt-nav-card { display: flex; flex-direction: column; gap: 12px; }
+.rt-nav { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.rt-nav-day { display: flex; flex-direction: column; align-items: center; text-align: center; min-width: 0; }
+.rt-nav-day strong { font-size: 20px; }
+.rt-nav-tools { display: flex; align-items: flex-end; justify-content: center; flex-wrap: wrap; gap: 12px; }
+.rt-date-pick { display: flex; flex-direction: column; gap: 4px; }
+.rt-total { margin: 0; font-size: 16px; }
+.rt-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 16px; align-items: start; }
+.rt-card .rt-note { margin: 0 0 8px; }
+.rt-trucks, .rt-plain { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.rt-truck { display: flex; align-items: flex-start; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--border-soft); }
+.rt-truck:first-child { padding-top: 0; }
+.rt-truck-ico { flex: none; margin-top: 2px; color: var(--mint); }
+.rt-truck-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.rt-plate { font-variant-numeric: tabular-nums; letter-spacing: .02em; }
+.rt-driver { display: flex; align-items: center; gap: 6px; }
+.rt-badges { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+.rt-plain li { padding: 8px 0; border-bottom: 1px solid var(--border-soft); }
+.rt-plain li:last-child { border-bottom: 0; }
+@media (max-width: 640px) {
+  .rt-grid { grid-template-columns: minmax(0, 1fr); }
+  .rt-name { font-size: 18px; }
+  .rt-streets ol { columns: 1; }
+  .rt-truck { flex-wrap: wrap; }
+  .rt-badges { justify-content: flex-start; }
+}
+.day-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+.day-chip { position: relative; display: inline-flex; align-items: center; justify-content: center; min-width: 48px; min-height: 40px; padding: 0 12px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); background: var(--field); font-weight: 600; cursor: pointer; user-select: none; }
+.day-chip input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; }
+.day-chip.on { background: var(--mint); border-color: var(--mint); color: var(--mint-ink); }
+.day-chip:focus-within { outline: 2px solid var(--mint); outline-offset: 2px; }

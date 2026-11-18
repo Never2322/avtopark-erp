@@ -12,8 +12,9 @@ from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session
 
 from app import audit
-from app.common import csv_text, fail
+from app.common import fail
 from app.db import get_db
+from app.exporting import check_format, table_response
 from app.deps import Principal, current, require
 from app.models import Employee, EmploymentAssignment, LegalEntity, WorkLog
 from app.registry import allowed_entities
@@ -112,23 +113,25 @@ def sheet(month: str = "", legal_entity_id: int | None = None, p: Principal = De
     return build(db, p, ent, _month(month))
 
 
-@router.get("/export.csv")
-def export(month: str = "", legal_entity_id: int | None = None, p: Principal = Depends(current), db: Session = Depends(get_db)):
+@router.get("/export.{fmt}")
+def export(fmt: str, month: str = "", legal_entity_id: int | None = None, p: Principal = Depends(current), db: Session = Depends(get_db)):
+    check_format(fmt)
     ent = _entity(db, p, "timesheet.export", legal_entity_id)
     first = _month(month)
     data = build(db, p, ent, first, "timesheet.export")
     n = len(data["days"])
-    fmt = lambda x: f"{x:.2f}".replace(".", ",")
-    h = lambda x: ts.hours_text(x)
+    day = lambda cell: round(cell["total"], 2) if cell else None
     rows: list[list] = [["№", "ФИО", "Должность"] + list(range(1, n + 1)) + ["Часов работы", "Часов ремонта", "Работа, ₽", "Ремонт, ₽", "Итого, ₽"]]
     for i, r in enumerate(data["rows"], 1):
         t = r["totals"]
-        rows.append([i, r["name"], r["position"]] + [fmt(r["days"][str(d)]["total"]) if r["days"].get(str(d)) else "" for d in range(1, n + 1)]
-                    + [h(t["work_h"]), h(t["repair_h"]), fmt(t["work"]), fmt(t["repair"]), fmt(t["total"])])
+        rows.append([i, r["name"], r["position"] or None] + [day(r["days"].get(str(d))) for d in range(1, n + 1)]
+                    + [t["work_h"], t["repair_h"], round(t["work"], 2), round(t["repair"], 2), round(t["total"], 2)])
     t = data["totals"]
-    rows.append(["", "Итого за день", ""] + [fmt(data["day_totals"][str(d)]) if data["day_totals"].get(str(d)) else "" for d in range(1, n + 1)]
-                + [h(t["work_h"]), h(t["repair_h"]), fmt(t["work"]), fmt(t["repair"]), fmt(t["total"])])
+    rows.append([None, "Итого за день", None] + [round(data["day_totals"][str(d)], 2) if data["day_totals"].get(str(d)) else None for d in range(1, n + 1)]
+                + [t["work_h"], t["repair_h"], round(t["work"], 2), round(t["repair"], 2), round(t["total"], 2)])
     audit.log(db, p, "timesheet.export", "timesheet", None, ent.id, month=data["month"], rows=len(data["rows"]))
     db.commit()
-    name = f"timesheet-{data['month']}.csv"
-    return Response(csv_text(rows), media_type="text/csv; charset=utf-8", headers={"Content-Disposition": f'attachment; filename="{name}"'})
+    kinds = ["num", None, None] + ["money"] * n + ["num", "num", "money", "money", "money"]
+    colors = [7, 0, 4] + [1] * n + [2, 3, 5, 6, 0]
+    return table_response(fmt, f"timesheet-{data['month']}", "Табель", rows, kinds, {"colors": colors, "freeze": 2})
+

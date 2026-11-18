@@ -365,7 +365,7 @@ def test_report_exports_to_excel_and_csv(world, make_client, reads):
     with zipfile.ZipFile(io.BytesIO(x.content)) as z:
         sheet = z.read("xl/worksheets/sheet1.xml").decode()
         styles = z.read("xl/styles.xml").decode()
-    assert "28.82" in sheet and 'numFmtId="2"' in styles                                # тонны с двумя знаками
+    assert "28.82" in sheet and 'numFmtId="4"' in styles                                # тонны с двумя знаками
     c = d.get(f"/reports/tonnage/export.csv?month={month}")
     assert c.status_code == 200 and "28,82" in c.content.decode("utf-8-sig")
 

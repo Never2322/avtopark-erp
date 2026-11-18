@@ -17,7 +17,7 @@ from app.models import Employee, FuelFill, ServiceRequest, Vehicle
 from app.registry import _vehicle_label
 from app.resources import job_today
 from app.routers.requests_ import visible_condition
-from app.services import hauls as hauls_svc, payroll as pay, timesheet as ts, weigh as weigh_svc
+from app.services import hauls as hauls_svc, payroll as pay, routes as routes_svc, timesheet as ts, weigh as weigh_svc
 from app.services.fuel import norms, over_norm, segments
 from app.services.vehicles import assigned_vehicle_ids
 
@@ -77,4 +77,4 @@ def home(p: Principal = Depends(current), db: Session = Depends(get_db)):
             "can": {"requests": p.can("requests.create"), "waybills": p.can("waybills.view_own") or p.can("waybills.create_own"),
                     "trip": p.can("trips.create_own"), "fuel": p.can("fuel_fills.create_own"), "jobs": bool(p.scope("jobs.view_own")),
                     "reading": p.can("readings.create_own"), "tonnage": weigh_svc.has_tonnage(db, p),
-                    "status": p.can("vehicle_status.change_own"), "hauls": hauls_svc.has_hauls(db, p)}}
+                    "status": p.can("vehicle_status.change_own"), "hauls": hauls_svc.has_hauls(db, p), "routes": routes_svc.has_routes(db, p)}}

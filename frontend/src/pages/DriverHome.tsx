@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { CalendarCheck, ClipboardList, Fuel, Gauge, Hourglass, ListOrdered, Route as RouteIcon, Truck, Wallet, Weight, Wrench } from "lucide-react";
+import { CalendarCheck, ClipboardList, Fuel, Gauge, Hourglass, ListOrdered, Route as RouteIcon, Truck, Wallet, Weight, Wrench, Signpost } from "lucide-react";
 import { get } from "../api";
 import { useAuth } from "../auth";
 import { fmtDate, fmtDateTime, fmtMoney, fmtNum, plural } from "../format";
@@ -27,7 +27,7 @@ export interface Earned {
 }
 interface Home {
   today: string; name: string; has_vehicle: boolean; vehicles: HomeVehicle[];
-  can: { requests: boolean; waybills: boolean; trip: boolean; fuel: boolean; jobs: boolean; reading: boolean; tonnage?: boolean; status?: boolean; hauls?: boolean };
+  can: { requests: boolean; waybills: boolean; trip: boolean; fuel: boolean; jobs: boolean; reading: boolean; tonnage?: boolean; status?: boolean; hauls?: boolean; routes?: boolean };
   earned?: Earned | null;
 }
 
@@ -141,6 +141,7 @@ export function DriverHome() {
                   {h.can.tonnage && <Button variant="primary" size="lg" icon={Weight} disabled={!tonnage.data?.can.create || !tonnage.data.vehicles.length} onClick={() => setTicket(true)}>Талон весов</Button>}
                   {h.can.requests && <Link className="btn lg" to={single ? `/requests?new=1&vehicle=${single.id}` : "/requests?new=1"}><Wrench size={16} aria-hidden /> Обращение</Link>}
                   {h.can.hauls && <Link className="btn lg" to="/hauls"><ListOrdered size={16} aria-hidden /> Счётчик ходок</Link>}
+                  {h.can.routes && <Link className="btn lg" to="/my-routes"><Signpost size={16} aria-hidden /> Мои маршруты</Link>}
                   {h.can.waybills && <Link className="btn lg" to="/waybills"><ClipboardList size={16} aria-hidden /> Путевые листы</Link>}
                   {can("worklog.view_own") && <Link className="btn lg" to="/my-time"><Hourglass size={16} aria-hidden /> Мои часы</Link>}
                 </div>

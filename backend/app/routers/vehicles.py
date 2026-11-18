@@ -9,8 +9,9 @@ from sqlalchemy import and_, asc, desc, exists, func, or_, select
 from sqlalchemy.orm import Session
 
 from app import audit
-from app.common import csv_text, fail, like, norm_plate, org_today, page_of, utcnow
+from app.common import fail, like, norm_plate, org_today, page_of, utcnow
 from app.db import get_db
+from app.exporting import check_format, table_response
 from app.deps import Principal, current, entity_filter, require
 from app.enums import READING_KINDS, REQUEST_OPEN, VEHICLE_CATEGORIES, VEHICLE_DOC_KINDS, VEHICLE_STATUSES, status_label
 from app.models import (Department, DossierDoc, Employee, LegalEntity, MaintenanceItem, ServiceRequest, User, Vehicle, VehicleAssignment, VehicleStatusHistory,
@@ -265,10 +266,11 @@ def list_vehicles(q: str = "", status: str = "", type_id: int | None = None, cat
             "facets": facets(db, p, flt)}
 
 
-@router.get("/export.csv")
-def export_csv(q: str = "", status: str = "", type_id: int | None = None, category: str = "", legal_entity_id: int | None = None,
-               department_id: int | None = None, driver_id: int | None = None, archived: bool = False,
-               p: Principal = Depends(require("vehicles.export")), db: Session = Depends(get_db)):
+@router.get("/export.{fmt}")
+def export_file(fmt: str, q: str = "", status: str = "", type_id: int | None = None, category: str = "", legal_entity_id: int | None = None,
+                department_id: int | None = None, driver_id: int | None = None, archived: bool = False,
+                p: Principal = Depends(require("vehicles.export")), db: Session = Depends(get_db)):
+    check_format(fmt)
     # выгрузка идёт по тем же правилам, что и список: чужие юрлица и техника без права экспорта в файл не попадают
     export_scope = p.scope("vehicles.export")
     query = filtered(db, p, q=q, status=status, type_id=type_id, category=category, legal_entity_id=legal_entity_id,
@@ -276,16 +278,14 @@ def export_csv(q: str = "", status: str = "", type_id: int | None = None, catego
     query = query.where(export_scope.cond(Vehicle.legal_entity_id)).order_by(Vehicle.plate)
     vehicles = db.scalars(query).all()
     drivers = drivers_of(db, [v.id for v in vehicles])
-    rows = [["Госномер", "Внутренний №", "Юрлицо", "Тип", "Марка", "Модель", "VIN", "Год", "Статус", "Пробег, км", "Моточасы, ч", "Водитель"]]
+    rows: list[list] = [["Госномер", "Внутренний №", "Юрлицо", "Тип", "Марка", "Модель", "VIN", "Год", "Статус", "Пробег, км", "Моточасы, ч", "Водитель"]]
     for v in vehicles:
-        rows.append([v.plate, v.internal_no, v.legal_entity.short_name or v.legal_entity.name, v.type.name, v.make, v.model,
-                     v.vin or "", v.year or "", VEHICLE_STATUSES[v.status],
-                     f"{v.current_km:g}" if v.current_km is not None else "", f"{v.current_hours:g}" if v.current_hours is not None else "",
-                     (drivers.get(v.id) or {}).get("name", "")])
+        rows.append([v.plate, v.internal_no or None, v.legal_entity.short_name or v.legal_entity.name, v.type.name, v.make or None, v.model or None,
+                     v.vin or None, v.year or None, VEHICLE_STATUSES[v.status],
+                     v.current_km, v.current_hours, (drivers.get(v.id) or {}).get("name") or None])
     audit.log(db, p, "vehicle.export", "vehicle", None, legal_entity_id, rows=len(rows) - 1)
     db.commit()
-    return Response(csv_text(rows), media_type="text/csv; charset=utf-8",
-                    headers={"Content-Disposition": 'attachment; filename="vehicles.csv"'})
+    return table_response(fmt, "vehicles", "Техника", rows, [None, None, None, None, None, None, None, "num", None, "int", "dec1", None])
 
 
 @router.post("", status_code=201)

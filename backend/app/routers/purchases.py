@@ -149,17 +149,17 @@ def restore(body: RestoreIn, p: Principal = Depends(require("purchases.mark")), 
     return {"ok": True, "moved_to_waiting": moved}
 
 
-@router.get("/export.csv")
-def export_csv(q: str = "", vehicle_id: int | None = None, legal_entity_id: int | None = None,
-               p: Principal = Depends(require("purchases.export")), db: Session = Depends(get_db)):
-    from app.common import csv_text
+@router.get("/export.{fmt}")
+def export_file(fmt: str, q: str = "", vehicle_id: int | None = None, legal_entity_id: int | None = None,
+                p: Principal = Depends(require("purchases.export")), db: Session = Depends(get_db)):
+    from app.exporting import check_format, local_naive, table_response
+    check_format(fmt)
     data = build(db, p, q=q, vehicle_id=vehicle_id, legal_entity_id=legal_entity_id, perm="purchases.export")
-    tz = org_tz()
-    rows = [["Деталь", "Артикул", "Единица", "Всего", "Обращение №", "Машина", "Статус обращения", "Нужно", "Добавлено"]]
+    rows: list[list] = [["Деталь", "Артикул", "Единица", "Всего", "Обращение №", "Машина", "Статус обращения", "Нужно", "Добавлено"]]
     for g in data["items"]:
         for ln in g["lines"]:
-            rows.append([g["name"], g["article"], g["unit"], g["qty_text"], ln["number"], ln["plate"], ln["status_label"], ln["qty_text"],
-                         dt.datetime.fromisoformat(ln["added_at"]).astimezone(tz).strftime("%d.%m.%Y")])
+            rows.append([g["name"], g["article"] or None, g["unit"], g["qty"], ln["number"], ln["plate"] or None, ln["status_label"], ln["qty"],
+                         local_naive(dt.datetime.fromisoformat(ln["added_at"])).date()])
     audit.log(db, p, "purchases.export", "request", None, legal_entity_id, rows=len(rows) - 1)
     db.commit()
-    return Response(csv_text(rows), media_type="text/csv; charset=utf-8", headers={"Content-Disposition": 'attachment; filename="purchases.csv"'})
+    return table_response(fmt, "purchases", "Что купить", rows, [None, None, None, "num", None, None, None, "num", "date"])

@@ -1,10 +1,12 @@
 # -*- coding: utf-8 -*-
 """Напоминания: что наступило и что наступит в ближайшие дни, из всех разделов, на которые у человека есть право."""
+import datetime as dt
+
 from fastapi import APIRouter, Depends, Response
 from sqlalchemy.orm import Session
 
 from app import audit
-from app.common import csv_text
+from app.exporting import check_format, table_response
 from app.db import get_db
 from app.deps import Principal, require
 from app.services import reminders as rem
@@ -36,12 +38,13 @@ def summary(legal_entity_id: int | None = None, p: Principal = Depends(require("
     return counts(rem.reminders(db, p, legal_entity_id))
 
 
-@router.get("/export.csv")
-def export(legal_entity_id: int | None = None, p: Principal = Depends(require("reminders.view")), db: Session = Depends(get_db)):
+@router.get("/export.{fmt}")
+def export(fmt: str, legal_entity_id: int | None = None, p: Principal = Depends(require("reminders.view")), db: Session = Depends(get_db)):
+    check_format(fmt)
     rows = rem.reminders(db, p, legal_entity_id)
-    table = [["Состояние", "Раздел", "Что", "Кто или что", "Срок", "Осталось"]]
+    table: list[list] = [["Состояние", "Раздел", "Что", "Кто или что", "Срок", "Осталось"]]
     for r in rows:
-        table.append([LEVELS[r["level"]], r["source_label"], r["title"], r["subject"], r["day"][8:10] + "." + r["day"][5:7] + "." + r["day"][:4], r["left_text"]])
+        table.append([LEVELS[r["level"]], r["source_label"], r["title"], r["subject"] or None, dt.date.fromisoformat(r["day"]), r["left_text"] or None])
     audit.log(db, p, "reminders.export", "reminders", None, legal_entity_id, rows=len(rows))
     db.commit()
-    return Response(csv_text(table), media_type="text/csv; charset=utf-8", headers={"Content-Disposition": 'attachment; filename="reminders.csv"'})
+    return table_response(fmt, "reminders", "Напоминания", table, [None, None, None, None, "date", None])

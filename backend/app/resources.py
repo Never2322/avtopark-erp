@@ -7,10 +7,10 @@ from decimal import ROUND_HALF_UP, Decimal
 from sqlalchemy import and_, case, func, select
 
 from app.common import num, org_today
-from app.enums import (MAINTENANCE_KINDS, TIRE_SEASONS, VEHICLE_FINANCE_KINDS, VEHICLE_REPAIR_KINDS, CALENDAR_COLORS, CALENDAR_REMIND_MAX, EMPLOYEE_EVENT_KINDS, EMPLOYEE_EVENT_MONEY_KINDS, REMINDER_LEAD_DAYS, PPE_SOON_DAYS, PPE_WEAR_MAX_MONTHS, PART_UNITS, CASH_ACCOUNT_KINDS, CASH_OP_KINDS, COUNTERPARTY_KINDS, DOC_FULL_NAMES, DOC_TYPES, ENTRY_LATE_DAYS, FINE_PAYERS,
+from app.enums import (MAINTENANCE_KINDS, ROUTE_PLAN_KINDS, WEEKDAY_FIELDS, TIRE_SEASONS, VEHICLE_FINANCE_KINDS, VEHICLE_REPAIR_KINDS, CALENDAR_COLORS, CALENDAR_REMIND_MAX, EMPLOYEE_EVENT_KINDS, EMPLOYEE_EVENT_MONEY_KINDS, REMINDER_LEAD_DAYS, PPE_SOON_DAYS, PPE_WEAR_MAX_MONTHS, PART_UNITS, CASH_ACCOUNT_KINDS, CASH_OP_KINDS, COUNTERPARTY_KINDS, DOC_FULL_NAMES, DOC_TYPES, ENTRY_LATE_DAYS, FINE_PAYERS,
                        FUEL_MAX_LITERS, JOB_DATE_WINDOW_DAYS, JOB_STATES, ORDER_STATUSES, PAYMENT_KINDS, RENTAL_DIRECTIONS, TARIFF_KINDS, TARIFF_UNITS, WORK_TARIFF_UNITS, PAY_TARIFF_KINDS, PAY_TARIFF_UNITS, WORKLOG_BACKDATE_DAYS, WORKLOG_KINDS, WORKLOG_SOURCES,
                        STOCK_UNITS, VAT_RATES)
-from app.models import (ControlEvent, MaintenanceItem, VehicleFinance, VehicleRepair, VehicleTire, CalendarEvent, EmployeeEvent, CashAccount, CashOp, Constant, Counterparty, Document, Employee, EmployeePayment, EntryPhoto, Fine, FuelCard,
+from app.models import (GarbageRoute, RoutePlan, ControlEvent, MaintenanceItem, VehicleFinance, VehicleRepair, VehicleTire, CalendarEvent, EmployeeEvent, CashAccount, CashOp, Constant, Counterparty, Document, Employee, EmployeePayment, EntryPhoto, Fine, FuelCard,
                         FuelFill, WeighTicket, WorkLog, Job, JobPhoto, MiscExpense, Order, PartCatalog, PpeIssue, PpeNorm, Rental, StockItem, Tariff, Trip, Vehicle, Warehouse)
 from app.registry import MAX_MONEY, Col, F, Invalid, R, org_tz, register
 from app.parts_seed import norm as part_key
@@ -21,6 +21,7 @@ from app.services import notify as notify_svc
 from app.services import payroll as payroll_svc
 from app.services import stock as stock_svc
 from app.services import weigh as weigh_svc
+from app.services import routes as routes_svc
 from app.services import reminders as rem
 from app.services.people import user_names
 from app.services.vehicles import current_driver_id
@@ -554,7 +555,7 @@ register(R(
         F("note", "Заметка", "textarea", list=False),
         F("year", "Год", "int", auto=True, list=False), F("number", "Номер", "int", auto=True, list=False),
     ],
-    cols=[Col("doc_no", "№", "text", first=True), Col("route", "Маршрут", "text"), Col("state", "Статус", "badge"),
+    cols=[Col("doc_no", "№", "text", first=True), Col("route", "Маршрут", "text", xl=False), Col("state", "Статус", "badge", xl=False),
           Col("total", "С НДС, ₽", "money", sum=True), Col("docs", "Документы", "text")],
     search=("cargo", "point_from", "point_to", "note"),
     search_refs=(("customer_id", Counterparty, ("name",)), ("vehicle_id", Vehicle, ("plate", "make", "model"))),
@@ -742,7 +743,7 @@ register(R(
         F("state", "Состояние", "enum", options=JOB_STATES, default="planned", auto=True, list=False),
     ],
     cols=[Col("status", "Состояние", "badge"), Col("arrived", "Приехал", "text"), Col("finished", "Закончил", "text"),
-          Col("photos", "Фото", "text")],
+          Col("photos", "Фото", "text", xl=False)],
     search=("customer", "address", "task", "result_note"),
     search_refs=(("vehicle_id", Vehicle, ("plate", "make", "model")),),
     states={"open": "Не закончены", "done": "Выполнены", "cancelled": "Отменены"}, state_filter=_job_filter,
@@ -820,7 +821,7 @@ register(R(
         F("note", "Заметка", "textarea", max=500, list=False),
         F("client_id", "Код отправки", max=64, auto=True, list=False),
     ],
-    cols=[Col("photos", "Фото", "text")],
+    cols=[Col("photos", "Фото", "text", xl=False)],
     search=("route", "customer", "cargo", "doc_number", "note"),
     search_refs=(("vehicle_id", Vehicle, ("plate", "make", "model")), ("driver_id", Employee, ("last_name", "first_name"))),
     date="trip_date", order=("-trip_date", "-id"), prepare=_trip_prepare, computed=_trip_computed,
@@ -905,7 +906,7 @@ register(R(
         F("client_id", "Код отправки", max=64, auto=True, list=False),
     ],
     cols=[Col("per_l", "Цена за литр, ₽", "money"), Col("consumption", "Расход, л/100 км", "text"), Col("check", "Проверка", "badge"),
-          Col("photos", "Фото", "text")],
+          Col("photos", "Фото", "text", xl=False)],
     photos=("fuel", "Фото чека"),
     search=("station", "note"),
     search_refs=(("vehicle_id", Vehicle, ("plate", "make", "model")), ("driver_id", Employee, ("last_name", "first_name"))),
@@ -973,7 +974,7 @@ register(R(
         F("note", "Заметка", "textarea", max=500, list=False, more=True),
         F("client_id", "Код отправки", max=64, auto=True, list=False),
     ],
-    cols=[Col("tons_state", "Тоннаж внесён", "badge"), Col("read_note", "Что прочитала программа", "text"), Col("photos", "Фото", "text")],
+    cols=[Col("tons_state", "Тоннаж внесён", "badge"), Col("read_note", "Что прочитала программа", "text", xl=False), Col("photos", "Фото", "text", xl=False)],
     photos=("ticket", "Фото талона"),
     states={"none": "Тоннаж не внесён", "set": "Тоннаж внесён"}, state_filter=_ticket_filter,
     search=("note", "doc_number", "read_note"),
@@ -1502,4 +1503,84 @@ register(R(
     order=("-id",), prepare=_control_prepare(hours=True), computed=_control_computed(lambda o: False),
     states={"open": "На контроле", "closed": "Сняты с контроля"},
     state_filter=lambda q, state, today: q.where(ControlEvent.controlled.is_(state == "open")),
+))
+
+
+# ---------------------------------------------------------------- маршруты мусоровозов
+
+def _route_computed(db, objs):
+    out = {}
+    for r in objs:
+        st = routes_svc.streets_list(r.streets)
+        short = "; ".join(st[:3]) + (f" и ещё {len(st) - 3}" if len(st) > 3 else "")
+        out[r.id] = {"streets_short": short}
+    return out
+
+
+def _route_before_void(db, obj):
+    n = db.scalar(select(func.count()).select_from(RoutePlan).where(RoutePlan.route_id == obj.id, RoutePlan.archived_at.is_(None)))
+    if n:
+        raise Invalid({"_": f"Маршрут стоит в расписании ({n}). Сначала уберите его оттуда или поставьте другой маршрут"})
+
+
+register(R(
+    key="garbage_routes", title="Маршруты мусоровозов", one="маршрут", model=GarbageRoute,
+    fields=[
+        F("name", "Название маршрута", required=True, max=120, wide=True, hint="Как маршрут называют в работе, например: Центр-1"),
+        F("streets", "Улицы", "textarea", wide=True, list=False, hint="Каждая улица с новой строки, в том порядке, в каком едет машина"),
+        F("note", "Заметка", "textarea", list=False),
+    ],
+    cols=[Col("streets_short", "Улицы")],
+    search=("name", "streets", "note"), order=("name",), computed=_route_computed, before_void=_route_before_void,
+    unique_field="name", unique_text="Маршрут с таким названием уже есть",
+))
+
+
+def _plan_computed(db, objs):
+    return {o.id: {"when": routes_svc.plan_when(o)} for o in objs}
+
+
+def _plan_prepare(db, p, v, obj, m):
+    e: dict = {}
+    if m.get("kind") == "date":                  # «на дату»: дней недели нет (при смене вида старые галочки сбрасываются)
+        for f in WEEKDAY_FIELDS:
+            v[f] = m[f] = False
+    else:                                        # «по дням недели»: даты нет
+        v["on_date"] = m["on_date"] = None
+    if m.get("kind") == "weekly" and not any(m.get(f) for f in WEEKDAY_FIELDS):
+        e["mon"] = "Отметьте хотя бы один день недели"
+        raise Invalid(e)
+    q = select(RoutePlan).where(RoutePlan.legal_entity_id == m["legal_entity_id"], RoutePlan.route_id == m["route_id"],
+                                RoutePlan.vehicle_id == m["vehicle_id"], RoutePlan.kind == m["kind"], RoutePlan.archived_at.is_(None))
+    if obj is not None:
+        q = q.where(RoutePlan.id != obj.id)
+    if m["kind"] == "date":
+        if db.scalar(q.where(RoutePlan.on_date == m["on_date"]).limit(1)):
+            e["on_date"] = "Эта машина на этот маршрут в этот день уже записана"
+    else:
+        for row in db.scalars(q):
+            clash = [i for i, f in enumerate(WEEKDAY_FIELDS) if m.get(f) and getattr(row, f)]
+            if clash:
+                e["mon"] = "Эта машина уже ездит по этому маршруту: " + routes_svc.weekdays_text(clash) + ". Поправьте существующую запись"
+                break
+    if e:
+        raise Invalid(e)
+
+
+_DAY_LABELS = (("mon", "Понедельник"), ("tue", "Вторник"), ("wed", "Среда"), ("thu", "Четверг"), ("fri", "Пятница"), ("sat", "Суббота"), ("sun", "Воскресенье"))
+
+register(R(
+    key="route_plan", title="Расписание маршрутов", one="запись в расписании", model=RoutePlan, entity_from="vehicle",
+    fields=[
+        F("route_id", "Маршрут", "ref", ref="route", required=True, filter=True),
+        F("vehicle_id", "Мусоровоз", "ref", ref="vehicle", required=True, filter=True, hint="Машина, которая едет по маршруту"),
+        F("kind", "Как ездит", "enum", options=ROUTE_PLAN_KINDS, default="weekly", required=True, filter=True,
+          hint="«По дням недели» — обычное расписание. «На одну дату» — замена на конкретный день: она отменяет обычное расписание этого маршрута в этот день"),
+        *[F(code, label, "bool", show_if=("kind", "weekly"), list=False) for code, label in _DAY_LABELS],
+        F("on_date", "Дата", "date", required=True, show_if=("kind", "date"), list=False),
+        F("note", "Заметка", "textarea", list=False),
+    ],
+    cols=[Col("when", "Когда")],
+    search=("note",), search_refs=(("vehicle_id", Vehicle, ("plate", "make", "model")), ("route_id", GarbageRoute, ("name", "streets"))),
+    order=("route_id", "-id"), prepare=_plan_prepare, computed=_plan_computed,
 ))

@@ -115,7 +115,7 @@ export function Registry({ resource, sub, icon, emptyHint, actions }: { resource
     return items;
   }, [m, list.data]);
 
-  const csvParams = { ...params, page: undefined, page_size: undefined };
+  const exportParams = { ...params, page: undefined, page_size: undefined };
   const Icon = icon ?? Inbox;
 
   return (
@@ -145,7 +145,7 @@ export function Registry({ resource, sub, icon, emptyHint, actions }: { resource
               ))}
               <label className="check"><input type="checkbox" checked={read("archived") === "1"} onChange={(e) => change({ archived: e.target.checked ? "1" : "" })} /> Архив</label>
               <span className="spacer" />
-              <a className="btn" href={`/api/${resource}/export.csv${qs(csvParams)}`} download><Download size={16} aria-hidden /> В Excel</a>
+              <a className="btn" href={`/api/${resource}/export.xlsx${qs(exportParams)}`} download><Download size={16} aria-hidden /> В Excel</a>
             </div>
             {m.states.length > 0 && (
               <div style={{ padding: "12px 14px 0" }}>
@@ -312,6 +312,40 @@ export function RecordModal({ meta, row, onClose, onSaved, defaults, hide }: { m
     return <Field key={f.name} label={label} error={err} hint={hint} full={f.wide}>{input}</Field>;
   };
 
+  /** Дни недели в расписании маршрутов рисуются одной строкой кнопок «Пн Вт Ср…», а не семью отдельными полями. */
+  const WEEK = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
+  const WEEK_SHORT = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
+  const renderDays = () => {
+    const disabled = readOnly || !!row?.archived;
+    const err = errors.mon;
+    return (
+      <div className="field full" key="week-days">
+        <span className="label" id="week-days-label">Дни недели <span style={{ color: "var(--error)" }} aria-hidden>*</span></span>
+        <div className="day-chips" role="group" aria-labelledby="week-days-label">
+          {WEEK.map((k, i) => (
+            <label key={k} className={`day-chip ${values[k] ? "on" : ""}`}>
+              <input type="checkbox" checked={!!values[k]} disabled={disabled} onChange={(e) => { set(k, e.target.checked); if (errors.mon) set("mon", k === "mon" ? e.target.checked : !!values.mon); }} />
+              <span>{WEEK_SHORT[i]}</span>
+            </label>
+          ))}
+        </div>
+        {err && <span className="err" role="alert">{err}</span>}
+      </div>
+    );
+  };
+  const renderFields = (fs: FieldMeta[]) => {
+    const out: ReactNode[] = [];
+    let days = false;
+    for (const f of fs) {
+      if (meta.key === "route_plan" && WEEK.includes(f.name)) {
+        if (!days) { days = true; out.push(renderDays()); }
+        continue;
+      }
+      out.push(renderField(f));
+    }
+    return out;
+  };
+
   const moreFields = meta.fields.filter((f) => visible(f) && f.more);
   const title = readOnly ? meta.title : editing ? "Изменить" : "Добавить";
   return (
@@ -334,7 +368,7 @@ export function RecordModal({ meta, row, onClose, onSaved, defaults, hide }: { m
               )}
             </Field>
           )}
-          {meta.fields.filter((f) => visible(f) && !f.more).map(renderField)}
+          {renderFields(meta.fields.filter((f) => visible(f) && !f.more))}
         </div>
         {meta.key === "worklog" && !readOnly && !row?.archived && <WorklogPreview values={values} editingId={row?.id} />}
         {photos && (

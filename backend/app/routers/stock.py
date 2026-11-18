@@ -16,8 +16,9 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app import audit
-from app.common import csv_text, fail, like, page_of, utcnow
+from app.common import fail, like, page_of, utcnow
 from app.db import get_db
+from app.exporting import check_format, table_response
 from app.deps import Principal, current, entity_filter, require
 from app.enums import REQUEST_PARTS_OPEN, STOCK_MAX_QTY, STOCK_MOVE_KINDS, STOCK_UNITS
 from app.models import (Counterparty, LegalEntity, RepairBill, RepairBillItem, RequestPart, ServiceRequest, StockItem, StockMove, User, Vehicle,
@@ -255,20 +256,23 @@ def balances(q: str = "", warehouse_id: int | None = None, low: bool = False, sh
             "can": {"create": bool(p.scope("stock_moves.create")), "view_moves": bool(p.scope("stock_moves.view")), "single_entity": bool(scope) and not scope.everything and len(scope.ids) == 1}}
 
 
-@router.get("/balances/export.csv")
-def balances_csv(q: str = "", warehouse_id: int | None = None, low: bool = False, show_empty: bool = False, legal_entity_id: int | None = None,
-                 p: Principal = Depends(require("stock_items.view")), db: Session = Depends(get_db)):
+@router.get("/balances/export.{fmt}")
+def balances_file(fmt: str, q: str = "", warehouse_id: int | None = None, low: bool = False, show_empty: bool = False, legal_entity_id: int | None = None,
+                  p: Principal = Depends(require("stock_items.view")), db: Session = Depends(get_db)):
+    check_format(fmt)
     rows = balance_rows(db, p, q=q, warehouse_id=warehouse_id, low=low, show_empty=show_empty, legal_entity_id=legal_entity_id)
-    out = [["Юрлицо", "Товар", "Артикул", "Единица", "Склад", "Остаток", "Минимум", "Средняя цена", "Сумма"]]
+    out: list[list] = [["Юрлицо", "Товар", "Артикул", "Единица", "Склад", "Остаток", "Минимум", "Средняя цена, ₽", "Сумма, ₽"]]
     for r in rows:
-        for pl in (r["places"] or [{"warehouse": "", "qty_text": "0"}]):
-            cost = f"{r['avg_price']:.2f}".replace(".", ",") if r["avg_price"] is not None else ""
-            qty = Decimal(str(pl["qty"] if "qty" in pl else 0))
-            amount = f"{(qty * Decimal(str(r['avg_price']))).quantize(Decimal('0.01'))}".replace(".", ",") if r["avg_price"] is not None else ""
-            out.append([r["legal_entity"], r["name"], r["sku"], r["unit"], pl["warehouse"], pl["qty_text"], r["min_text"], cost, amount])
+        for pl in (r["places"] or [{"warehouse": "", "qty": 0}]):
+            amount = (Decimal(str(pl["qty"])) * Decimal(str(r["avg_price"]))).quantize(Decimal("0.01")) if r["avg_price"] is not None else None
+            out.append([r["legal_entity"] or None, r["name"], r["sku"] or None, r["unit"], pl["warehouse"] or None, pl["qty"], r["min_qty"] or None,
+                        r["avg_price"], amount])
+    sums = [sum((x[8] for x in out[1:] if x[8] is not None), Decimal(0))]
+    if len(out) > 1:
+        out.append(["Итого", None, None, None, None, None, None, None, sums[0]])
     audit.log(db, p, "stock.export", "stock_item", None, legal_entity_id, rows=len(out) - 1, what="balances")
     db.commit()
-    return Response(csv_text(out), media_type="text/csv; charset=utf-8", headers={"Content-Disposition": 'attachment; filename="stock-balances.csv"'})
+    return table_response(fmt, "stock-balances", "Остатки склада", out, [None, None, None, None, None, "num", "num", "money", "money"])
 
 
 # ---------------------------------------------------------------- журнал движений
@@ -327,24 +331,25 @@ def list_moves(kind: str = "", month: str = "", warehouse_id: int | None = None,
             "sums": {k: float(v.quantize(Decimal("0.01"))) for k, v in sums.items()}}
 
 
-@router.get("/moves/export.csv")
-def moves_csv(kind: str = "", month: str = "", warehouse_id: int | None = None, item_id: int | None = None, vehicle_id: int | None = None, q: str = "",
-              archived: bool = False, legal_entity_id: int | None = None, p: Principal = Depends(require("stock_moves.view")),
-              db: Session = Depends(get_db)):
+@router.get("/moves/export.{fmt}")
+def moves_file(fmt: str, kind: str = "", month: str = "", warehouse_id: int | None = None, item_id: int | None = None, vehicle_id: int | None = None, q: str = "",
+               archived: bool = False, legal_entity_id: int | None = None, p: Principal = Depends(require("stock_moves.view")),
+               db: Session = Depends(get_db)):
+    check_format(fmt)
     cond = move_filters(p, kind=kind, month=month, warehouse_id=warehouse_id, item_id=item_id, vehicle_id=vehicle_id, q=q, archived=archived,
                         legal_entity_id=legal_entity_id)
     moves = list(db.scalars(select(StockMove).where(*cond).order_by(StockMove.move_date.desc(), StockMove.id.desc()).limit(20000)))
     c = context(db, moves)
-    out = [["Дата", "Вид", "Товар", "Артикул", "Единица", "Склад", "Куда", "Количество", "Цена", "Сумма", "Контрагент", "Машина", "Обращение №",
-            "Документ", "Заметка", "В архиве"]]
+    out: list[list] = [["Дата", "Вид", "Товар", "Артикул", "Единица", "Склад", "Куда", "Количество", "Цена, ₽", "Сумма, ₽", "Контрагент", "Машина",
+                        "Обращение №", "Документ", "Заметка", "В архиве"]]
     for m in moves:
         o = move_out(p, m, c)
-        out.append([dt.date.fromisoformat(o["move_date"]).strftime("%d.%m.%Y"), o["kind_label"], o["item"], o["sku"], o["unit"], o["warehouse"],
-                    o["to_warehouse"], o["qty_text"], f"{o['price']:.2f}".replace(".", ","), f"{o['amount']:.2f}".replace(".", ","), o["counterparty"],
-                    o["vehicle"], o["request_number"] or "", o["doc_number"], o["note"], "да" if o["archived"] else ""])
+        out.append([dt.date.fromisoformat(o["move_date"]), o["kind_label"], o["item"], o["sku"] or None, o["unit"], o["warehouse"] or None,
+                    o["to_warehouse"] or None, o["qty"], o["price"], o["amount"], o["counterparty"] or None, o["vehicle"] or None,
+                    o["request_number"] or None, o["doc_number"] or None, o["note"] or None, "да" if o["archived"] else None])
     audit.log(db, p, "stock.export", "stock_move", None, legal_entity_id, rows=len(out) - 1, what="moves")
     db.commit()
-    return Response(csv_text(out), media_type="text/csv; charset=utf-8", headers={"Content-Disposition": 'attachment; filename="stock-moves.csv"'})
+    return table_response(fmt, "stock-moves", "Движения склада", out, ["date", None, None, None, None, None, None, "num", "money", "money"])
 
 
 # ---------------------------------------------------------------- создание движения

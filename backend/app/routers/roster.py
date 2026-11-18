@@ -19,8 +19,9 @@ from sqlalchemy import and_, exists, func, or_, select
 from sqlalchemy.orm import Session
 
 from app import audit
-from app.common import csv_text, fail, like, num, org_today, utcnow
+from app.common import fail, like, num, org_today, utcnow
 from app.db import get_db
+from app.exporting import check_format, local_naive, table_response
 from app.deps import Principal, current, require
 from app.enums import EFFECTIVE_STATES, JOB_STATES, REQUEST_OPEN, VEHICLE_STATUSES
 from app.models import (Employee, EmploymentAssignment, FuelFill, Job, ServiceRequest, Trip, Vehicle, VehicleAssignment, VehicleReading)
@@ -212,44 +213,50 @@ def roster(legal_entity_id: int | None = None, q: str = "", status: str = "", on
     return data
 
 
-@router.get("/export.csv")
-def export_csv(legal_entity_id: int | None = None, q: str = "", status: str = "", only: str = "",
-               p: Principal = Depends(require("roster.export")), db: Session = Depends(get_db)):
+@router.get("/export.{fmt}")
+def export_file(fmt: str, legal_entity_id: int | None = None, q: str = "", status: str = "", only: str = "",
+                p: Principal = Depends(require("roster.export")), db: Session = Depends(get_db)):
+    check_format(fmt)
     # выгрузка идёт по тем же правилам, что и экран; чужие юрлица и разделы без права в файл не попадают
     data = build(db, p, legal_entity_id=legal_entity_id, q=q, status=status, only=only, export=True)
     can = data["can"]
     head = ["Госномер", "Машина", "Юрлицо", "Водитель", "Запасные водители", "Состояние", "С какого времени"]
+    kinds: list = [None, None, None, None, None, None, "datetime"]
     if can["jobs"]:
         head += ["Заданий сегодня", "Ближайшее задание"]
+        kinds += ["num", None]
     if can["trips"]:
         head += ["Последний рейс"]
+        kinds += [None]
     if can["fuel"]:
         head += ["Последняя заправка", "Расход, л/100 км", "Норма, л/100 км"]
+        kinds += [None, "dec1", "dec1"]
     if can["requests"]:
         head += ["Открытых обращений"]
+        kinds += ["num"]
     head += ["Пробег, км", "Моточасы, ч", "Замечания"]
-    tz = org_tz()
-    rows = [head]
+    kinds += ["int", "dec1", None]
+    rows: list[list] = [head]
     for i in data["items"]:
         main = [d["name"] for d in i["drivers"] if d["role"] == "primary"]
         spare = [d["name"] for d in i["drivers"] if d["role"] != "primary"]
-        since = dt.datetime.fromisoformat(i["status_since"]).astimezone(tz).strftime("%d.%m.%Y %H:%M") if i["status_since"] else ""
-        r = [i["plate"], i["name"], i["legal_entity"], ", ".join(main), ", ".join(spare), i["status_label"], since]
+        since = local_naive(dt.datetime.fromisoformat(i["status_since"])) if i["status_since"] else None
+        r = [i["plate"], i["name"], i["legal_entity"], ", ".join(main) or None, ", ".join(spare) or None, i["status_label"], since]
         if can["jobs"]:
             j = i["job"]
-            r += [j["today"] if j else "", (f"{j['next']['time_from'] + ' ' if j['next']['time_from'] else ''}{j['next']['address']}" if j and j["next"] else "")]
+            r += [j["today"] if j else None, (f"{j['next']['time_from'] + ' ' if j['next']['time_from'] else ''}{j['next']['address']}" if j and j["next"] else None)]
         if can["trips"]:
             t = i["last_trip"]
-            r += [f"{dt.date.fromisoformat(t['date']).strftime('%d.%m.%Y')} {t['route']}" if t else ""]
+            r += [f"{dt.date.fromisoformat(t['date']).strftime('%d.%m.%Y')} {t['route']}" if t else None]
         if can["fuel"]:
             f = i["fuel"]
-            r += [f"{dt.date.fromisoformat(f['date']).strftime('%d.%m.%Y')}, {num(Decimal(str(f['liters'])))} л" if f else "",
-                  num(Decimal(str(f["per100"]))) if f and f["per100"] is not None else "", num(Decimal(str(f["norm"]))) if f and f["norm"] else ""]
+            r += [f"{dt.date.fromisoformat(f['date']).strftime('%d.%m.%Y')}, {num(Decimal(str(f['liters'])))} л" if f else None,
+                  f["per100"] if f and f["per100"] is not None else None, f["norm"] if f and f["norm"] else None]
         if can["requests"]:
-            r += [i["open_requests"] if i["open_requests"] is not None else ""]
-        r += [f"{i['current_km']:g}" if i["current_km"] is not None else "", f"{i['current_hours']:g}" if i["current_hours"] is not None else "",
-              "; ".join(f["label"] for f in i["flags"])]
+            r += [i["open_requests"] if i["open_requests"] is not None else None]
+        r += [i["current_km"], i["current_hours"], "; ".join(f["label"] for f in i["flags"]) or None]
         rows.append(r)
     audit.log(db, p, "roster.export", "vehicle", None, legal_entity_id, rows=len(rows) - 1)
     db.commit()
-    return Response(csv_text(rows), media_type="text/csv; charset=utf-8", headers={"Content-Disposition": 'attachment; filename="roster.csv"'})
+    return table_response(fmt, "roster", "Водители и техника", rows, kinds)
+

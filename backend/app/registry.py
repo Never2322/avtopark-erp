@@ -4,7 +4,7 @@
 Раздел описывается один раз (поля, права, правила), а каркас даёт всё остальное одинаково для всех:
   GET    /api/<раздел>/meta          описание полей для экрана и что можно этому человеку
   GET    /api/<раздел>               список: поиск, даты, фильтры, постранично, итоги по суммам
-  GET    /api/<раздел>/export.csv    то же в файл (открывается в Excel)
+  GET    /api/<раздел>/export.xlsx   то же в файл Excel (export.csv — то же таблицей CSV)
   POST   /api/<раздел>               добавить
   PATCH  /api/<раздел>/{id}          изменить
   POST   /api/<раздел>/{id}/void     убрать в архив (причина обязательна)
@@ -29,12 +29,13 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app import audit
-from app.common import csv_text, fail, like, org_today, page_of, utcnow
+from app.common import fail, like, org_today, page_of, utcnow
 from app.config import get_settings
 from app.db import get_db
 from app.enums import PAY_TARIFF_UNITS
 from app.deps import NOTHING, Principal, Scope, current, entity_filter
-from app.models import CashAccount, Counterparty, Employee, EmploymentAssignment, LegalEntity, Order, PpeNorm, Tariff, Vehicle
+from app.exporting import check_format, local_naive, table_response
+from app.models import CashAccount, Counterparty, Employee, EmploymentAssignment, GarbageRoute, LegalEntity, Order, PpeNorm, Tariff, Vehicle
 from app.routers import audit_log
 
 MAX_MONEY = Decimal("100000000000")        # 100 млрд: защита от опечатки с лишними нулями
@@ -81,6 +82,7 @@ class Col:
     kind: str = "text"           # text | money | badge | number | date
     sum: bool = False
     first: bool = False          # показывать первой колонкой, до полей
+    xl: bool = True              # попадает в файл Excel; False — только для экрана (значки, число фото, дубли соседних колонок)
 
 
 @dataclass
@@ -151,6 +153,8 @@ def ref_labels(db: Session, ref: str, ids: set[int]) -> dict[int, str]:
         return {a.id: a.name for a in db.scalars(select(CashAccount).where(CashAccount.id.in_(ids)))}
     if ref == "ppe":
         return {n.id: n.name for n in db.scalars(select(PpeNorm).where(PpeNorm.id.in_(ids)))}
+    if ref == "route":
+        return {r.id: r.name for r in db.scalars(select(GarbageRoute).where(GarbageRoute.id.in_(ids)))}
     return {}
 
 
@@ -243,7 +247,7 @@ def parse_body(res: R, body: dict, current_vals: dict | None) -> dict:
         raw = body.get(f.name, f.default)
         merged[f.name] = raw
         try:
-            out[f.name] = parse_one(f, raw) if _visible(f, {**merged}) else (None if f.kind not in ("text", "textarea") else "")
+            out[f.name] = parse_one(f, raw) if _visible(f, {**merged}) else ("" if f.kind in ("text", "textarea") else False if f.kind == "bool" else None)
         except Invalid as e:
             errors.update(e.fields)
     # условно обязательные поля проверяем уже по итоговым значениям
@@ -361,6 +365,70 @@ def row_out(res: R, obj: Any, labels: dict[str, dict[int, str]], extra: dict, p:
     return d
 
 
+def _xl_cell(f: F, it: dict):
+    """Значение поля для файла Excel: числа числами, даты датами, ссылки и перечисления подписью."""
+    v = it.get(f.name + "_label") if f.kind == "ref" else it.get(f.name)
+    if v is None or v == "":
+        return None
+    if f.kind == "enum":
+        return (f.options or {}).get(v, v)
+    if f.kind == "bool":
+        return "да" if v else "нет"
+    if f.kind == "date":
+        return dt.date.fromisoformat(str(v)[:10])
+    if f.kind == "datetime":
+        return local_naive(dt.datetime.fromisoformat(str(v)))
+    if f.kind in ("money", "decimal", "int") and isinstance(v, (int, float)):
+        return v
+    return v
+
+
+def _xl_kind(f: F) -> str | None:
+    if f.kind == "money":
+        return "money"
+    if f.kind == "decimal":
+        return f"dec{f.places}" if f.places in (1, 2, 3) else "num"
+    if f.kind == "int":
+        return "num"
+    return {"date": "date", "datetime": "datetime"}.get(f.kind)
+
+
+def _xl_col(c: Col, it: dict):
+    v = it.get(c.name)
+    if isinstance(v, dict):
+        v = v.get("text", "")
+    if v is None or v == "":
+        return None
+    if c.kind == "date":
+        return dt.date.fromisoformat(str(v)[:10])
+    return v
+
+
+def export_sheet(res: R, items: list[dict], totals: bool = True) -> tuple[list[list], list]:
+    """Таблица для выгрузки: только названия столбцов и данные. Колонки «для экрана» (Col.xl=False: значки, число фото, повторы) не входят."""
+    shown = [f for f in res.fields if not f.auto]
+    cols = [c for c in res.cols if c.xl]
+    first, rest = [c for c in cols if c.first], [c for c in cols if not c.first]
+    plan: list[tuple] = []                                  # (название, как достать значение, вид, надо ли суммировать)
+    if res.scope == "entity":
+        plan.append(("Юрлицо", lambda it: it.get("legal_entity") or None, None, False))
+    plan += [(c.label, (lambda it, c=c: _xl_col(c, it)), "money" if c.kind == "money" else "date" if c.kind == "date" else "num" if c.kind == "number" else None, c.sum)
+             for c in first]
+    plan += [(f.label, (lambda it, f=f: _xl_cell(f, it)), _xl_kind(f), f.sum) for f in shown]
+    plan += [(c.label, (lambda it, c=c: _xl_col(c, it)), "money" if c.kind == "money" else "date" if c.kind == "date" else "num" if c.kind == "number" else None, c.sum)
+             for c in rest]
+    rows: list[list] = [[name for name, *_ in plan]]
+    for it in items:
+        rows.append([get(it) for _, get, _, _ in plan])
+    if totals and items and any(s for *_, s in plan):
+        total = ["Итого"] + [None] * (len(plan) - 1)
+        for i, (_, _, _, s) in enumerate(plan):
+            if s and i:
+                total[i] = float(sum((Decimal(str(r[i])) for r in rows[1:] if isinstance(r[i], (int, float))), Decimal(0)))
+        rows.append(total)
+    return rows, [k for _, _, k, _ in plan]
+
+
 def rows_out(db: Session, res: R, objs: list, p: Principal) -> list[dict]:
     labels: dict[str, dict[int, str]] = {}
     for f in res.fields:
@@ -469,6 +537,12 @@ def validate_refs(db: Session, res: R, values: dict, entity_id: int | None, obj:
                 errors[f.name] = pick if row is None else "Этот счёт из другого юрлица"
             elif changed and row.archived_at:
                 errors[f.name] = "Счёт в архиве"
+        elif f.ref == "route":
+            row = db.get(GarbageRoute, v)
+            if row is None or (entity_id is not None and row.legal_entity_id != entity_id):
+                errors[f.name] = pick if row is None else "Этот маршрут из другого юрлица"
+            elif changed and row.archived_at:
+                errors[f.name] = "Маршрут в архиве"
     if errors:
         raise Invalid(errors)
 
@@ -614,43 +688,16 @@ def build_router(res: R) -> APIRouter:
                     sums[c.name] = float(sum((Decimal(str(ext.get(o.id, {}).get(c.name) or 0)) for o in full), Decimal(0)))
         return {"items": out, "total": total, "page": page, "page_size": page_size, "totals": sums}
 
-    @r.get("/export.csv")
-    def export(request: Request, q: str = "", date_from: str = "", date_to: str = "", legal_entity_id: int | None = None,
+    @r.get("/export.{fmt}")
+    def export(fmt: str, request: Request, q: str = "", date_from: str = "", date_to: str = "", legal_entity_id: int | None = None,
                archived: bool = False, p: Principal = Depends(need_view), db: Session = Depends(get_db)):
+        check_format(fmt)
         ordered, _plain = listing(request, p, db, q, date_from, date_to, legal_entity_id, archived)
         objs = [x[0] for x in db.execute(ordered.limit(20000)).all()]
-        items = rows_out(db, res, objs, p)
-        shown = [f for f in res.fields if not f.auto]
-        head = (["Юрлицо"] if res.scope == "entity" else []) + [f.label for f in shown] + [c.label for c in res.cols]
-        rows: list[list[Any]] = [head]
-        for it in items:
-            line: list[Any] = [it["legal_entity"]] if res.scope == "entity" else []
-            for f in shown:
-                v = it.get(f.name + "_label") if f.kind == "ref" else it.get(f.name)
-                if f.kind == "enum":
-                    v = (f.options or {}).get(v, v)
-                elif f.kind == "bool":
-                    v = "да" if v else "нет"
-                elif f.kind == "date" and v:
-                    v = ".".join(reversed(str(v).split("-")))
-                elif f.kind == "datetime" and v:
-                    v = dt.datetime.fromisoformat(str(v)).astimezone(org_tz()).strftime("%d.%m.%Y %H:%M")
-                elif isinstance(v, float):
-                    v = f"{v:.{f.places}f}".replace(".", ",")
-                line.append("" if v is None else v)
-            for c in res.cols:
-                v = it.get(c.name)
-                if isinstance(v, dict):
-                    v = v.get("text", "")
-                elif c.kind == "date" and v:
-                    v = ".".join(reversed(str(v).split("-")))
-                elif isinstance(v, float):
-                    v = f"{v:.2f}".replace(".", ",")
-                line.append("" if v is None else v)
-            rows.append(line)
+        rows, kinds = export_sheet(res, rows_out(db, res, objs, p), totals=fmt == "xlsx")
         audit.log(db, p, f"{res.key}.export", res.key, None, legal_entity_id, rows=len(rows) - 1)
         db.commit()
-        return Response(csv_text(rows), media_type="text/csv; charset=utf-8", headers={"Content-Disposition": f'attachment; filename="{res.key}.csv"'})
+        return table_response(fmt, f"{res.key}-{org_today().isoformat()}", res.title, rows, kinds)
 
     @r.post("", status_code=201)
     def create(body: dict, p: Principal = Depends(current), db: Session = Depends(get_db)):
@@ -803,4 +850,10 @@ def options(ref: str, q: str = "", legal_entity_id: int | None = None, p: Princi
         scope = ref_scope(p, ref, "cash_accounts.view", legal_entity_id)
         query = select(CashAccount).where(scope.cond(CashAccount.legal_entity_id), CashAccount.archived_at.is_(None)).order_by(CashAccount.name)
         return {"items": [{"id": a.id, "label": a.name, "legal_entity_id": a.legal_entity_id} for a in db.scalars(query)]}
+    if ref == "route":
+        scope = ref_scope(p, ref, "garbage_routes.view", legal_entity_id)
+        query = select(GarbageRoute).where(scope.cond(GarbageRoute.legal_entity_id), GarbageRoute.archived_at.is_(None)).order_by(GarbageRoute.name)
+        if t:
+            query = query.where(GarbageRoute.name.ilike(t))
+        return {"items": [{"id": r.id, "label": r.name, "legal_entity_id": r.legal_entity_id} for r in db.scalars(query.limit(300))]}
     raise fail(404, "not_found", "Такого списка нет")

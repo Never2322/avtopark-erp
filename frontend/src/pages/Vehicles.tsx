@@ -142,7 +142,7 @@ export function Vehicles() {
     <>
       <PageHeader title="Транспорт" sub={`Управление автопарком и спецтехникой${list.data ? ` · показано: ${list.data.total}` : ""}`}
         actions={<>
-          {can("vehicles.export") && <a className="btn" href={`/api/vehicles/export.csv${qs({ q: s.q, status: s.status, type_id: s.type_id, archived: s.archived === "1", legal_entity_id: entity })}`}><Download size={16} aria-hidden /> Выгрузить в Excel</a>}
+          {can("vehicles.export") && <a className="btn" href={`/api/vehicles/export.xlsx${qs({ q: s.q, status: s.status, type_id: s.type_id, archived: s.archived === "1", legal_entity_id: entity })}`}><Download size={16} aria-hidden /> Выгрузить в Excel</a>}
           {can("vehicles.create") && <Button variant="primary" icon={Plus} onClick={() => setCreating(true)}>Добавить технику</Button>}
         </>} />
       <Card flush>

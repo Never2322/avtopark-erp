@@ -100,7 +100,7 @@ export function StockMoves() {
     <>
       <PageHeader title="Движение товара" sub="Приход, расход, списания и перемещения. Остаток считается по этим записям"
         actions={<>
-          {d && <a className="btn" href={`/api/stock/moves/export.csv${qs({ ...params, page: undefined, page_size: undefined })}`}><Download size={16} aria-hidden /> В Excel</a>}
+          {d && <a className="btn" href={`/api/stock/moves/export.xlsx${qs({ ...params, page: undefined, page_size: undefined })}`}><Download size={16} aria-hidden /> В Excel</a>}
           {o?.can.create && <Button variant="primary" icon={ArrowLeftRight} onClick={() => setModal(true)}>Новое движение</Button>}
         </>} />
       <Card flush>

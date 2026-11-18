@@ -39,7 +39,7 @@ export function Stock() {
     <>
       <PageHeader title="Склад" sub={d ? `Позиций: ${d.totals.positions}${d.totals.value ? ` · стоимость остатков ${fmtMoney(d.totals.value)} ₽ по средней закупочной цене` : ""}` : undefined}
         actions={<>
-          {d && <a className="btn" href={`/api/stock/balances/export.csv${qs(params)}`}><Download size={16} aria-hidden /> В Excel</a>}
+          {d && <a className="btn" href={`/api/stock/balances/export.xlsx${qs(params)}`}><Download size={16} aria-hidden /> В Excel</a>}
           {canMove && <Button icon={PackageMinus} onClick={() => setModal({ kind: "issue" })}>Расход</Button>}
           {canMove && <Button icon={Trash2} onClick={() => setModal({ kind: "writeoff" })}>Списание</Button>}
           {canMove && <Button icon={ArrowLeftRight} onClick={() => setModal({ kind: "transfer" })}>Перемещение</Button>}

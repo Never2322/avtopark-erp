@@ -3,7 +3,7 @@ import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import {
   BellRing, Building2, CalendarCheck, CalendarClock, CalendarDays, ChevronDown, ChevronRight, ClipboardList, DatabaseBackup, Gauge, LayoutDashboard, LogOut, Menu, ScrollText, Search, ShieldCheck,
-  Truck, User as UserIcon, UserCheck, UserCog, UserSquare2, Users, UsersRound, Wrench, FolderOpen, Fuel, NotebookPen, ShoppingCart, ReceiptText, Receipt, Megaphone, Newspaper, Boxes, ArrowLeftRight, BarChart3, FileUp, Hourglass, ListOrdered, MapPin, Send, Settings, Wallet, Weight, X, type LucideIcon,
+  Truck, User as UserIcon, UserCheck, UserCog, UserSquare2, Users, UsersRound, Wrench, FolderOpen, Fuel, NotebookPen, ShoppingCart, ReceiptText, Receipt, Megaphone, Newspaper, Boxes, ArrowLeftRight, BarChart3, FileUp, Hourglass, ListOrdered, MapPin, Signpost, CalendarRange, Send, Settings, Wallet, Weight, X, type LucideIcon,
 } from "lucide-react";
 import { ConnectionBar, useOutboxSync } from "./Outbox";
 import { BellMenu, useNotifSummary } from "./Bell";
@@ -14,7 +14,7 @@ import { SECTIONS } from "../sections";
 import { Empty } from "../ui";
 
 /** sub: заголовок подраздела внутри группы (ставится у первого пункта подраздела); words: как ещё люди называют этот раздел (для поиска). */
-interface Item { to: string; label: string; icon: LucideIcon; any: string[]; end?: boolean; badge?: "pending" | "reminders" | "news"; unless?: string[]; all?: string[]; feature?: "tonnage" | "hauls"; sub?: string; words?: string }
+interface Item { to: string; label: string; icon: LucideIcon; any: string[]; end?: boolean; badge?: "pending" | "reminders" | "news"; unless?: string[]; all?: string[]; feature?: "tonnage" | "hauls" | "routes"; sub?: string; words?: string }
 interface Group { key: string; title: string; icon: LucideIcon; tone: string; items: Item[]; flat?: boolean }
 
 const sectionItems = (...keys: string[]): Item[] =>
@@ -59,6 +59,11 @@ const NAV: Group[] = [
         ...sectionItems("weigh_tickets"),
         { to: "/reports/tonnage", label: "Тоннаж за месяц", icon: BarChart3, any: ["weigh_tickets.view"], all: ["reports.view"], words: "тонны итог отчёт" },
       ]),
+      ...withSub("Маршруты мусоровозов", [
+        { to: "/my-routes", label: "Мои маршруты", icon: Signpost, any: ["route_plan.view_own"], unless: ["route_plan.view"], feature: "routes", end: true, words: "мусоровоз улицы объезд по дням" },
+        { to: "/route-board", label: "Маршруты по дням", icon: CalendarRange, any: ["route_plan.view"], end: true, words: "какой мусоровоз где сегодня работает улицы" },
+        ...sectionItems("route_plan", "garbage_routes"),
+      ]),
     ],
   },
   {
@@ -77,7 +82,6 @@ const NAV: Group[] = [
       ...withSub("Ремонт", [
         { to: "/requests", label: "Обращения и ремонты", icon: Wrench, any: ["requests.view", "requests.view_own"], words: "поломка заявка на ремонт" },
         { to: "/purchases", label: "Что купить", icon: ShoppingCart, any: ["purchases.view"], words: "закупка запчасти список" },
-        { to: "/bills", label: "Счета на ремонт", icon: ReceiptText, any: ["bills.view"], words: "запчасти поставщик оплата" },
         ...sectionItems("parts"),
       ]),
       ...withSub("Склад", [
@@ -104,6 +108,7 @@ const NAV: Group[] = [
     key: "money", title: "Деньги и заказы", icon: Wallet, tone: "violet",
     items: [
       { to: "/expenses", label: "Расходы", icon: Receipt, any: ["reports.money"], end: true, words: "траты затраты счета итог месяц" },
+      { to: "/bills", label: "Счета на ремонт", icon: ReceiptText, any: ["bills.view"], words: "запчасти поставщик оплата ремонт счёт к оплате" },
       ...sectionItems("expenses", "orders", "documents"),
       ...withSub("Касса", sectionItems("cash", "cash_accounts", "payments")),
       ...withSub("Отчёты", [{ to: "/reports", label: "Отчёты", icon: BarChart3, any: ["reports.view"], words: "затраты зарплата выручка" }]),

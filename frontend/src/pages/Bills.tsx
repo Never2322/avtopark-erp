@@ -95,7 +95,7 @@ export function Bills() {
     <>
       <PageHeader title="Счета на ремонт" sub="Что выставили поставщики за запчасти и работы, сколько заплатили и сколько ещё должны"
         actions={<>
-          {can?.export && s.tab === "list" && <a className="btn" href={`/api/bills/export.csv${qs({ ...params, page: undefined, page_size: undefined })}`}><Download size={16} aria-hidden /> В Excel</a>}
+          {can?.export && s.tab === "list" && <a className="btn" href={`/api/bills/export.xlsx${qs({ ...params, page: undefined, page_size: undefined })}`}><Download size={16} aria-hidden /> В Excel</a>}
           {can?.create && <Button variant="primary" icon={FileUp} onClick={() => setAuto(true)}>Загрузить счёт</Button>}
           {can?.create && <Button icon={Upload} onClick={() => nav("/bills/new?kind=uploaded")}>Внести вручную</Button>}
           {can?.create && <Button icon={FilePlus2} onClick={() => nav("/bills/new?kind=issued")}>Выписать счёт</Button>}

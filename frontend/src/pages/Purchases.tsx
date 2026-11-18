@@ -50,7 +50,7 @@ export function Purchases() {
   return (
     <>
       <PageHeader title="Что купить" sub={d ? `${d.totals.positions} ${plural(d.totals.positions, "позиция", "позиции", "позиций")} для ${d.totals.requests} ${plural(d.totals.requests, "обращения", "обращений", "обращений")}` : undefined}
-        actions={d?.can.export && <a className="btn" href={`/api/purchases/export.csv${qs(params)}`}><Download size={16} aria-hidden /> Выгрузить в Excel</a>} />
+        actions={d?.can.export && <a className="btn" href={`/api/purchases/export.xlsx${qs(params)}`}><Download size={16} aria-hidden /> Выгрузить в Excel</a>} />
       <Card flush>
         <div className="toolbar" style={{ padding: 14, marginBottom: 0 }}>
           <div style={{ position: "relative", minWidth: 240, flex: "1 1 240px", maxWidth: 380 }}>
