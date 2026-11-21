@@ -7,6 +7,8 @@ from sqlalchemy import update
 
 from app.db import session_factory
 from app.models import FuelFill, Vehicle
+from tests.test_dossier import add_vehicle_doc
+from tests.test_registry import fine
 from tests.test_trade import customer, order
 from app.common import org_today
 
@@ -113,14 +115,30 @@ def test_dashboard_maintenance_hidden_without_right(world, make_client):
 
 def test_dashboard_orders_block(world, make_client):
     boss = make_client("dir_a")
-    assert boss.get("/dashboard").json()["orders"]["active"] == 0
+    assert boss.get("/dashboard").json()["orders"] == {"active": 0, "month_total": 0, "month_count": 0, "prev_total": 0, "delta_pct": None}
     cust = customer(boss)
-    for _ in range(3):
-        assert order(world, boss, cust).status_code == 201
+    assert order(world, boss, cust, amount="1000", vat_pct="20").status_code == 201
+    assert order(world, boss, cust, amount="1000", vat_pct="20").status_code == 201
+    assert order(world, boss, cust, amount="500").status_code == 201
     o = make_client("dir_a").get("/dashboard").json()["orders"]
-    assert o["active"] == 3 and len(o["days"]) == 14 and o["days"][-1] == 3 and o["week"] == 3 and o["prev_week"] == 0
-    assert make_client("dir_b").get("/dashboard").json()["orders"]["active"] == 0     # чужое юрлицо
+    assert o["active"] == 3 and o["month_count"] == 3 and o["month_total"] == 2900      # сумма с НДС, как в списке заказов: 1200 + 1200 + 500
+    assert o["prev_total"] == 0 and o["delta_pct"] is None
+    assert make_client("dir_b").get("/dashboard").json()["orders"]["month_total"] == 0     # чужое юрлицо
     assert make_client("drv1").get("/dashboard").json()["orders"] is None
+
+
+def test_dashboard_orders_month_sum_skips_cancelled_archived_and_compares_with_previous_month(world, make_client):
+    boss = make_client("dir_a")
+    cust = customer(boss)
+    prev_day = (org_today().replace(day=1) - dt.timedelta(days=1)).isoformat()             # последний день прошлого месяца
+    assert order(world, boss, cust, amount="2000", order_date=prev_day, status="done").status_code == 201
+    assert order(world, boss, cust, amount="3000").status_code == 201
+    assert order(world, boss, cust, amount="9999", status="cancelled").status_code == 201    # отменённый не считается
+    gone = order(world, boss, cust, amount="7777").json()
+    assert boss.post(f"/orders/{gone['id']}/void", {"reason": "ошибка"}).status_code == 200    # убранный в архив тоже
+    o = boss.get("/dashboard").json()["orders"]
+    assert o["month_total"] == 3000 and o["month_count"] == 1 and o["prev_total"] == 2000 and o["delta_pct"] == 50
+    assert o["active"] == 1                                                                 # в работе только новый на 3000
 
 
 def test_dashboard_reminders_block(world, make_client):
@@ -129,6 +147,82 @@ def test_dashboard_reminders_block(world, make_client):
     assert r["total"] >= 1 and r["due"] >= 1 and len(r["items"]) <= 5
     assert r["items"][0]["level"] == "due" and r["items"][0]["url"].startswith("/vehicles/")
     assert make_client("drv1").get("/dashboard").json()["reminders"] is None
+
+
+# ---------------------------------------------------------------- ОСАГО на главной
+
+def test_dashboard_osago_counts_expired_and_soon(world, make_client):
+    admin = make_client("admin")
+    assert make_client("dir_a").get("/dashboard").json()["osago"] == {"soon": 0, "expired": 0, "total": 0, "days": 30, "items": []}
+    for vid, off in ((world.va1, -5), (world.va2, 10), (world.va3, 200)):
+        assert add_vehicle_doc(admin, vid, "osago", valid_until=d(off)).status_code == 201
+    o = make_client("dir_a").get("/dashboard").json()["osago"]
+    assert o["soon"] == 2 and o["expired"] == 1 and o["total"] == 3         # 200 дней — ещё далеко
+    assert [i["vehicle_id"] for i in o["items"]] == [world.va1, world.va2]  # самый срочный первым, дальний не показывается
+    assert o["items"][0]["level"] == "due" and "просрочено" in o["items"][0]["left_text"] and o["items"][0]["plate"] == "А001АА54"
+    assert o["items"][1]["level"] == "soon" and o["items"][1]["left_text"] == "10 дн."
+
+
+def test_dashboard_osago_renewed_policy_replaces_old_one(world, make_client):
+    admin = make_client("admin")
+    assert add_vehicle_doc(admin, world.va1, "osago", valid_until=d(-40)).status_code == 201     # старый полис остался в деле
+    assert add_vehicle_doc(admin, world.va1, "osago", valid_until=d(300)).status_code == 201     # новый
+    o = make_client("dir_a").get("/dashboard").json()["osago"]
+    assert o["soon"] == 0 and o["expired"] == 0 and o["total"] == 1 and o["items"] == []
+
+
+def test_dashboard_osago_ignores_archived_other_kinds_and_other_entity(world, make_client):
+    admin = make_client("admin")
+    old = add_vehicle_doc(admin, world.va1, "osago", valid_until=d(-2)).json()
+    assert admin.post(f"/dossier/docs/{old['id']}/archive", {"reason": "заменён"}).status_code == 200
+    assert add_vehicle_doc(admin, world.va2, "kasko", valid_until=d(-2)).status_code == 201     # КАСКО — не ОСАГО
+    assert add_vehicle_doc(admin, world.va3, "osago").status_code == 201                       # без даты окончания
+    assert add_vehicle_doc(admin, world.vb1, "osago", valid_until=d(5)).status_code == 201      # другое юрлицо
+    a = make_client("dir_a").get("/dashboard").json()["osago"]
+    assert a["soon"] == 0 and a["total"] == 0
+    b = make_client("dir_b").get("/dashboard").json()["osago"]
+    assert b["soon"] == 1 and [i["vehicle_id"] for i in b["items"]] == [world.vb1]
+
+
+def test_dashboard_osago_hidden_without_right(world, make_client):
+    assert add_vehicle_doc(make_client("admin"), world.va1, "osago", valid_until=d(-1)).status_code == 201
+    assert make_client("drv1").get("/dashboard").json()["osago"] is None
+
+
+# ---------------------------------------------------------------- штрафы на главной
+
+def test_dashboard_fines_block(world, make_client):
+    boss = make_client("dir_a")
+    assert boss.get("/dashboard").json()["fines"] == {"unpaid": 0, "unpaid_total": 0, "overdue": 0, "soon": 0, "days": 7, "items": []}
+    for body in (fine(world, vehicle_id=world.va1, amount="500", due_date=d(-3)),                         # просрочен
+                 fine(world, vehicle_id=world.va2, amount="1500", due_date=d(60), discount_until=d(4)),    # скидка кончается через 4 дня
+                 fine(world, vehicle_id=world.va3, amount="2500", due_date=d(40)),                         # срок далеко
+                 fine(world, vehicle_id=world.va1, amount="700", payer="driver")):                         # срока нет, платит водитель
+        assert boss.post("/fines", body).status_code == 201
+    f = boss.get("/dashboard").json()["fines"]
+    assert f["unpaid"] == 4 and f["unpaid_total"] == 5200 and f["overdue"] == 1 and f["soon"] == 1
+    assert [i["amount"] for i in f["items"]] == [500, 1500, 2500]                  # показаны три: просроченный, со скидкой, дальний; без срока в конце
+    assert f["items"][0]["level"] == "due" and "просрочено на 3" in f["items"][0]["left_text"] and f["items"][0]["plate"] == "А001АА54"
+    assert f["items"][1]["level"] == "soon" and f["items"][1]["discount"] is True and f["items"][1]["deadline"] == d(4) and f["items"][1]["left_text"] == "4 дн."
+    assert f["items"][2]["level"] == "ok" and f["items"][2]["discount"] is False
+
+
+def test_dashboard_fines_skip_paid_archived_and_other_entity(world, make_client):
+    boss = make_client("dir_a")
+    paid = boss.post("/fines", fine(world, amount="900", due_date=d(-1), paid_at=d(-1))).json()
+    gone = boss.post("/fines", fine(world, amount="800", due_date=d(2))).json()
+    assert boss.post(f"/fines/{gone['id']}/void", {"reason": "ошибка"}).status_code == 200
+    assert make_client("admin").post("/fines", fine(world, vehicle_id=world.vb1, amount="600", due_date=d(1))).status_code == 201
+    assert paid["id"]
+    a = boss.get("/dashboard").json()["fines"]
+    assert a["unpaid"] == 0 and a["unpaid_total"] == 0 and a["items"] == []
+    b = make_client("dir_b").get("/dashboard").json()["fines"]
+    assert b["unpaid"] == 1 and b["soon"] == 1 and b["items"][0]["amount"] == 600
+
+
+def test_dashboard_fines_hidden_without_right(world, make_client):
+    assert make_client("dir_a").post("/fines", fine(world, due_date=d(1))).status_code == 201
+    assert make_client("drv1").get("/dashboard").json()["fines"] is None
 
 
 # ---------------------------------------------------------------- список техники

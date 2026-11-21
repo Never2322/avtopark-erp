@@ -1,7 +1,7 @@
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { AlertTriangle, ArrowDown, ArrowUp, BellRing, CalendarCheck, CalendarClock, CheckCircle2, ClipboardCheck, ClipboardList, Gauge, History, PackageSearch, PieChart, Plus, Truck, Wallet, Wrench } from "lucide-react";
+import { AlertTriangle, ArrowDown, ArrowUp, BellRing, CalendarCheck, CalendarClock, CheckCircle2, ClipboardCheck, ClipboardList, Gavel, History, PackageSearch, PieChart, Plus, ShieldCheck, Truck, Wallet, Wrench } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { get } from "../api";
 import { useAuth } from "../auth";
@@ -15,12 +15,14 @@ interface Dash {
   requests: { open: number; urgent: number; overdue: number; awaiting_approval: number;
     latest: { id: number; number: number; title: string; status: string; status_label: string; priority: string; priority_label: string; plate: string }[] } | null;
   waybills: { open: number; drafts: number; today: number; forgotten: number; open_list: { id: number; number_label: string; plate: string; driver: string; opened_at: string }[] } | null;
-  readings: { pending: number } | null;
   jobs: { today: number; open: number; done: number; stale: number; own: boolean } | null;
   audit: { latest: { id: number; at: string; user_login: string; action_label: string }[] } | null;
   expenses: { months: { label: string; fuel: number; repair: number; other: number; total: number }[]; month_total: number; prev_total: number; delta_pct: number | null } | null;
   maintenance: { soon: number; items: { id: number; vehicle_id: number; plate: string; name: string; kind_label: string; work: string; level: string; left_text: string; due_date: string | null }[] } | null;
-  orders: { active: number; days: number[]; week: number; prev_week: number } | null;
+  osago: { soon: number; expired: number; total: number; days: number; items: { vehicle_id: number; plate: string; name: string; until: string; level: string; left_text: string }[] } | null;
+  fines: { unpaid: number; unpaid_total: number; overdue: number; soon: number; days: number;
+    items: { id: number; vehicle_id: number; plate: string; amount: number; resolution_number: string; deadline: string | null; payer: string; discount: boolean; level: string; left_text: string }[] } | null;
+  orders: { active: number; month_total: number; month_count: number; prev_total: number; delta_pct: number | null } | null;
   reminders: { total: number; due: number; items: { source_label: string; level: string; tone: string; left_text: string; title: string; subject: string; url: string }[] } | null;
 }
 
@@ -34,6 +36,7 @@ const SERIES = [
 ];
 
 const rub = (v: number) => `${new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 }).format(Math.round(v))}\u00a0₽`;
+const money = (v: number) => (v >= 1_000_000 ? `${fmtNum(v / 1_000_000, 1)}\u00a0млн\u00a0₽` : rub(v));
 const compact = (v: number) => (v >= 1_000_000 ? `${fmtNum(v / 1_000_000, 1)} млн` : v >= 1000 ? `${fmtNum(v / 1000, 0)} тыс` : String(Math.round(v)));
 
 /** Верхняя граница оси: 1, 2, 2.5, 5 или 10 на нужный порядок, чтобы подписи были круглыми. */
@@ -133,22 +136,57 @@ function Donut({ parts, total, centre, sub }: { parts: { code: string; label: st
   );
 }
 
-function Spark({ values }: { values: number[] }) {
-  const W = 220, H = 70, top = Math.max(...values, 1);
-  const pts = values.map((v, i) => [(i * W) / Math.max(1, values.length - 1), H - 6 - (v / top) * (H - 14)] as const);
-  const line = pts.map(([px, py], i) => {
-    if (i === 0) return `M${px},${py}`;
-    const [qx, qy] = pts[i - 1];
-    const cx = (px - qx) / 2;
-    return `C${qx + cx},${qy} ${px - cx},${py} ${px},${py}`;
-  }).join(" ");
+/** Кольцо «Готовность парка»: доля техники на линии. Дуга с градиентом рисуется при появлении карточки. */
+function FleetRing({ pct, inWork, total, repair }: { pct: number; inWork: number; total: number; repair: number }) {
+  const R = 42, C = 2 * Math.PI * R;
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} className="spark" aria-hidden preserveAspectRatio="none">
-      <defs><linearGradient id="spark-fill" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stopColor="var(--success)" stopOpacity="0.35" /><stop offset="1" stopColor="var(--success)" stopOpacity="0" /></linearGradient></defs>
-      <path d={`${line} L${W},${H} L0,${H} Z`} fill="url(#spark-fill)" />
-      <path d={line} fill="none" stroke="var(--success)" strokeWidth="2" vectorEffect="non-scaling-stroke" />
-    </svg>
+    <Link to="/vehicles?status=in_work" className="card deco deco-ring">
+      <svg viewBox="0 0 120 120" className="ring" role="img" aria-label={`На линии ${inWork} из ${total} машин, ${pct}%`} style={{ "--c": C } as CSSProperties}>
+        <defs>
+          <linearGradient id="ring-grad" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="var(--mint)" /><stop offset="1" stopColor="var(--success)" /></linearGradient>
+        </defs>
+        <circle cx="60" cy="60" r={R} className="ring-track" />
+        <circle cx="60" cy="60" r={R} className="ring-fill" stroke="url(#ring-grad)" strokeDasharray={C} strokeDashoffset={C * (1 - Math.min(100, pct) / 100)} transform="rotate(-90 60 60)" />
+        <text x="60" y="60" textAnchor="middle" className="ring-num">{pct}%</text>
+        <text x="60" y="78" textAnchor="middle" className="ring-sub">на линии</text>
+      </svg>
+      <span className="deco-body">
+        <span className="deco-title">Готовность парка</span>
+        <span className="deco-big">{inWork}<small> из {total}</small></span>
+        <span className="deco-sub">{repair ? `в ремонте: ${repair}` : "все исправны"}</span>
+      </span>
+    </Link>
   );
+}
+
+const WEEKDAYS = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
+
+/** Неделя одной полосой: сегодняшний день подсвечен, выходные приглушены. Номер недели считается по ISO. */
+function WeekStrip({ today, to }: { today: string; to?: string }) {
+  const [y, m, dd] = today.split("-").map(Number);
+  const base = Date.UTC(y, m - 1, dd);
+  const dow = (new Date(base).getUTCDay() + 6) % 7;
+  const days = WEEKDAYS.map((label, i) => ({ label, date: new Date(base + (i - dow) * 86_400_000), today: i === dow }));
+  const thu = days[3].date;
+  const jan1 = Date.UTC(thu.getUTCFullYear(), 0, 1);
+  const week = Math.ceil(((thu.getTime() - jan1) / 86_400_000 + 1) / 7);
+  const monthName = new Intl.DateTimeFormat("ru-RU", { timeZone: "UTC", month: "long" }).format(thu);
+  const month = monthName[0].toUpperCase() + monthName.slice(1);
+  const body = (
+    <>
+      <span className="deco-title">Неделя · {month}</span>
+      <span className="week" role="list">
+        {days.map((x) => (
+          <span key={x.label} role="listitem" className={`week-day${x.today ? " today" : ""}${x.label === "Сб" || x.label === "Вс" ? " off" : ""}`} aria-current={x.today ? "date" : undefined}>
+            <span className="week-name">{x.label}</span>
+            <span className="week-num">{x.date.getUTCDate()}</span>
+          </span>
+        ))}
+      </span>
+      <span className="deco-sub">{week}-я неделя года</span>
+    </>
+  );
+  return to ? <Link to={to} className="card deco deco-week">{body}</Link> : <div className="card deco deco-week">{body}</div>;
 }
 
 function Kpi({ to, label, value, hint, icon: Icon, tone }: { to: string; label: string; value: number; hint?: string; icon: typeof Truck; tone?: Tone }) {
@@ -179,6 +217,8 @@ export function Dashboard() {
   const total = d?.vehicles?.total ?? 0;
   const pct = (n: number) => (total ? Math.round((n / total) * 100) : 0);
   const exp = d?.expenses;
+  const monthName = d ? new Intl.DateTimeFormat("ru-RU", { timeZone: "UTC", month: "long" }).format(new Date(`${d.date}T12:00:00Z`)) : "";
+  const hasData = !!d && !!(d.vehicles || d.requests || d.waybills || d.jobs || d.fines || rem.data);
   const tasksTotal = d?.reminders?.total ?? (rem.data ? rem.data.due + rem.data.soon : null);
   const actions = [
     can("vehicles.create") && { to: "/vehicles?new=1", icon: Truck, label: "Добавить технику" },
@@ -213,7 +253,12 @@ export function Dashboard() {
               {d.vehicles && <Stat to="/vehicles" icon={Truck} tone="mint" value={String(total)} label="Всего техники" />}
               {d.vehicles && total > 0 && <Stat to="/vehicles?status=in_work" icon={CheckCircle2} tone="success" value={String(inWork)} label="На линии" bar={pct(inWork)} foot={`${pct(inWork)}%`} />}
               {d.vehicles && total > 0 && <Stat to="/vehicles?status=in_repair" icon={Wrench} tone="error" value={String(d.vehicles.attention)} label="В ремонте" bar={pct(d.vehicles.attention)} foot={`${pct(d.vehicles.attention)}%`} />}
-              {d.maintenance && <Stat to="/reminders" icon={CalendarCheck} tone="warning" value={String(d.maintenance.soon)} label="ТО скоро" />}
+              {d.osago && (
+                <Stat to="/dossier/vehicles" icon={ShieldCheck} tone={d.osago.expired ? "error" : d.osago.soon ? "warning" : "success"} value={String(d.osago.soon)} label="ОСАГО"
+                  foot={d.osago.total === 0 ? "полисы не внесены" : d.osago.items[0]
+                    ? <span className={d.osago.expired ? "bad" : undefined}>{d.osago.items[0].plate} · {d.osago.items[0].left_text}</span>
+                    : "все полисы действуют"} />
+              )}
               {exp && (
                 <Stat to="/expenses" icon={Wallet} tone="info" value={exp.month_total >= 1_000_000 ? `${fmtNum(exp.month_total / 1_000_000, 1)}\u00a0млн\u00a0₽` : rub(exp.month_total)} label="Расходы за месяц"
                   foot={exp.delta_pct === null ? "в прошлом месяце не было" : (
@@ -229,12 +274,12 @@ export function Dashboard() {
               {d.requests && <Kpi to="/requests?status=open" icon={Wrench} label="Открытые обращения" value={d.requests.open}
                 hint={[d.requests.urgent && `срочных: ${d.requests.urgent}`, d.requests.overdue && `просрочено: ${d.requests.overdue}`, d.requests.awaiting_approval && `ждут согласования: ${d.requests.awaiting_approval}`].filter(Boolean).join(" · ") || "Срочных нет"}
                 tone={d.requests.overdue ? "error" : d.requests.urgent ? "warning" : undefined} />}
-              {d.waybills && <Kpi to="/waybills?status=active" icon={ClipboardList} label="Путевые листы в работе" value={d.waybills.open} hint={`Черновиков: ${d.waybills.drafts} · сегодня: ${d.waybills.today}`} />}
-              {d.readings && <Kpi to="/readings" icon={Gauge} label="Показания на проверке" value={d.readings.pending} hint={d.readings.pending ? "Нужно решение" : "Очередь пуста"} tone={d.readings.pending ? "warning" : undefined} />}
+              {d.vehicles && total > 0 && <FleetRing pct={pct(inWork)} inWork={inWork} total={total} repair={d.vehicles.attention} />}
+              {hasData && <WeekStrip today={d.date} to={can("calendar.view") ? "/calendar" : undefined} />}
               {rem.data && !d.reminders && <Kpi to="/reminders" icon={BellRing} label="Напоминания" value={rem.data.due + rem.data.soon}
                 hint={rem.data.total ? `Наступило: ${rem.data.due} · скоро: ${rem.data.soon}` : "Ничего не истекает"} tone={rem.data.due ? "error" : rem.data.soon ? "warning" : undefined} />}
             </div>
-            {!d.vehicles && !d.requests && !d.waybills && !d.readings && !d.jobs && !rem.data && (
+            {!hasData && (
               <Empty icon={AlertTriangle} title="Для вашей роли здесь пока нечего показывать">Перейдите в нужный раздел через меню слева.</Empty>
             )}
 
@@ -296,17 +341,50 @@ export function Dashboard() {
                   )}
                 </Card>
               )}
+              {d.fines && (
+                <Card title="Штрафы" icon={Gavel} actions={<Link to="/fines?state=unpaid">Все штрафы</Link>}>
+                  {d.fines.unpaid === 0 ? <Empty icon={CheckCircle2} title="Неоплаченных штрафов нет">Новые штрафы вносятся в разделе «Штрафы».</Empty> : (
+                    <div className="fines">
+                      <div className="orders-sum">{money(d.fines.unpaid_total)}</div>
+                      <div className="muted small">не оплачено: {d.fines.unpaid} {plural(d.fines.unpaid, "штраф", "штрафа", "штрафов")}</div>
+                      {(d.fines.overdue > 0 || d.fines.soon > 0) && (
+                        <div className="fines-badges">
+                          {d.fines.overdue > 0 && <span className="badge error">Просрочено: {d.fines.overdue}</span>}
+                          {d.fines.soon > 0 && <span className="badge warning">Срок в ближайшие {d.fines.days} дн.: {d.fines.soon}</span>}
+                        </div>
+                      )}
+                      <div className="stack-sm">
+                        {d.fines.items.map((f) => (
+                          <Link key={f.id} to={`/fines?state=unpaid&q=${encodeURIComponent(f.plate)}`} className="to-item" style={{ color: "inherit", textDecoration: "none" }}>
+                            <span className="to-name"><strong>{f.plate}</strong> <span className="muted">{rub(f.amount)}{f.discount ? " · скидка" : ""}{f.payer === "driver" ? " · с водителя" : ""}</span></span>
+                            {f.resolution_number && <span className="muted small trunc" title={`Постановление ${f.resolution_number}`}>№ {f.resolution_number}</span>}
+                            <span className={`badge ${f.level === "due" ? "error" : f.level === "soon" ? "warning" : "neutral"}`}>{f.level === "soon" ? "Скоро · " : ""}{f.left_text}</span>
+                          </Link>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </Card>
+              )}
               {d.orders && (
                 <Card title="Заказы" icon={PackageSearch} actions={<Link to="/orders">Все заказы</Link>}>
                   <div className="orders">
-                    <div><span className="orders-num">{d.orders.active}</span><span className="muted"> {plural(d.orders.active, "активный заказ", "активных заказа", "активных заказов")}</span></div>
-                    <Spark values={d.orders.days} />
-                    <div className="muted small">Новых за неделю: {d.orders.week}{d.orders.week !== d.orders.prev_week && ` (${d.orders.week > d.orders.prev_week ? "+" : "−"}${Math.abs(d.orders.week - d.orders.prev_week)} к прошлой)`}</div>
+                    <div className="orders-sum">{money(d.orders.month_total)}</div>
+                    <div className="muted small">за {monthName}, с НДС</div>
+                    <div className="orders-meta">
+                      <span>Заказов за месяц: <strong>{d.orders.month_count}</strong></span>
+                      <span>В работе: <strong>{d.orders.active}</strong></span>
+                    </div>
+                    <div className="muted small">
+                      {d.orders.delta_pct === null
+                        ? "в прошлом месяце заказов не было"
+                        : <span className={d.orders.delta_pct > 0 ? "good" : d.orders.delta_pct < 0 ? "bad" : undefined}>{d.orders.delta_pct > 0 ? <ArrowUp size={13} aria-hidden /> : d.orders.delta_pct < 0 ? <ArrowDown size={13} aria-hidden /> : null} {d.orders.delta_pct > 0 ? "+" : ""}{d.orders.delta_pct}% к прошлому месяцу ({money(d.orders.prev_total)})</span>}
+                    </div>
                   </div>
                 </Card>
               )}
               {actions.length > 0 && (
-                <Card title="Быстрые действия" icon={Plus}>
+                <Card title="Быстрые действия" icon={Plus} className="quick-card">
                   <div className="quick">
                     {actions.map((a) => <Link key={a.to} to={a.to} className="quick-btn"><a.icon size={22} aria-hidden /><span>{a.label}</span></Link>)}
                   </div>

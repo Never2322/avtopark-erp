@@ -3,7 +3,7 @@ import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import {
   BellRing, Building2, Camera, CalendarCheck, CalendarClock, CalendarDays, ChevronDown, ChevronRight, ClipboardList, DatabaseBackup, Gauge, LayoutDashboard, LogOut, Menu, ScrollText, Search, ShieldCheck,
-  Truck, User as UserIcon, UserCheck, UserCog, UserSquare2, Users, UsersRound, Wrench, FolderOpen, Fuel, NotebookPen, ShoppingCart, ReceiptText, Receipt, Megaphone, Newspaper, Boxes, ArrowLeftRight, BarChart3, FileUp, Hourglass, ListOrdered, MapPin, Signpost, CalendarRange, Send, Settings, Wallet, Weight, X, type LucideIcon,
+  Truck, User as UserIcon, UserCheck, UserCog, UserSquare2, Users, UsersRound, Wrench, FolderOpen, Fuel, NotebookPen, ShoppingCart, ReceiptText, Receipt, Megaphone, Newspaper, Boxes, ArrowLeftRight, BarChart3, FileUp, Hourglass, ListOrdered, MapPin, Recycle, Signpost, CalendarRange, Send, Settings, Wallet, Weight, X, type LucideIcon,
 } from "lucide-react";
 import { ConnectionBar, useOutboxSync } from "./Outbox";
 import { BellMenu, useNotifSummary } from "./Bell";
@@ -13,16 +13,16 @@ import { get } from "../api";
 import { SECTIONS } from "../sections";
 import { Empty } from "../ui";
 
-/** sub: заголовок подраздела внутри группы (ставится у первого пункта подраздела); words: как ещё люди называют этот раздел (для поиска). */
+/** sub: заголовок подраздела внутри группы (есть у каждого пункта подраздела, показывается над первым видимым: если первый скрыт правами, заголовок не пропадает); words: как ещё люди называют этот раздел (для поиска). */
 interface Item { to: string; label: string; icon: LucideIcon; any: string[]; end?: boolean; badge?: "pending" | "reminders" | "news"; unless?: string[]; all?: string[]; feature?: "tonnage" | "hauls" | "routes"; sub?: string; words?: string }
 interface Group { key: string; title: string; icon: LucideIcon; tone: string; items: Item[]; flat?: boolean }
 
 const sectionItems = (...keys: string[]): Item[] =>
   keys.map((k) => SECTIONS.find((x) => x.key === k)!).map((x) => ({ to: x.path, label: x.label, icon: x.icon, any: [`${x.key}.view`] }));
 /** Первому пункту списка добавляет заголовок подраздела. */
-const withSub = (sub: string, items: Item[]): Item[] => items.map((i, n) => (n === 0 ? { ...i, sub } : i));
+const withSub = (sub: string, items: Item[]): Item[] => items.map((i) => ({ ...i, sub }));
 
-// Шесть понятных групп вместо тринадцати: что делаем сегодня, техника, ремонт и склад, люди, деньги, справочники.
+// Семь понятных групп вместо тринадцати: что делаем сегодня, мусоровозы, техника, ремонт и склад, люди, деньги, справочники.
 const NAV: Group[] = [
   {
     key: "home", title: "Главное", icon: LayoutDashboard, tone: "mint", flat: true,
@@ -53,16 +53,21 @@ const NAV: Group[] = [
         { to: "/entries/feed", label: "Записи водителей", icon: Fuel, any: ["trips.view", "fuel_fills.view"], words: "рейсы заправки лента" },
         ...sectionItems("trips", "fuel_fills"),
       ]),
-      ...withSub("Тоннаж", [
+    ],
+  },
+  {
+    key: "garbage", title: "Мусоровозы", icon: Recycle, tone: "success",
+    items: [
+      ...withSub("Маршруты", [
+        { to: "/my-routes", label: "Мои маршруты", icon: Signpost, any: ["route_plan.view_own"], unless: ["route_plan.view"], feature: "routes", end: true, words: "мусоровоз улицы объезд по дням" },
+        { to: "/route-board", label: "Маршруты по дням", icon: CalendarRange, any: ["route_plan.view"], end: true, words: "какой мусоровоз где сегодня работает улицы" },
+        ...sectionItems("route_plan", "garbage_routes"),
+      ]),
+      ...withSub("Тоннаж и ходки", [
         { to: "/tonnage", label: "Тоннаж", icon: Weight, any: ["weigh_tickets.view_own"], unless: ["weigh_tickets.view"], feature: "tonnage", end: true, words: "талон вес весы тонны" },
         { to: "/hauls", label: "Счётчик ходок", icon: ListOrdered, any: ["hauls.use_own"], feature: "hauls", end: true, words: "ходки рейсы" },
         ...sectionItems("weigh_tickets"),
         { to: "/reports/tonnage", label: "Тоннаж за месяц", icon: BarChart3, any: ["weigh_tickets.view"], all: ["reports.view"], words: "тонны итог отчёт" },
-      ]),
-      ...withSub("Маршруты мусоровозов", [
-        { to: "/my-routes", label: "Мои маршруты", icon: Signpost, any: ["route_plan.view_own"], unless: ["route_plan.view"], feature: "routes", end: true, words: "мусоровоз улицы объезд по дням" },
-        { to: "/route-board", label: "Маршруты по дням", icon: CalendarRange, any: ["route_plan.view"], end: true, words: "какой мусоровоз где сегодня работает улицы" },
-        ...sectionItems("route_plan", "garbage_routes"),
       ]),
     ],
   },

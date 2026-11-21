@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """Главная: только настоящие данные и только то, на что у человека есть право. Разделы без права не попадают в ответ."""
 import datetime as dt
+from decimal import Decimal
 
 from fastapi import APIRouter, Depends
 from sqlalchemy import and_, func, select
@@ -9,8 +10,9 @@ from sqlalchemy.orm import Session
 from app.common import fail, org_today
 from app.db import get_db
 from app.deps import Principal, current
-from app.enums import MAINTENANCE_KINDS, REQUEST_OPEN, REQUEST_PRIORITIES, REQUEST_STATUSES, VEHICLE_STATUSES
-from app.models import AuditLog, MaintenanceItem, Order, ServiceRequest, Vehicle, VehicleReading, Waybill
+from app.enums import DOC_EXPIRING_DAYS, MAINTENANCE_KINDS, REQUEST_OPEN, REQUEST_PRIORITIES, REQUEST_STATUSES, VEHICLE_STATUSES
+from app.models import AuditLog, DossierDoc, Fine, MaintenanceItem, Order, ServiceRequest, Vehicle, VehicleReading, Waybill
+from app.resources import FINE_SOON_DAYS, _fine_deadline, _vat_split
 from app.routers import audit_log
 from app.routers import requests_ as req_router
 from app.routers import waybills as wb_router
@@ -87,8 +89,37 @@ def maintenance_summary(db: Session, p: Principal, legal_entity_id: int | None) 
                       for _, _, i, v, ev in rows[:3]]}
 
 
+def osago_summary(db: Session, p: Principal, legal_entity_id: int | None) -> dict | None:
+    """ОСАГО по парку: у скольких машин полис кончился или кончается в ближайшие дни.
+    Берётся полис с самой поздней датой окончания, чтобы заменённый старый не считался просроченным.
+    Только тем, кто видит личные дела техники."""
+    scope = p.scope("vehicle_files.view")
+    if not scope:
+        return None
+    today = org_today()
+    q = (select(Vehicle, func.max(DossierDoc.valid_until))
+         .join(DossierDoc, DossierDoc.vehicle_id == Vehicle.id)
+         .where(DossierDoc.kind == "osago", DossierDoc.archived_at.is_(None), DossierDoc.valid_until.is_not(None),
+                Vehicle.archived_at.is_(None), scope.cond(Vehicle.legal_entity_id))
+         .group_by(Vehicle.id))
+    if legal_entity_id is not None:
+        q = q.where(Vehicle.legal_entity_id == legal_entity_id)
+    rows = []
+    for v, until in db.execute(q):
+        left = (until - today).days
+        rows.append((left, v.id, v, until))
+    rows.sort(key=lambda r: (r[0], r[1]))
+    expired = sum(1 for r in rows if r[0] < 0)
+    soon = sum(1 for r in rows if 0 <= r[0] <= DOC_EXPIRING_DAYS)
+    return {"soon": expired + soon, "expired": expired, "total": len(rows), "days": DOC_EXPIRING_DAYS,
+            "items": [{"vehicle_id": v.id, "plate": v.plate, "name": f"{v.make} {v.model}".strip(), "until": until.isoformat(),
+                       "level": "due" if left < 0 else "soon", "left_text": reminders_svc.left_text(left)}
+                      for left, _, v, until in rows if left <= DOC_EXPIRING_DAYS][:3]}
+
+
 def orders_summary(db: Session, p: Principal, legal_entity_id: int | None) -> dict | None:
-    """Заказы: сколько в работе и как шли новые заказы последние две недели (для маленького графика)."""
+    """Заказы: сколько в работе и на какую сумму (с НДС, как в списке заказов) заказано за этот месяц и за прошлый.
+    Отменённые и убранные в архив не считаются."""
     scope = p.scope("orders.view")
     if not scope:
         return None
@@ -97,11 +128,49 @@ def orders_summary(db: Session, p: Principal, legal_entity_id: int | None) -> di
     if legal_entity_id is not None:
         cond.append(Order.legal_entity_id == legal_entity_id)
     active = db.scalar(select(func.count()).where(*cond, Order.status.in_(("new", "confirmed", "in_progress")))) or 0
-    since = today - dt.timedelta(days=13)
-    per_day = dict(db.execute(select(Order.order_date, func.count()).where(*cond, Order.status != "cancelled", Order.order_date >= since,
-                                                                          Order.order_date <= today).group_by(Order.order_date)).all())
-    days = [per_day.get(since + dt.timedelta(days=i), 0) for i in range(14)]
-    return {"active": active, "days": days, "week": sum(days[7:]), "prev_week": sum(days[:7])}
+    (py, pm), (cy, cm) = rep.last_months(today, 2)
+    cur_from, cur_to = rep.month_bounds(cy, cm)
+    prev_from, _ = rep.month_bounds(py, pm)
+    cur = prev = Decimal(0)
+    count = 0
+    for day, amount, vat_pct in db.execute(select(Order.order_date, Order.amount, Order.vat_pct)
+                                          .where(*cond, Order.status != "cancelled", Order.order_date >= prev_from, Order.order_date <= cur_to)):
+        total = _vat_split(amount, vat_pct)[1]
+        if day >= cur_from:
+            cur += total
+            count += 1
+        else:
+            prev += total
+    return {"active": active, "month_total": float(cur), "month_count": count, "prev_total": float(prev),
+            "delta_pct": round((cur - prev) / prev * 100) if prev > 0 else None}
+
+
+def fines_summary(db: Session, p: Principal, legal_entity_id: int | None) -> dict | None:
+    """Штрафы: сколько не оплачено и на какую сумму, сколько просрочено, у скольких срок в ближайшие дни.
+    Срок у штрафа один, как в разделе «Штрафы»: со скидкой, пока она действует, иначе общий. Ближайшие три впереди, просроченные первыми."""
+    scope = p.scope("fines.view")
+    if not scope:
+        return None
+    today = org_today()
+    q = (select(Fine, Vehicle).join(Vehicle, Vehicle.id == Fine.vehicle_id)
+         .where(Fine.archived_at.is_(None), Fine.paid_at.is_(None), scope.cond(Fine.legal_entity_id)))
+    if legal_entity_id is not None:
+        q = q.where(Fine.legal_entity_id == legal_entity_id)
+    rows = []
+    for f, v in db.execute(q):
+        deadline = _fine_deadline(f)
+        left = (deadline - today).days if deadline else None
+        rows.append((left is None, left if left is not None else 0, -f.fine_date.toordinal(), f.id, f, v, deadline, left))
+    rows.sort(key=lambda r: r[:4])       # со сроком раньше всех, ближайший срок первым; без срока по свежести нарушения
+    overdue = sum(1 for r in rows if r[7] is not None and r[7] < 0)
+    soon = sum(1 for r in rows if r[7] is not None and 0 <= r[7] <= FINE_SOON_DAYS)
+    return {"unpaid": len(rows), "unpaid_total": float(sum((r[4].amount for r in rows), Decimal(0))), "overdue": overdue, "soon": soon, "days": FINE_SOON_DAYS,
+            "items": [{"id": f.id, "vehicle_id": v.id, "plate": v.plate, "amount": float(f.amount), "resolution_number": f.resolution_number,
+                       "deadline": deadline.isoformat() if deadline else None, "payer": f.payer,
+                       "discount": bool(f.discount_until and f.discount_until >= today),
+                       "level": "none" if left is None else "due" if left < 0 else "soon" if left <= FINE_SOON_DAYS else "ok",
+                       "left_text": "срок не указан" if left is None else reminders_svc.left_text(left)}
+                      for _, _, _, _, f, v, deadline, left in rows[:3]]}
 
 
 def check_entity(p: Principal, legal_entity_id: int | None):
@@ -116,7 +185,7 @@ def dashboard(legal_entity_id: int | None = None, p: Principal = Depends(current
     check_entity(p, legal_entity_id)
     today = org_today()
     data: dict = {"date": today.isoformat(), "vehicles": None, "requests": None, "waybills": None, "readings": None, "audit": None, "jobs": None,
-            "expenses": None, "maintenance": None, "orders": None, "reminders": None}
+            "expenses": None, "maintenance": None, "osago": None, "fines": None, "orders": None, "reminders": None}
 
     if p.can("vehicles.view") or p.can("vehicles.view_own"):
         cond = and_(access.view_condition(p, db), Vehicle.archived_at.is_(None))
@@ -178,6 +247,8 @@ def dashboard(legal_entity_id: int | None = None, p: Principal = Depends(current
 
     data["expenses"] = expenses(db, p, legal_entity_id)
     data["maintenance"] = maintenance_summary(db, p, legal_entity_id)
+    data["osago"] = osago_summary(db, p, legal_entity_id)
+    data["fines"] = fines_summary(db, p, legal_entity_id)
     data["orders"] = orders_summary(db, p, legal_entity_id)
     if p.can("reminders.view"):
         items = reminders_svc.reminders(db, p, legal_entity_id)
