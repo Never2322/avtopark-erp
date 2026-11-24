@@ -46,7 +46,7 @@ const NAV: Group[] = [
       ...withSub("Путевые листы и показания", [
         { to: "/waybills", label: "Путевые листы", icon: ClipboardList, any: ["waybills.view", "waybills.view_own"] },
         { to: "/readings", label: "Показания на проверке", icon: Gauge, any: ["readings.review"], badge: "pending", end: true, words: "пробег моточасы одометр" },
-        { to: "/readings/import", label: "Загрузка показаний", icon: FileUp, any: ["readings.import"], words: "пробег моточасы файл" },
+        { to: "/readings/import", label: "Ввод показаний", icon: FileUp, any: ["readings.import", "readings.create", "readings.create_own"], words: "спидометр пробег моточасы вручную файл загрузка показаний" },
       ]),
       ...withSub("Рейсы и заправки", [
         { to: "/entries", label: "Мои записи", icon: NotebookPen, any: ["trips.view_own", "fuel_fills.view_own"], unless: ["trips.view", "fuel_fills.view"], end: true, words: "рейс заправка внести" },
@@ -68,6 +68,9 @@ const NAV: Group[] = [
         { to: "/hauls", label: "Счётчик ходок", icon: ListOrdered, any: ["hauls.use_own"], feature: "hauls", end: true, words: "ходки рейсы" },
         ...sectionItems("weigh_tickets"),
         { to: "/reports/tonnage", label: "Тоннаж за месяц", icon: BarChart3, any: ["weigh_tickets.view"], all: ["reports.view"], words: "тонны итог отчёт" },
+      ]),
+      ...withSub("Зарплата", [
+        { to: "/reports/garbage_salary", label: "Зарплата мусоровозов", icon: Wallet, any: ["worklog.view"], all: ["reports.view"], words: "зарплата заработок выплата тонны водители мусоровозов аванс" },
       ]),
     ],
   },

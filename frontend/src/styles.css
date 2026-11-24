@@ -1128,3 +1128,32 @@ a.deco:hover { border-color: var(--border-strong); text-decoration: none; transf
   .rp-date-pick .input { flex: 1 1 auto; width: 100%; }
   .rp-viewer img { max-height: 46vh; }
 }
+
+/* Зарплата мусоровозов: листы по машинам, как таблица «ЗП» в Excel */
+.matrix-table td, .matrix-table th { padding: 6px 10px; }
+.matrix-table tr.m-strong td { font-weight: 600; background: var(--surface); }
+.matrix-table tr.m-strong td:first-child { background: var(--surface); }
+.matrix-table td:last-child, .matrix-table th:last-child { border-left: 1px solid var(--border); }
+
+/* Главная: карточка «Мусоровозы» */
+.garbage-nums { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.garbage-nums > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.garbage-nums strong { font-size: 20px; font-variant-numeric: tabular-nums; line-height: 1.25; }
+.garbage-nums .good { color: var(--success); }
+.garbage-nums .bad { color: var(--error); }
+.garbage-trucks { list-style: none; margin: 4px 0 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.garbage-trucks li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 10px; align-items: center; font-size: 13px; }
+.garbage-trucks .garbage-bar { grid-column: 1 / -1; grid-row: 2; }
+.garbage-bar { height: 8px; border-radius: 4px; background: var(--surface); overflow: hidden; }
+.garbage-bar > span { display: block; height: 100%; background: var(--mint); border-radius: 4px; }
+
+/* Ввод показаний вручную списком */
+.manual-readings .num-input { width: 130px; text-align: right; font-variant-numeric: tabular-nums; }
+.manual-readings td { vertical-align: middle; }
+.manual-readings .bad { color: var(--error); }
+
+/* Склад: выбор детали из каталога */
+.catalog-list { max-height: 240px; overflow: auto; border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.catalog-row { display: flex; justify-content: space-between; gap: 12px; width: 100%; padding: 8px 12px; background: none; border: 0; border-bottom: 1px solid var(--border); color: inherit; text-align: left; cursor: pointer; font: inherit; }
+.catalog-row:last-child { border-bottom: 0; }
+.catalog-row:hover, .catalog-row:focus-visible { background: var(--hover); }

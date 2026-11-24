@@ -8,6 +8,8 @@ import { upload, errorText } from "../api";
 import { fmtDate, fmtNum, readingUnit } from "../format";
 import { useEntityParam } from "../hooks";
 import { Alert, Badge, Button, Card, Field, FilterChips, PageHeader, Table, useToast, type Tone } from "../ui";
+import { useAuth } from "../auth";
+import { ManualReadings } from "./ManualReadings";
 
 interface Row { n: number; plate: string; vehicle_id: number | null; vehicle: string; kind: string; date: string; value: number | null; status: Status; message: string }
 type Status = "ok" | "review" | "duplicate" | "error";
@@ -26,7 +28,26 @@ const SHOWN = 300;
 
 type Filter = "all" | Status;
 
+/** «Ввод показаний»: вручную списком (все, кто вводит показания) и загрузка из файла (директор и диспетчер). */
 export function ReadingsImport() {
+  const { can } = useAuth();
+  const manual = can("readings.create") || can("readings.create_own");
+  const fromFile = can("readings.import");
+  const [tab, setTab] = useState<"manual" | "file">(manual ? "manual" : "file");
+  return (
+    <>
+      <PageHeader title="Ввод показаний" sub="Спидометр и моточасы: вручную по каждой машине или загрузкой из файла CSV или Excel" />
+      {manual && fromFile && (
+        <div className="row wrap" style={{ marginBottom: 12 }}>
+          <FilterChips<"manual" | "file"> value={tab} onChange={setTab} options={[{ id: "manual", label: "Вручную" }, { id: "file", label: "Из файла" }]} />
+        </div>
+      )}
+      {tab === "manual" ? <ManualReadings /> : <ReadingsFromFile />}
+    </>
+  );
+}
+
+function ReadingsFromFile() {
   const entity = useEntityParam();
   const qc = useQueryClient();
   const toast = useToast();
@@ -68,7 +89,7 @@ export function ReadingsImport() {
 
   return (
     <>
-      <PageHeader title="Загрузка показаний из файла" sub="Файл CSV или Excel (.xlsx): одна строка — одно показание. Сначала вы увидите, что получится, и только потом подтвердите загрузку" />
+      <p className="muted small" style={{ margin: "0 0 12px" }}>Файл CSV или Excel (.xlsx): одна строка — одно показание. Сначала вы увидите, что получится, и только потом подтвердите загрузку.</p>
       <div className="stack">
         {!res?.applied && (
           <Card title="1. Файл">

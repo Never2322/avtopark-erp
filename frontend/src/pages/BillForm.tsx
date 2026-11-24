@@ -9,7 +9,7 @@ import { useAuth } from "../auth";
 import { useVehicleOptions } from "../components/pickers";
 import { BILL_UNITS, emptyPart, filledParts, PartsEditor, type PartRow } from "../components/PartsEditor";
 import { Alert, Button, Card, Field, NotFound, PageHeader, QueryState, Spinner, useForm, useToast } from "../ui";
-import { clearHandoff, peekHandoff } from "./billAuto";
+import { clearHandoff, peekHandoff } from "./billAutoHandoff";
 import { useBillMeta, type BillMeta } from "./Bills";
 
 interface Detail {

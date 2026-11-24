@@ -1,7 +1,7 @@
 import type { CSSProperties, ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { AlertTriangle, ArrowDown, ArrowUp, BellRing, CalendarCheck, CalendarClock, CheckCircle2, ClipboardCheck, ClipboardList, Gavel, History, PackageSearch, PieChart, Plus, ShieldCheck, Truck, Wallet, Wrench } from "lucide-react";
+import { AlertTriangle, ArrowDown, ArrowUp, BellRing, CalendarCheck, CalendarClock, CheckCircle2, ClipboardCheck, ClipboardList, Gavel, History, PackageSearch, PieChart, Plus, Recycle, ShieldCheck, Truck, Wallet, Wrench } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { get } from "../api";
 import { useAuth } from "../auth";
@@ -24,6 +24,37 @@ interface Dash {
     items: { id: number; vehicle_id: number; plate: string; amount: number; resolution_number: string; deadline: string | null; payer: string; discount: boolean; level: string; left_text: string }[] } | null;
   orders: { active: number; month_total: number; month_count: number; prev_total: number; delta_pct: number | null } | null;
   reminders: { total: number; due: number; items: { source_label: string; level: string; tone: string; left_text: string; title: string; subject: string; url: string }[] } | null;
+  garbage: { month: string; trips: number; tons: number; cost: number; fot: number | null; fr: number | null; today_tons: number; pending: number;
+    trucks: { plate: string; trips: number; tons: number }[] } | null;
+}
+
+/** Мусоровозы за месяц: тонны, стоимость вывезенных тонн, ФОТ водителей и ФР, по машинам. Вместо «Сейчас в рейсе». */
+function GarbageCard({ g }: { g: NonNullable<Dash["garbage"]> }) {
+  const max = Math.max(...g.trucks.map((t) => t.tons), 1);
+  return (
+    <Card title="Мусоровозы" icon={Recycle} actions={<span className="muted small">за {g.month} · <Link to="/reports/garbage_salary">подробнее</Link></span>}>
+      {g.trips === 0 ? <Empty icon={Recycle} title="В этом месяце талонов пока нет">Их присылают водители или загружают из Excel в «Журнале тоннажа».</Empty> : (
+        <div className="stack-sm">
+          <div className="garbage-nums">
+            <div><span className="muted small">Вывезено</span><strong>{fmtNum(g.tons, 2)}&nbsp;т</strong><span className="muted small">{g.trips} {plural(g.trips, "рейс", "рейса", "рейсов")} · сегодня {fmtNum(g.today_tons, 2)} т</span></div>
+            <div><span className="muted small">Стоимость тонн</span><strong>{rub(g.cost)}</strong></div>
+            {g.fot !== null && <div><span className="muted small">ФОТ водителей</span><strong>{rub(g.fot)}</strong></div>}
+            {g.fr !== null && <div><span className="muted small">ФР</span><strong className={g.fr < 0 ? "bad" : "good"}>{rub(g.fr)}</strong></div>}
+          </div>
+          <ul className="garbage-trucks">
+            {g.trucks.map((t) => (
+              <li key={t.plate}>
+                <span className="mono">{t.plate}</span>
+                <span className="garbage-bar" aria-hidden><span style={{ width: `${Math.round((t.tons / max) * 100)}%` }} /></span>
+                <span className="mono right">{fmtNum(t.tons, 1)} т · {t.trips}</span>
+              </li>
+            ))}
+          </ul>
+          {g.pending > 0 && <Alert tone="warning">Талонов без веса: {g.pending}. <Link to="/weigh-tickets?state=none">Внести вес</Link></Alert>}
+        </div>
+      )}
+    </Card>
+  );
 }
 
 const STATUS_COLOR: Record<string, string> = {
@@ -218,7 +249,7 @@ export function Dashboard() {
   const pct = (n: number) => (total ? Math.round((n / total) * 100) : 0);
   const exp = d?.expenses;
   const monthName = d ? new Intl.DateTimeFormat("ru-RU", { timeZone: "UTC", month: "long" }).format(new Date(`${d.date}T12:00:00Z`)) : "";
-  const hasData = !!d && !!(d.vehicles || d.requests || d.waybills || d.jobs || d.fines || rem.data);
+  const hasData = !!d && !!(d.vehicles || d.requests || d.waybills || d.jobs || d.fines || d.garbage || rem.data);
   const tasksTotal = d?.reminders?.total ?? (rem.data ? rem.data.due + rem.data.soon : null);
   const actions = [
     can("vehicles.create") && { to: "/vehicles?new=1", icon: Truck, label: "Добавить технику" },
@@ -283,8 +314,8 @@ export function Dashboard() {
               <Empty icon={AlertTriangle} title="Для вашей роли здесь пока нечего показывать">Перейдите в нужный раздел через меню слева.</Empty>
             )}
 
-            {(exp || d.waybills) && (
-              <div className={exp && d.waybills ? "dash-2-1" : "grid"}>
+            {(exp || d.garbage) && (
+              <div className={exp && d.garbage ? "dash-2-1" : "grid"}>
                 {exp && (
                   <Card title="Расходы компании" icon={Wallet} actions={<span className="muted small">за 6 месяцев · <Link to="/expenses">подробнее</Link></span>}>
                     {exp.months.every((m) => m.total === 0)
@@ -292,20 +323,7 @@ export function Dashboard() {
                       : <ExpensesChart months={exp.months} />}
                   </Card>
                 )}
-                {d.waybills && (
-                  <Card title="Сейчас в рейсе" icon={ClipboardList} actions={<Link to="/waybills?status=open">Все</Link>}>
-                    {d.waybills.open_list.length === 0 ? <Empty icon={ClipboardList} title="Открытых путевых листов нет" /> : (
-                      <div className="stack-sm">
-                        {d.waybills.open_list.map((w) => (
-                          <Link key={w.id} to={`/waybills/${w.id}`} className="row" style={{ color: "inherit", textDecoration: "none", justifyContent: "space-between" }}>
-                            <span><strong>{w.plate}</strong> <span className="muted">— {w.driver}</span></span>
-                            <span className="muted small">с {fmtDateTime(w.opened_at)}</span>
-                          </Link>
-                        ))}
-                      </div>
-                    )}
-                  </Card>
-                )}
+                {d.garbage && <GarbageCard g={d.garbage} />}
               </div>
             )}
 

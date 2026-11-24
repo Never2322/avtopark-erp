@@ -46,7 +46,8 @@ export function cell(f: { name: string; kind: string; options?: FieldMeta["optio
 /** Дополнительные кнопки в строке (печать, «составить документ» и т. п.) для отдельных разделов. */
 export type RowActions = (r: Row, done: () => void) => { node: ReactNode; width: number } | null;
 
-export function Registry({ resource, sub, icon, emptyHint, actions }: { resource: string; sub?: string; icon?: LucideIcon; emptyHint?: string; actions?: RowActions }) {
+/** createExtra: ещё кнопки рядом с «Добавить» (например, «Загрузить из Excel»), видны тем, кто может добавлять. */
+export function Registry({ resource, sub, icon, emptyHint, actions, createExtra }: { resource: string; sub?: string; icon?: LucideIcon; emptyHint?: string; actions?: RowActions; createExtra?: ReactNode }) {
   const entity = useEntityParam();
   const { me } = useAuth();
   const [sp, setSp] = useSearchParams();
@@ -121,7 +122,7 @@ export function Registry({ resource, sub, icon, emptyHint, actions }: { resource
   return (
     <>
       <PageHeader title={m?.title ?? "…"} sub={sub}
-        actions={m?.can.create ? <Button variant="primary" icon={Plus} onClick={() => setEdit("new")}>Добавить</Button> : undefined} />
+        actions={m?.can.create ? <div className="row wrap">{createExtra}<Button variant="primary" icon={Plus} onClick={() => setEdit("new")}>Добавить</Button></div> : undefined} />
       <QueryState q={meta}>
         {m && (
           <Card flush>

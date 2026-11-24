@@ -238,3 +238,13 @@ def type_tonnage(vtype) -> bool:
     """Включать ли тоннаж новой машине этого типа: мусоровозы и самосвалы да, остальным его включают галочкой в карточке."""
     name = (vtype.name or "").lower()
     return vtype.code in TONNAGE_CODES or any(w in name for w in TONNAGE_WORDS)
+
+
+def trip_cost(ticket, vehicle=None) -> Decimal | None:
+    """Стоимость рейса для заказчика: тонны × цена за тонну из талона (нет в талоне — из карточки машины), до копеек.
+    Нет веса или цены — None. Округляется каждый рейс, а итоги складываются из округлённых, как в журнале и в Excel."""
+    from decimal import ROUND_HALF_UP
+    price = ticket.price if ticket.price is not None else (vehicle.ton_price if vehicle is not None else None)
+    if ticket.tons is None or price is None:
+        return None
+    return (Decimal(ticket.tons) * Decimal(price)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)

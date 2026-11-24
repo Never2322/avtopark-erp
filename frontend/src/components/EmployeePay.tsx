@@ -12,11 +12,11 @@ interface PayTariff { id: number; name: string; unit: string; rate: number }
 interface Options { work: PayTariff[]; repair: PayTariff[] }
 interface Earned {
   month: string; title: string; work_h: number; repair_h: number; work: number; repair: number; total: number; no_rate: number; entries: number;
-  by_tons?: boolean; tons?: number; tons_rate?: number; tons_amount?: number; tons_pending?: number;   // мусоровозы: работа по тоннам из талонов весов
+  by_tons?: boolean; tons?: number; tons_rate?: number; tons_amount?: number; tons_pending?: number; tons_rate_text?: string;   // мусоровозы: работа по тоннам из талонов весов
 }
 export interface PayInfo { work_tariff_id: number | null; repair_tariff_id: number | null; work_tariff: string | null; repair_tariff: string | null; can_edit: boolean; earned?: Earned }
 
-const unitText = (u: string) => (u === "day" ? "день" : u === "ton" ? "тонну" : "час");
+const unitText = (u: string) => (u === "day" ? "день" : u === "ton" || u === "ton_tier" ? "тонну" : "час");
 const label = (t: PayTariff) => `${t.name} — ${fmtMoney(t.rate)} за ${unitText(t.unit)}`;
 
 /** Сколько уже заработано в этом месяце по внесённым часам (то же число видит сам водитель на главной). */
@@ -27,7 +27,7 @@ function EarnedLines({ e }: { e: Earned }) {
       <dd><strong>{fmtMoney(e.total)} ₽</strong> <span className="muted small">до вычета налогов</span></dd>
       {e.by_tons ? (
         <>
-          <dt>Работа по тоннам</dt><dd>{fmtNum(e.tons, 2)} т × {fmtMoney(e.tons_rate)} ₽ = {fmtMoney(e.tons_amount)} ₽ {e.work_h > 0 && <span className="muted small">часы ({fmtNum(e.work_h)} ч) записаны, но не оплачиваются</span>}</dd>
+          <dt>Работа по тоннам</dt><dd>{fmtNum(e.tons, 2)} т ({e.tons_rate_text || `${fmtMoney(e.tons_rate)} ₽/т`}) = {fmtMoney(e.tons_amount)} ₽ {e.work_h > 0 && <span className="muted small">часы ({fmtNum(e.work_h)} ч) записаны, но не оплачиваются</span>}</dd>
           {(e.tons_pending ?? 0) > 0 && <><dt>Ждут веса</dt><dd><span style={{ color: "var(--warning)" }}>талонов: {e.tons_pending}</span> <span className="muted small">внесите тоннаж в «Журнале тоннажа»</span></dd></>}
         </>
       ) : (

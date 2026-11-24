@@ -62,7 +62,7 @@ export function Stock() {
             <Empty icon={Boxes} title={filtered ? "Ничего не найдено" : "На складе пока пусто"}>
               {filtered ? <Button onClick={() => { setText(""); setS({ q: "", wh: "", low: "" }); }}>Сбросить фильтры</Button>
                 : o && o.warehouses.length === 0 ? <>Сначала заведите склад (раздел «Склады»){o.can.warehouses_create ? <> — <Link to="/warehouses">открыть</Link></> : ""}, потом товары и приход.</>
-                : o && o.items.length === 0 ? <>Заведите товары в разделе «Товары»{o.can.items_create ? <> — <Link to="/stock-items">открыть</Link></> : ""}, потом оформите приход.</>
+                : o && o.items.length === 0 ? <>Нажмите «Приход» и выберите деталь из каталога или впишите новую вручную: товар заведётся сам.</>
                 : "Оформите приход: товар появится здесь."}
             </Empty>
           ) : (

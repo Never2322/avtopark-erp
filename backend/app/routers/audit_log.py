@@ -33,7 +33,7 @@ ACTIONS = {
     "vehicle.create": "Добавлена техника", "vehicle.update": "Изменена техника", "vehicle.archive": "Техника в архиве",
     "vehicle.restore": "Техника возвращена", "vehicle.status": "Сменён статус техники", "vehicle.assign": "Водитель закреплён",
     "vehicle.unassign": "Закрепление снято", "vehicle.export": "Выгрузка списка техники",
-    "reading.create": "Введено показание", "reading.correct": "Показание исправлено", "reading.review": "Показание проверено", "readings.import": "Загрузка показаний из файла",
+    "reading.create": "Введено показание", "reading.correct": "Показание исправлено", "reading.review": "Показание проверено", "readings.import": "Загрузка показаний из файла", "weigh_tickets.import": "Загрузка тоннажа из файла",
     "request.create": "Создано обращение", "request.update": "Изменено обращение", "request.transition": "Смена статуса обращения",
     "request.comment": "Комментарий к обращению",
     "waybill.create": "Создан путевой лист", "waybill.update": "Изменён путевой лист", "waybill.open": "Путевой лист открыт",

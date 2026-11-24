@@ -11,7 +11,7 @@ from decimal import ROUND_HALF_UP, Decimal
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.enums import PAY_TARIFF_KINDS, PAY_TARIFF_UNITS, WORK_TARIFF_UNITS, WORKLOG_KINDS, WORKLOG_MAX_HOURS
+from app.enums import PAY_TARIFF_KINDS, PAY_TARIFF_UNITS, TON_UNITS, WORK_TARIFF_UNITS, WORKLOG_KINDS, WORKLOG_MAX_HOURS
 from app.models import Employee, Tariff, Vehicle, WeighTicket, WorkLog
 from app.services.vehicles import employee_in_entity
 
@@ -30,26 +30,63 @@ def pay_tariff(db: Session, emp: Employee, kind: str) -> Tariff | None:
 
 
 def ton_tariff(db: Session, emp: Employee) -> Tariff | None:
-    """Тариф «за тонну» у сотрудника (мусоровозы): работа оплачивается по тоннажу из талонов весов, а не по часам."""
+    """Тариф «за тонну» у сотрудника (мусоровозы): работа оплачивается по тоннажу из талонов весов, а не по часам.
+    Простой («ton»): тонны × ставка. С порогом («ton_tier»): тонн за день меньше порога — все тонны дня по первой ставке, иначе по второй."""
     t = pay_tariff(db, emp, "work")
-    return t if t is not None and t.unit == "ton" else None
+    return t if t is not None and t.unit in TON_UNITS else None
+
+
+def day_rate(t: Tariff, day_tons) -> Decimal:
+    """Ставка за тонну при таком тоннаже водителя за день (для простого тарифа одна и та же)."""
+    if t.unit == "ton_tier" and t.tier_tons is not None and t.rate_high is not None and Decimal(day_tons) >= Decimal(t.tier_tons):
+        return Decimal(t.rate_high)
+    return Decimal(t.rate)
+
+
+def day_tons(db: Session, pairs) -> dict[tuple[int, dt.date], Decimal]:
+    """Тонны водителя за день по всем живым талонам с весом (во всех юрлицах): от них зависит ставка тарифа с порогом."""
+    pairs = {(d, day) for d, day in pairs if d is not None}
+    if not pairs:
+        return {}
+    drivers = {d for d, _ in pairs}
+    days = [day for _, day in pairs]
+    rows = db.execute(select(WeighTicket.driver_id, WeighTicket.ticket_date, func.sum(WeighTicket.tons)).where(
+        WeighTicket.driver_id.in_(drivers), WeighTicket.ticket_date >= min(days), WeighTicket.ticket_date <= max(days),
+        WeighTicket.archived_at.is_(None), WeighTicket.tons.is_not(None)).group_by(WeighTicket.driver_id, WeighTicket.ticket_date)).all()
+    return {(d, day): Decimal(n or 0) for d, day, n in rows}
 
 
 def ton_rows(db: Session, tickets) -> list[dict]:
-    """Сумма по каждому талону весов: тонны × ставка «за тонну» водителя талона. Талоны без тоннажа, убранные и у водителей без такого
-    тарифа пропускаются. Ставка берётся из тарифа сотрудника на момент расчёта (в талоне она не запоминается)."""
+    """Сумма по каждому талону весов: тонны × ставка «за тонну» водителя талона (у тарифа с порогом ставка зависит от тонн водителя
+    за весь день). Талоны без тоннажа, убранные и у водителей без такого тарифа пропускаются. Ставка берётся из тарифа сотрудника на
+    момент расчёта (в талоне она не запоминается)."""
     cache: dict[int, Tariff | None] = {}
-    out = []
-    for t in tickets:
-        if t.driver_id is None or t.tons is None or t.archived_at is not None:
-            continue
+    live = [t for t in tickets if t.driver_id is not None and t.tons is not None and t.archived_at is None]
+    for t in live:
         if t.driver_id not in cache:
             emp = db.get(Employee, t.driver_id)
             cache[t.driver_id] = ton_tariff(db, emp) if emp is not None else None
+    tiered = [t for t in live if cache[t.driver_id] is not None and cache[t.driver_id].unit == "ton_tier"]
+    per_day = day_tons(db, [(t.driver_id, t.ticket_date) for t in tiered])
+    out = []
+    for t in live:
         tar = cache[t.driver_id]
         if tar is not None:
-            out.append({"ticket": t, "tariff": tar, "tons": Decimal(t.tons), "amount": money(Decimal(t.tons) * Decimal(tar.rate))})
+            dtons = per_day.get((t.driver_id, t.ticket_date), Decimal(t.tons))
+            rate = day_rate(tar, dtons)
+            out.append({"ticket": t, "tariff": tar, "tons": Decimal(t.tons), "rate": rate, "day_tons": dtons,
+                        "amount": money(Decimal(t.tons) * rate)})
     return out
+
+
+def tariff_text(t: Tariff | None) -> str:
+    """Ставка тарифа словами: «600 ₽/т» или «400 ₽/т до 12 т в день, 450 ₽/т от 12 т»."""
+    if t is None:
+        return ""
+    if t.unit == "ton_tier":
+        tier = f"{Decimal(t.tier_tons or 0).normalize():f}".replace(".", ",")
+        return f"{rate_str(t.rate, 'ton')} до {tier} т в день, {rate_str(t.rate_high or 0, 'ton')} от {tier} т"
+    return rate_str(t.rate, t.unit)
 
 
 def ton_pending(db: Session, tickets) -> int:
@@ -66,7 +103,7 @@ def ton_pending(db: Session, tickets) -> int:
     return n
 
 
-NO_TONS = {"by_tons": False, "tons": Decimal(0), "rate": Decimal(0), "amount": Decimal(0), "pending": 0, "tariff_name": ""}
+NO_TONS = {"by_tons": False, "tons": Decimal(0), "rate": Decimal(0), "amount": Decimal(0), "pending": 0, "tariff_name": "", "rate_text": ""}
 
 
 def ton_pay(db: Session, emp: Employee, first: dt.date, last: dt.date, cond=None) -> dict:
@@ -80,14 +117,14 @@ def ton_pay(db: Session, emp: Employee, first: dt.date, last: dt.date, cond=None
         stmt = stmt.where(cond(WeighTicket.legal_entity_id))
     tickets = list(db.scalars(stmt))
     rows = ton_rows(db, tickets)
-    return {"by_tons": True, "tons": sum((r["tons"] for r in rows), Decimal(0)), "rate": Decimal(tar.rate), "tariff_name": tar.name,
+    return {"by_tons": True, "tons": sum((r["tons"] for r in rows), Decimal(0)), "rate": Decimal(tar.rate), "tariff_name": tar.name, "rate_text": tariff_text(tar),
             "amount": sum((r["amount"] for r in rows), Decimal(0)), "pending": sum(1 for t in tickets if t.tons is None)}
 
 
 def ton_fields(tp: dict) -> dict:
     """Поля тоннажа для ответа сайту (общие для главной водителя, «Моих часов» и карточки сотрудника)."""
     return {"by_tons": tp["by_tons"], "tons": num(tp["tons"]), "tons_rate": num(tp["rate"]), "tons_amount": num(tp["amount"]),
-            "tons_pending": tp["pending"], "tons_tariff": tp["tariff_name"]}
+            "tons_pending": tp["pending"], "tons_tariff": tp["tariff_name"], "tons_rate_text": tp.get("rate_text", "")}
 
 
 def snapshot(db: Session, emp: Employee, kind: str) -> dict:
@@ -96,7 +133,7 @@ def snapshot(db: Session, emp: Employee, kind: str) -> dict:
     t = pay_tariff(db, emp, kind)
     if t is None:
         return {"tariff_id": None, "tariff_name": "", "unit": "hour", "rate": Decimal(0), "tariff_manual": False}
-    if t.unit == "ton":                                 # часы записываются, а платят за тонны из талонов весов: ставка часа 0
+    if t.unit in TON_UNITS:                             # часы записываются, а платят за тонны из талонов весов: ставка часа 0
         return {"tariff_id": t.id, "tariff_name": t.name, "unit": "hour", "rate": Decimal(0), "tariff_manual": False}
     return {"tariff_id": t.id, "tariff_name": t.name, "unit": t.unit, "rate": t.rate, "tariff_manual": False}
 
@@ -211,7 +248,7 @@ def preview_entry(db: Session, *, emp: Employee, work_date: dt.date, kind: str, 
     day = [l for l in db.scalars(select(WorkLog).where(WorkLog.employee_id == emp.id, WorkLog.work_date == work_date, WorkLog.archived_at.is_(None))
                                  .order_by(WorkLog.id)) if l.id != exclude_id and allows(l.legal_entity_id)]
     before = _day_amounts(day)
-    by_ton = t is not None and t.unit == "ton"           # платят за тонны: часы без суммы
+    by_ton = t is not None and t.unit in TON_UNITS       # платят за тонны: часы без суммы
     out = {"ok": True, "source": source, "tariff_id": t.id if t else None, "tariff_name": t.name if t else "",
            "unit": "hour" if by_ton or not t else t.unit, "rate": 0.0 if by_ton or not t else num(t.rate),
            "rate_text": "нет тарифа" if not t else "за тонны" if by_ton else rate_str(t.rate, t.unit),

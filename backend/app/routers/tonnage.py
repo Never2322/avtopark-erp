@@ -65,3 +65,27 @@ def my_tonnage(month: str | None = None, p: Principal = Depends(current), db: Se
         "totals": {"trips": trips, "tons": float(tons), "pending": pending},
         "can": {"create": bool(vehicles) and p.can("weigh_tickets.create_own") and p.employee_id is not None},
     }
+
+
+# ---------------------------------------------------------------- загрузка журнала тоннажа из файла
+
+from fastapi import File, Form, Response, UploadFile  # noqa: E402
+
+from app.deps import require  # noqa: E402
+from app.services import weigh_import  # noqa: E402
+
+
+@router.post("/import")
+def import_tickets(file: UploadFile = File(...), apply: str = Form("0"), legal_entity_id: int | None = Form(None),
+                   p: Principal = Depends(require("weigh_tickets.create")), db: Session = Depends(get_db)):
+    """Талоны весов из Excel или CSV: apply=0 — просмотр (ничего не записывается), apply=1 — загрузка."""
+    data = file.file.read(weigh_import.MAX_BYTES + 1)
+    if len(data) > weigh_import.MAX_BYTES:
+        raise fail(413, "file_too_big", "Файл больше 3 МБ. Разбейте его на части.", "file")
+    return weigh_import.run(db, p, file.filename or "", data, legal_entity_id=legal_entity_id, apply=apply == "1", today=job_today())
+
+
+@router.get("/import/template.csv")
+def import_template(p: Principal = Depends(require("weigh_tickets.create"))):
+    return Response(("\ufeff" + weigh_import.TEMPLATE).encode("utf-8"), media_type="text/csv; charset=utf-8",
+                    headers={"Content-Disposition": 'attachment; filename="tonnazh-obrazec.csv"'})

@@ -712,7 +712,7 @@ def report_day(c: Ctx) -> dict:
         for r in pay.ton_rows(db, tickets):             # водителям с тарифом «за тонну» работа считается по талонам весов
             a = of(r["ticket"].driver_id)
             a["work"] += float(r["amount"])
-            a["rate"]["work"] = pay.rate_str(r["tariff"].rate, "ton")
+            a["rate"]["work"] = pay.tariff_text(r["tariff"])
             if r["ticket"].vehicle_id:
                 a["vehicles"].add(r["ticket"].vehicle_id)
     if sc_way:
@@ -792,7 +792,7 @@ def report_salary(c: Ctx) -> dict:
         a["days"].add(tk.ticket_date)
         a["work"] += float(r["amount"])
         a["tons"] += float(r["tons"])
-        t = by_tariff.setdefault((r["tariff"].name, pay.rate_str(r["tariff"].rate, "ton")), {"h": 0.0, "sum": 0.0, "tons": 0.0})
+        t = by_tariff.setdefault((r["tariff"].name, pay.tariff_text(r["tariff"])), {"h": 0.0, "sum": 0.0, "tons": 0.0})
         t["sum"] += float(r["amount"])
         t["tons"] += float(r["tons"])
         v = by_vehicle.setdefault(tk.vehicle_id, {"h": 0.0, "sum": 0.0})
@@ -847,6 +847,217 @@ def report_salary(c: Ctx) -> dict:
     return {"title": f"Зарплата за {MONTHS_RU[c.d_from.month - 1]} {c.d_from.year}", "table": table(cols, rows), "chart": ch, "extras": extras, "note": note}
 
 
+
+GARBAGE_PAID = ("salary", "advance", "other")          # выданные деньги: зарплата, аванс, прочее
+
+
+def report_garbage_salary(c: Ctx) -> dict:
+    """Зарплата водителей мусоровозов за месяц: ходки и тонны по талонам весов × ставка «за тонну», часы и деньги за ремонт, премии,
+    удержания и что уже выдано, остаток к выплате. Водитель мусоровоза — тот, у кого тариф работы «за тонну» или есть талоны весов за месяц.
+    Суммы те же, что в «Зарплате за месяц» и в «Моих часах»: тонны × ставка тарифа сотрудника сейчас, часы × ставка, запомненная при внесении."""
+    from sqlalchemy import or_
+    from app.enums import PAYMENT_KINDS
+    from app.models import EmployeePayment, EmploymentAssignment
+    db = c.db
+    sc = c.sc("worklog.view")
+    if not sc:
+        raise fail(403, "forbidden", "Нет доступа к часам работы и ремонта")
+    sc_pay = c.sc("payments.view")
+    if not sc_pay:
+        c.hide("Премии, удержания и выдачи: нет права видеть выплаты сотрудникам")
+    title = f"Зарплата мусоровозов за {MONTHS_RU[c.d_from.month - 1]} {c.d_from.year}"
+    tickets = list(db.scalars(select(WeighTicket).where(WeighTicket.ticket_date >= c.d_from, WeighTicket.ticket_date <= c.d_to, WeighTicket.archived_at.is_(None),
+                                                        WeighTicket.driver_id.is_not(None), sc.cond(WeighTicket.legal_entity_id))
+                              .order_by(WeighTicket.ticket_date, WeighTicket.id)))
+    keys: set[tuple[int, int]] = {(t.driver_id, t.legal_entity_id) for t in tickets}
+    # тариф «за тонну» есть, а талонов за месяц нет: водитель всё равно в таблице (юрлицо по месту работы в этом месяце)
+    ton_emp = [e.id for e in db.scalars(select(Employee).where(Employee.archived_at.is_(None), Employee.work_tariff_id.is_not(None)))
+               if pay.ton_tariff(db, e) is not None]
+    if ton_emp:
+        for eid, ent in db.execute(select(EmploymentAssignment.employee_id, EmploymentAssignment.legal_entity_id).where(
+                EmploymentAssignment.employee_id.in_(ton_emp), sc.cond(EmploymentAssignment.legal_entity_id),
+                or_(EmploymentAssignment.started_on.is_(None), EmploymentAssignment.started_on <= c.d_to),
+                or_(EmploymentAssignment.ended_on.is_(None), EmploymentAssignment.ended_on >= c.d_from))).all():
+            keys.add((eid, ent))
+    emp_ids = {k[0] for k in keys}
+    if not emp_ids:
+        return {"title": title, "table": table([Col("name", "Водитель")], []), "chart": None, "extras": [],
+                "note": "За этот месяц нет ни талонов весов, ни водителей с тарифом «за тонну». Тариф «за тонну» назначается сотруднику "
+                        "(оплата работы, единица «тонна»), талоны водители прикладывают во вкладке «Тоннаж»."}
+    emps = {e.id: e for e in db.scalars(select(Employee).where(Employee.id.in_(emp_ids)))}
+    ton_rows = pay.ton_rows(db, tickets)
+    logs = list(db.scalars(select(WorkLog).where(WorkLog.employee_id.in_(emp_ids), WorkLog.work_date >= c.d_from, WorkLog.work_date <= c.d_to,
+                                                 WorkLog.archived_at.is_(None), sc.cond(WorkLog.legal_entity_id)).order_by(WorkLog.id)))
+    amt = pay.amounts(db, logs)
+    pays = list(db.scalars(select(EmployeePayment).where(
+        EmployeePayment.employee_id.in_(emp_ids), EmployeePayment.pay_date >= c.d_from, EmployeePayment.pay_date <= c.d_to,
+        EmployeePayment.archived_at.is_(None), sc_pay.cond(EmployeePayment.legal_entity_id)).order_by(EmployeePayment.pay_date, EmployeePayment.id))) if sc_pay else []
+    veh_ids = {t.vehicle_id for t in tickets}
+    plates = {v.id: label(v) for v in db.scalars(select(Vehicle).where(Vehicle.id.in_(veh_ids)))} if veh_ids else {}
+    ents = {e.id: (e.short_name or e.name) for e in db.scalars(select(LegalEntity))}
+    people: dict[tuple[int, int], dict] = {}
+
+    def person(eid: int, ent: int) -> dict:
+        return people.setdefault((eid, ent), {"veh": set(), "trips": 0, "pending": 0, "tons": 0.0, "by_tons": 0.0, "repair_h": 0.0, "repair": 0.0,
+                                              "work_h": 0.0, "work": 0.0, "bonus": 0.0, "fine": 0.0, "paid": 0.0})
+
+    for k in keys:
+        person(*k)
+    by_day: dict[tuple, dict] = {}
+    for t in tickets:
+        a = person(t.driver_id, t.legal_entity_id)
+        a["veh"].add(t.vehicle_id)
+        a["trips"] += 1
+        a["pending"] += 1 if t.tons is None else 0
+        a["tons"] += float(t.tons) if t.tons is not None else 0.0      # тонны видны и без тарифа, деньги только по тарифу
+        d = by_day.setdefault((t.ticket_date, t.driver_id, t.vehicle_id), {"trips": 0, "tons": 0.0, "sum": 0.0})
+        d["trips"] += 1
+        d["tons"] += float(t.tons) if t.tons is not None else 0.0
+    for r in ton_rows:
+        t = r["ticket"]
+        a = person(t.driver_id, t.legal_entity_id)
+        a["by_tons"] += float(r["amount"])
+        by_day[(t.ticket_date, t.driver_id, t.vehicle_id)]["sum"] += float(r["amount"])
+    for l in logs:
+        a = person(l.employee_id, l.legal_entity_id)
+        a[f"{l.kind}_h"] += float(l.hours)
+        a[l.kind] += float(amt[l.id])
+    for p in pays:
+        a = person(p.employee_id, p.legal_entity_id)
+        a["bonus" if p.kind == "bonus" else "fine" if p.kind == "fine" else "paid"] += float(p.amount)
+
+    def who(eid: int) -> str:
+        e = emps.get(eid)
+        return " ".join(x for x in (e.last_name, e.first_name, e.middle_name) if x) if e else "—"
+
+    rates = {eid: pay.ton_tariff(db, e) for eid, e in emps.items()}
+    rows = []
+    for (eid, ent), a in people.items():
+        tar = rates.get(eid)
+        accrued = a["by_tons"] + a["work"] + a["repair"] + a["bonus"]
+        rows.append({"name": who(eid), "ent": ents.get(ent, ""), "veh": ", ".join(sorted(plates.get(v, "") for v in a["veh"])), "trips": a["trips"],
+                     "tons": round(a["tons"], 3), "pending": a["pending"], "rate": pay.tariff_text(tar) if tar is not None else "нет тарифа «за тонну»",
+                     "by_tons": fl(a["by_tons"]), "work": fl(a["work"]), "repair_h": round(a["repair_h"], 1), "repair": fl(a["repair"]), "bonus": fl(a["bonus"]),
+                     "accrued": fl(accrued), "fine": fl(a["fine"]), "paid": fl(a["paid"]), "left": fl(accrued - a["fine"] - a["paid"])})
+    rows.sort(key=lambda r: (r["name"].lower(), r["ent"]))
+    many = len({k[1] for k in people}) > 1
+    has_work = any(r["work"] for r in rows)
+    see_pay = bool(sc_pay)
+    cols = [Col("name", "Водитель"), Col("ent", "Юрлицо", show=many), Col("veh", "Машина"), Col("trips", "Ходок", "int", True), Col("tons", "Тонн", "ton", True),
+            Col("pending", "Талонов без веса", "int", True), Col("rate", "Ставка"), Col("by_tons", "За тонны, ₽", "money", True),
+            Col("work", "Другая работа, ₽", "money", True, has_work), Col("repair_h", "Часы ремонта", "dec", True), Col("repair", "За ремонт, ₽", "money", True),
+            Col("bonus", "Премии, ₽", "money", True, see_pay), Col("accrued", "Начислено, ₽", "money", True),
+            Col("fine", "Удержано, ₽", "money", True, see_pay), Col("paid", "Выдано, ₽", "money", True, see_pay),
+            Col("left", "К выплате, ₽", "money", True)]
+    top = sorted(rows, key=lambda r: -r["accrued"])[:10]
+    ch = chart([short(r["name"].split(" ")[0] + "".join(" " + w[0] + "." for w in r["name"].split(" ")[1:3]), 16) for r in top], [r["accrued"] for r in top], "₽",
+               [r["name"] for r in top])
+    extras = []
+    if by_day:
+        extras.append(extra("По дням", [{"key": "d", "label": "День", "kind": "date"}, {"key": "w", "label": "Водитель", "kind": "text"},
+                                        {"key": "v", "label": "Машина", "kind": "text"}, {"key": "n", "label": "Ходок", "kind": "int", "sum": True},
+                                        {"key": "t", "label": "Тонн", "kind": "ton", "sum": True}, {"key": "s", "label": "За тонны, ₽", "kind": "money", "sum": True}],
+                            [[d.isoformat(), who(eid), plates.get(vid, ""), a["trips"], round(a["tons"], 3), fl(a["sum"])]
+                             for (d, eid, vid), a in sorted(by_day.items(), key=lambda kv: (kv[0][0], who(kv[0][1]), plates.get(kv[0][2], "")))], c, True))
+    if pays:
+        extras.append(extra("Премии, удержания и выдачи", [{"key": "d", "label": "Дата", "kind": "date"}, {"key": "w", "label": "Водитель", "kind": "text"},
+                                                          {"key": "k", "label": "Вид", "kind": "text"}, {"key": "s", "label": "Сумма, ₽", "kind": "money"},
+                                                          {"key": "n", "label": "Заметка", "kind": "text"}],
+                            [[p.pay_date.isoformat(), who(p.employee_id), PAYMENT_KINDS.get(p.kind, p.kind), fl(p.amount), p.note or ""] for p in pays], c))
+    matrix = garbage_matrix(c, tickets, ton_rows, emps, plates)
+    note = ("Сверху листы по машинам, как в таблице «ЗП»: тонны каждого рейса по дням, итого за день, водитель, ФОТ водителя по его тарифу, "
+            "стоимость вывезенных тонн (тонны × цена за тонну из талона) и ФР = стоимость − ФОТ. Ниже итог по водителям за месяц: "
+            "водители с тарифом работы «за тонну» и все, у кого есть талоны весов за месяц. За тонны: тонны с талонов (нетто) × ставка «за тонну» "
+            "из карточки водителя сейчас. За ремонт: часы ремонта из «Часов работы и ремонта» × ставка, которая действовала при внесении. ")
+    if see_pay:
+        note += ("Начислено = за тонны + за ремонт + премии. К выплате = начислено − удержано − уже выдано (зарплата, аванс, прочее). "
+                 "Премии, удержания и выдачи вносятся в «Выплатах сотрудникам» с датой в этом месяце. ")
+    else:
+        note += "Начислено = за тонны + за ремонт. "
+    note += "Налоги не считаются: суммы до вычета налогов."
+    wait = sum(r["pending"] for r in rows)
+    if wait:
+        note += f" Внимание: у {wait} талонов не внесён вес, они не оплачены: впишите вес в «Журнале тоннажа»."
+    no_tar = [r["name"] for r in rows if r["rate"].startswith("нет")]
+    if no_tar:
+        note += " Внимание: без тарифа «за тонну» тонны не оплачиваются: " + ", ".join(no_tar[:5]) + (" и др." if len(no_tar) > 5 else "") + "."
+    return {"title": title, "table": table(cols, rows), "chart": None, "extras": extras, "note": note, "matrix": matrix,
+            "table_title": "Итого по водителям за месяц"}
+
+
+def garbage_matrix(c: Ctx, tickets: list, ton_rows: list[dict], emps: dict, plates: dict) -> dict | None:
+    """Листы по машинам в виде таблицы «ЗП Ноябрь»: столбцы — дни с талонами, строки — рейсы, итог тонн, водитель, ФОТ водителя,
+    стоимость вывезенных тонн и финансовый результат (стоимость − ФОТ). Стоимость и ФР видны только тем, кто видит журнал тоннажа."""
+    if not tickets:
+        return None
+    see_money = bool(c.sc("weigh_tickets.view"))
+    pay_of = {r["ticket"].id: float(r["amount"]) for r in ton_rows}
+    veh = {v.id: v for v in c.db.scalars(select(Vehicle).where(Vehicle.id.in_({t.vehicle_id for t in tickets})))}
+    days = sorted({t.ticket_date for t in tickets})
+    di = {d: i for i, d in enumerate(days)}
+    n = len(days)
+
+    def surname(eid):
+        e = emps.get(eid)
+        return (e.last_name if e else "") or "—"
+
+    def row(label, kind, values, total=True, strong=False):
+        tot = round(sum(v for v in values if isinstance(v, (int, float))), 3 if kind == "ton" else 2) if total else None
+        return {"label": label, "kind": kind, "values": values, "total": tot, "strong": strong}
+
+    blocks = []
+    all_tons = [0.0] * n
+    by_v: dict[int, list] = {}
+    for t in tickets:
+        by_v.setdefault(t.vehicle_id, []).append(t)
+    for vid in sorted(by_v, key=lambda x: plates.get(x, "")):
+        per_day: list[list] = [[] for _ in range(n)]
+        for t in sorted(by_v[vid], key=lambda x: x.id):
+            per_day[di[t.ticket_date]].append(t)
+        rows = []
+        for k in range(max(len(x) for x in per_day)):
+            vals = [(float(x[k].tons) if x[k].tons is not None else "вес?") if k < len(x) else None for x in per_day]
+            rows.append(row("Тонны по рейсам" if k == 0 else "", "ton", vals))
+        day_tons = [round(sum(float(t.tons) for t in x if t.tons is not None), 3) if x else None for x in per_day]
+        for i, v in enumerate(day_tons):
+            all_tons[i] += v or 0
+        rows.append(row("Итого тонн в день", "ton", day_tons, strong=True))
+        drivers = []
+        for x in per_day:
+            ids = [t.driver_id for t in x if t.driver_id]
+            drivers.append(surname(max(set(ids), key=ids.count)) if ids else ("без водителя" if x else None))
+        rows.append(row("Водитель", "text", drivers, total=False))
+        fot = [round(sum(pay_of.get(t.id, 0.0) for t in x), 2) if x else None for x in per_day]
+        rows.append(row("ФОТ водителя, ₽", "money", fot, strong=True))
+        if see_money:
+            from app.services.weigh import trip_cost
+            v = veh.get(vid)
+            cost = [round(sum(float(trip_cost(t, v) or 0) for t in x), 2) if x else None for x in per_day]
+            rows.append(row("Стоимость вывезенных тонн, ₽", "money", cost))
+            rows.append(row("ФР (стоимость − ФОТ), ₽", "money",
+                            [round(a - b, 2) if a is not None and b is not None else None for a, b in zip(cost, fot)], strong=True))
+        blocks.append({"title": plates.get(vid, ""), "rows": rows})
+    foot = row("ИТОГО тонн в день по всем машинам", "ton", [round(x, 3) if x else None for x in all_tons], strong=True)
+    return {"days": [d.isoformat() for d in days], "blocks": blocks, "footer": foot if len(blocks) > 1 else None, "money": see_money}
+
+
+def matrix_sheet(m: dict) -> tuple[list[list], list]:
+    """Те же листы по машинам одним листом Excel: блок под блоком, как в исходной таблице."""
+    out: list[list] = []
+    days = [f"{d[8:10]}.{d[5:7]}" for d in m["days"]]
+    kinds = None
+    for b in m["blocks"]:
+        out.append([b["title"]])
+        out.append(["Дата"] + days + ["Итого"])
+        for r in b["rows"]:
+            out.append([r["label"]] + [v if v is not None else None for v in r["values"]] + [r["total"]])
+        out.append([])
+    if m.get("footer"):
+        f = m["footer"]
+        out.append([f["label"]] + list(f["values"]) + [f["total"]])
+    return out, kinds
+
+
 def report_tonnage(c: Ctx) -> dict:
     """Тоннаж за месяц по мусоровозам и самосвалам: сколько ходок и тонн привезла каждая машина. Тонны берутся с талонов весов
     (нетто), которые водители прикладывают в «Тоннаже». Талон без тоннажа считается ходкой, но в тонны не входит: его вес ещё нужно внести
@@ -868,21 +1079,29 @@ def report_tonnage(c: Ctx) -> dict:
         e = emps.get(eid)
         return " ".join(x for x in (e.last_name, e.first_name) if x) if e else "Без водителя"
 
-    by_v: dict[int, dict] = {vid: {"trips": 0, "tons": 0.0, "pending": 0} for vid in ids}
+    by_v: dict[int, dict] = {vid: {"trips": 0, "tons": 0.0, "pending": 0, "cost": 0.0} for vid in ids}
+    see_cost = bool(c.sc("weigh_tickets.view"))
+
+    def cost_of(t) -> float:
+        """Стоимость рейса: тонны × цена за тонну из талона (нет в талоне — из карточки машины), до копеек."""
+        from app.services.weigh import trip_cost
+        return float(trip_cost(t, vehicles.get(t.vehicle_id)) or 0)
     by_day: dict[dt.date, dict] = {}
     by_driver: dict[int | None, dict] = {}
     twins: dict[tuple[int, str], list[WeighTicket]] = {}
     for t in tickets:
-        for a in (by_v[t.vehicle_id], by_day.setdefault(t.ticket_date, {"trips": 0, "tons": 0.0}), by_driver.setdefault(t.driver_id, {"trips": 0, "tons": 0.0})):
+        for a in (by_v[t.vehicle_id], by_day.setdefault(t.ticket_date, {"trips": 0, "tons": 0.0, "cost": 0.0}),
+                  by_driver.setdefault(t.driver_id, {"trips": 0, "tons": 0.0, "cost": 0.0})):
             a["trips"] += 1
             a["tons"] += float(t.tons) if t.tons is not None else 0.0
+            a["cost"] += cost_of(t)
         if t.tons is None:
             by_v[t.vehicle_id]["pending"] += 1
         if t.doc_number:
             twins.setdefault((t.vehicle_id, t.doc_number), []).append(t)
     many = len({vehicles[vid].legal_entity_id for vid in ids if vid in vehicles}) > 1
     cols = [Col("veh", "Машина"), Col("type", "Тип"), Col("ent", "Юрлицо", show=many), Col("trips", "Ходок", "int", True), Col("tons", "Тонн", "ton", True),
-            Col("avg", "В среднем за ходку, т", "ton"), Col("pending", "Талонов без тоннажа", "int", True)]
+            Col("avg", "В среднем за ходку, т", "ton"), Col("cost", "Стоимость, ₽", "money", True, see_cost), Col("pending", "Талонов без тоннажа", "int", True)]
     rows = []
     for vid, a in by_v.items():
         v = vehicles.get(vid)
@@ -890,15 +1109,16 @@ def report_tonnage(c: Ctx) -> dict:
             continue
         counted = a["trips"] - a["pending"]
         rows.append({"veh": label(v), "type": types.get(v.type_id, ""), "ent": ents.get(v.legal_entity_id, ""), "trips": a["trips"], "tons": round(a["tons"], 3),
-                     "avg": round(a["tons"] / counted, 3) if counted else None, "pending": a["pending"]})
+                     "avg": round(a["tons"] / counted, 3) if counted else None, "cost": round(a["cost"], 2), "pending": a["pending"]})
     rows.sort(key=lambda r: (-r["tons"], r["veh"]))
     top = [r for r in rows if r["tons"]][:10]
     ch = chart([short(r["veh"].split(" · ")[0], 12) for r in top], [r["tons"] for r in top], "т", [r["veh"] for r in top])
     extras = []
     if by_day:
         extras.append(extra("По дням", [{"key": "d", "label": "День", "kind": "date"}, {"key": "n", "label": "Ходок", "kind": "int", "sum": True},
-                                        {"key": "t", "label": "Тонн", "kind": "ton", "sum": True}],
-                            [[d.isoformat(), a["trips"], round(a["tons"], 3)] for d, a in sorted(by_day.items())], c, True))
+                                        {"key": "t", "label": "Тонн", "kind": "ton", "sum": True}]
+                            + ([{"key": "s", "label": "Стоимость, ₽", "kind": "money", "sum": True}] if see_cost else []),
+                            [[d.isoformat(), a["trips"], round(a["tons"], 3)] + ([round(a["cost"], 2)] if see_cost else []) for d, a in sorted(by_day.items())], c, True))
     if by_driver:
         extras.append(extra("По водителям", [{"key": "w", "label": "Водитель", "kind": "text"}, {"key": "n", "label": "Ходок", "kind": "int", "sum": True},
                                              {"key": "t", "label": "Тонн", "kind": "ton", "sum": True}],
@@ -946,6 +1166,8 @@ REPORTS: dict[str, Report] = {r.name: r for r in (
     Report("orders", "Заказы по заказчикам", "range", ("orders.view",), report_orders, desc="Заказы и выручка по заказчикам"),
     Report("salary", "Зарплата за месяц", "month", ("worklog.view",), report_salary,
            desc="Сколько заработал каждый сотрудник за месяц по часам работы и ремонта, итог к выплате"),
+    Report("garbage_salary", "Зарплата мусоровозов", "month", ("worklog.view",), report_garbage_salary,
+           desc="Ходки, тонны и заработок водителей мусоровозов за месяц: за тонны, за ремонт, премии, удержания и остаток к выплате"),
     Report("tonnage", "Тоннаж за месяц", "month", ("weigh_tickets.view",), report_tonnage,
            desc="Сколько тонн привёз каждый мусоровоз и самосвал за месяц по талонам весов, итог"),
     Report("day", "Отчёт за день", "day", ("worklog.view", "waybills.view", "fuel_fills.view"), report_day,

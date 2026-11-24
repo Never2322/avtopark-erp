@@ -88,6 +88,18 @@ def _tariff_prepare(db, p, v, obj, m):
         raise Invalid({"unit": "Оплату ремонта считают за час или за сутки"})
     if m.get("kind") in PAY_TARIFF_KINDS:
         v["min_amount"] = Decimal(0)               # минимальная сумма нужна только тарифам для заказчика
+    if m.get("unit") == "ton_tier":
+        e = {}
+        if m.get("kind") != "work":
+            e["unit"] = "Тариф с порогом за день бывает только для оплаты работы водителю"
+        if m.get("rate_high") is None:
+            e["rate_high"] = "Укажите ставку от порога"
+        if m.get("tier_tons") is None or Decimal(m["tier_tons"]) <= 0:
+            e["tier_tons"] = "Укажите порог в тоннах, например 12"
+        if e:
+            raise Invalid(e)
+    else:
+        v["rate_high"], v["tier_tons"] = None, None  # у остальных тарифов второй ставки и порога нет
 
 
 def _tariff_before_void(db, obj):
@@ -105,8 +117,11 @@ register(R(
         F("kind", "Вид", "enum", options=TARIFF_KINDS, default="customer", required=True, filter=True, locked=True,
           hint="«Оплата работы» и «Оплата ремонта» считают заработок водителя. Вид после добавления не меняется"),
         F("unit", "Ед. измерения", "enum", options=TARIFF_UNITS, default="hour", required=True, filter=True,
-          hint="Оплата работы: за час, за сутки или за тонну (мусоровозам: по талонам весов). Оплата ремонта: за час или за сутки"),
-        F("rate", "Ставка, ₽", "money", required=True, default="0"),
+          hint="Оплата работы: за час, за сутки, за тонну или за тонну с порогом за день (мусоровозам: по талонам весов). Оплата ремонта: за час или за сутки"),
+        F("rate", "Ставка, ₽", "money", required=True, default="0", hint="У тарифа с порогом: ставка за тонну, когда за день меньше порога"),
+        F("tier_tons", "Порог за день, т", "decimal", places=2, lo=Decimal("0.01"), default="12", show_if=("unit", "ton_tier"),
+          hint="Сколько тонн водитель должен привезти за день, чтобы все тонны дня считались по второй ставке. В вашей таблице: 12"),
+        F("rate_high", "Ставка от порога, ₽", "money", show_if=("unit", "ton_tier"), hint="Ставка за тонну, когда за день привезено столько же или больше порога"),
         F("min_amount", "Сумма, ₽", "money", default="0", hint="Минимальная сумма за выезд: меньше не берём. 0 — без минимума", show_if=("kind", "customer")),
         F("note", "Заметка", "textarea", list=False),
     ],
@@ -928,6 +943,10 @@ def _ticket_prepare(db, p, v, obj, m):
         veh = db.get(Vehicle, m["vehicle_id"])
         if veh is not None and not veh.tonnage:
             e["vehicle_id"] = "У этой машины не ведётся тоннаж: поставьте галочку «Вести тоннаж» в карточке техники"
+    if obj is None and m.get("price") is None and "vehicle_id" not in e:
+        veh = db.get(Vehicle, m["vehicle_id"])
+        if veh is not None and veh.ton_price is not None:
+            v["price"] = veh.ton_price                   # цена за тонну машины подставляется сама; в талоне её можно поправить
     if "tons" in v:
         was = obj.tons if obj is not None else None
         if v["tons"] is not None and v["tons"] > weigh_svc.MAX_TONS:
@@ -952,7 +971,9 @@ def _ticket_computed(db, objs):
         else:
             state = {"text": "Нужно внести", "tone": "warning"}
         guess = f"Программа увидела {weigh_svc.fmt_t(o.tons_guess)} т. " if o.tons is None and o.tons_guess is not None else ""
-        out[o.id] = {"photos": photos.get(o.id, 0) or "", "tons_state": state, "read_note": ("" if o.tons_source == "manual" else o.read_note) or guess.strip()}
+        c_ = weigh_svc.trip_cost(o)
+        cost = float(c_) if c_ is not None else None
+        out[o.id] = {"cost": cost, "photos": photos.get(o.id, 0) or "", "tons_state": state, "read_note": ("" if o.tons_source == "manual" else o.read_note) or guess.strip()}
     return out
 
 
@@ -969,12 +990,14 @@ register(R(
         F("vehicle_id", "Техника", "ref", ref="vehicle", required=True, hint="Машина с галочкой «Вести тоннаж» (мусоровозы и самосвалы включены сами)"),
         F("tons", "Тоннаж (нетто), т", "decimal", places=3, lo=Decimal("0.001"), sum=True,
           hint="Если программа не смогла прочитать вес с фото, впишите его по фото талона. Брутто и тару писать не нужно"),
+        F("price", "Цена за тонну, ₽", "money",
+          hint="Пусто: подставится цена за тонну из карточки машины. Впишите свою, если для этого рейса цена другая"),
         F("driver_id", "Водитель", "ref", ref="employee", hint="Если пусто, подставится водитель, закреплённый за машиной", more=True),
         F("doc_number", "Номер талона", max=60, more=True),
         F("note", "Заметка", "textarea", max=500, list=False, more=True),
         F("client_id", "Код отправки", max=64, auto=True, list=False),
     ],
-    cols=[Col("tons_state", "Тоннаж внесён", "badge"), Col("read_note", "Что прочитала программа", "text", xl=False), Col("photos", "Фото", "text", xl=False)],
+    cols=[Col("cost", "Стоимость рейса, ₽", "money", sum=True), Col("tons_state", "Тоннаж внесён", "badge"), Col("read_note", "Что прочитала программа", "text", xl=False), Col("photos", "Фото", "text", xl=False)],
     photos=("ticket", "Фото талона"),
     states={"none": "Тоннаж не внесён", "set": "Тоннаж внесён"}, state_filter=_ticket_filter,
     search=("note", "doc_number", "read_note"),

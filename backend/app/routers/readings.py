@@ -119,3 +119,77 @@ def pending(legal_entity_id: int | None = None, p: Principal = Depends(require("
         items.append({**out(r, name or login, None), "vehicle_id": r.vehicle_id, "plate": plate, "vehicle": f"{make} {model}".strip(),
                       "previous": float(prev.value) if prev else None})
     return {"items": items}
+
+
+# ---------------------------------------------------------------- ручной ввод списком: спидометр сразу по всей своей технике
+
+class BatchItem(BaseModel):
+    vehicle_id: int
+    kind: str = "km"
+    value: Decimal = Field(ge=0, le=9_999_999, max_digits=12, decimal_places=1)
+    recorded_at: dt.datetime | None = None
+
+
+class BatchIn(BaseModel):
+    items: list[BatchItem] = Field(min_length=1, max_length=500)
+    note: str = Field(default="", max_length=300)
+
+
+def _enterable(db: Session, p: Principal, legal_entity_id: int | None) -> list[Vehicle]:
+    """Техника, по которой человек может вводить показания: с правом «любой техники» — вся техника его юрлиц (директор, диспетчер),
+    с правом «только своей» — закреплённая за ним сейчас (водитель)."""
+    from sqlalchemy import or_
+    from app.services.vehicles import assigned_vehicle_ids
+    full, own = p.scope("readings.create"), p.scope("readings.create_own")
+    parts = []
+    if full:
+        parts.append(full.cond(Vehicle.legal_entity_id))
+    if own:
+        ids = assigned_vehicle_ids(db, p.employee_id)
+        if ids:
+            parts.append(own.cond(Vehicle.legal_entity_id) & Vehicle.id.in_(ids))
+    if not parts:
+        return []
+    q = select(Vehicle).where(Vehicle.archived_at.is_(None), or_(*parts))
+    if legal_entity_id is not None:
+        q = q.where(Vehicle.legal_entity_id == legal_entity_id)
+    return list(db.scalars(q.order_by(Vehicle.plate)))
+
+
+@router.get("/readings/manual")
+def manual_list(legal_entity_id: int | None = None, p: Principal = Depends(current), db: Session = Depends(get_db)):
+    """Список техники для ручного ввода показаний: госномер, текущий пробег и моточасы, что в ней главное."""
+    if not (p.can("readings.create") or p.can("readings.create_own")):
+        raise fail(403, "forbidden", "Нет права вводить показания")
+    items = [{"id": v.id, "plate": v.plate, "name": f"{v.make} {v.model}".strip(), "primary": v.type.primary_reading,
+              "current_km": float(v.current_km) if v.current_km is not None else None,
+              "current_hours": float(v.current_hours) if v.current_hours is not None else None}
+             for v in _enterable(db, p, legal_entity_id)]
+    return {"items": items, "all": bool(p.scope("readings.create"))}
+
+
+@router.post("/readings/manual")
+def manual_batch(body: BatchIn, p: Principal = Depends(current), db: Session = Depends(get_db)):
+    """Сохранить показания по нескольким машинам сразу. Правила как у ввода в карточке: не меньше предыдущего, не в будущем,
+    большой скачок уходит на проверку. Строка с ошибкой не мешает остальным: по каждой ответ, записалось или почему нет."""
+    from fastapi import HTTPException
+    allowed = {v.id: v for v in _enterable(db, p, None)}
+    results = []
+    for it in body.items:
+        v = allowed.get(it.vehicle_id)
+        if v is None:
+            results.append({"vehicle_id": it.vehicle_id, "ok": False, "message": "Нет права вводить показания этой техники"})
+            continue
+        sp = db.begin_nested()
+        try:
+            r = svc.add_reading(db, p, v, it.kind, it.value, recorded_at=it.recorded_at, note=body.note.strip())
+            sp.commit()
+            results.append({"vehicle_id": v.id, "ok": True, "needs_review": r.is_anomaly,
+                            "current_km": float(v.current_km) if v.current_km is not None else None,
+                            "current_hours": float(v.current_hours) if v.current_hours is not None else None})
+        except HTTPException as e:
+            sp.rollback()
+            detail = e.detail if isinstance(e.detail, dict) else {}
+            results.append({"vehicle_id": v.id, "ok": False, "message": str(detail.get("message") or "Не удалось сохранить")})
+    db.commit()
+    return {"results": results, "saved": sum(1 for r in results if r["ok"])}

@@ -1,4 +1,4 @@
-import { Navigate, Route, Routes, useLocation } from "react-router-dom";
+import { Link, Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { useAuth } from "./auth";
 import { Empty, Spinner } from "./ui";
 import { Guard, Shell } from "./components/Shell";
@@ -13,6 +13,7 @@ import { Waybills } from "./pages/Waybills";
 import { WaybillCard } from "./pages/WaybillCard";
 import { ReadingsReview } from "./pages/ReadingsReview";
 import { ReadingsImport } from "./pages/ReadingsImport";
+import { TonnageImport } from "./pages/TonnageImport";
 import { Employees } from "./pages/Employees";
 import { Entities } from "./pages/Entities";
 import { Users } from "./pages/Users";
@@ -20,7 +21,7 @@ import { Roles } from "./pages/Roles";
 import { Audit } from "./pages/Audit";
 import { Backups } from "./pages/Backups";
 import { ChannelsStatus } from "./pages/ChannelsStatus";
-import { SearchX } from "lucide-react";
+import { FileSpreadsheet, SearchX } from "lucide-react";
 import { DriverFile, DriverFiles } from "./pages/dossier/DriverFiles";
 import { VehicleFile, VehicleFiles } from "./pages/dossier/VehicleFiles";
 import { Registry } from "./pages/Registry";
@@ -94,7 +95,8 @@ export function App() {
         <Route path="waybills" element={<Guard any={WB}><Waybills /></Guard>} />
         <Route path="waybills/:id" element={<Guard any={WB}><WaybillCard /></Guard>} />
         <Route path="readings" element={<Guard any={["readings.review"]}><ReadingsReview /></Guard>} />
-        <Route path="readings/import" element={<Guard any={["readings.import"]}><ReadingsImport /></Guard>} />
+        <Route path="readings/import" element={<Guard any={["readings.import", "readings.create", "readings.create_own"]}><ReadingsImport /></Guard>} />
+        <Route path="weigh-tickets/import" element={<Guard any={["weigh_tickets.create"]}><TonnageImport /></Guard>} />
         <Route path="jobs" element={<Guard any={["jobs.view"]}><JobsBoard /></Guard>} />
         <Route path="map" element={<Guard any={["map.view"]}><MapPage /></Guard>} />
         <Route path="jobs/mine" element={<Guard any={["jobs.view_own"]}><MyJobs /></Guard>} />
@@ -134,7 +136,8 @@ export function App() {
         <Route path="dossier/vehicles" element={<Guard any={["vehicle_files.view"]}><VehicleFiles /></Guard>} />
         <Route path="dossier/vehicles/:id" element={<Guard any={["vehicle_files.view"]}><VehicleFile /></Guard>} />
         {SECTIONS.map((x) => (
-          <Route key={x.key} path={x.path} element={<Guard any={[`${x.key}.view`]}><Registry resource={x.key} sub={x.sub} icon={x.icon} emptyHint={x.empty} actions={tradeActions(x.key)} /></Guard>} />
+          <Route key={x.key} path={x.path} element={<Guard any={[`${x.key}.view`]}><Registry resource={x.key} sub={x.sub} icon={x.icon} emptyHint={x.empty} actions={tradeActions(x.key)}
+            createExtra={x.key === "weigh_tickets" ? <Link className="btn" to="/weigh-tickets/import"><FileSpreadsheet size={16} aria-hidden /> Загрузить из Excel</Link> : undefined} /></Guard>} />
         ))}
         <Route path="entities" element={<Guard any={["legal_entities.view"]}><Entities /></Guard>} />
         <Route path="users" element={<Guard any={["users.view"]}><Users /></Guard>} />

@@ -6,7 +6,7 @@ import { FileUp, Paperclip, X } from "lucide-react";
 import { api } from "../api";
 import { fmtSize } from "../format";
 import { Alert, Button, Field, Modal, useToast } from "../ui";
-import { FIELD_LABELS, giveHandoff, type AutoResult } from "./billAuto";
+import { FIELD_LABELS, giveHandoff, type AutoResult } from "./billAutoHandoff";
 import type { BillMeta } from "./Bills";
 
 const MAX_FILES = 10;

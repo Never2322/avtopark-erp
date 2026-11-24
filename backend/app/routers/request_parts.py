@@ -87,7 +87,8 @@ def remove_part(rid: int, pid: int, p: Principal = Depends(current), db: Session
 @router.get("/part-options")
 def part_options(q: str = "", limit: int = 15, p: Principal = Depends(current), db: Session = Depends(get_db)):
     """Подсказки названий при вводе: сначала самые частые, потом по алфавиту. Нужны тем, кто вносит детали или ведёт каталог."""
-    if not (p.scope("requests.create") or p.scope("requests.edit") or p.scope("bills.create") or p.scope("bills.edit") or p.scope("parts.view")):
+    if not (p.scope("requests.create") or p.scope("requests.edit") or p.scope("bills.create") or p.scope("bills.edit") or p.scope("parts.view")
+            or p.scope("stock_moves.create")):
         raise fail(403, "forbidden", "Нет доступа")
     query = select(PartCatalog).where(PartCatalog.archived_at.is_(None))
     t = q.strip()

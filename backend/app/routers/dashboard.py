@@ -173,6 +173,41 @@ def fines_summary(db: Session, p: Principal, legal_entity_id: int | None) -> dic
                       for _, _, _, _, f, v, deadline, left in rows[:3]]}
 
 
+def garbage_summary(db: Session, p: Principal, legal_entity_id: int | None) -> dict | None:
+    """Мусоровозы за текущий месяц: рейсы, тонны, стоимость вывезенных тонн (тонны × цена за тонну), ФОТ водителей по их тарифам
+    и ФР = стоимость − ФОТ; по каждой машине тонны и рейсы, сколько тонн сегодня и сколько талонов ждут веса.
+    Видно с правом на журнал тоннажа; ФОТ и ФР — ещё и с правом видеть часы и заработок."""
+    from app.models import WeighTicket
+    from app.services import payroll as pay_svc
+    scope = p.scope("weigh_tickets.view").narrow(legal_entity_id)
+    if not scope:
+        return None
+    today = org_today()
+    first = today.replace(day=1)
+    tickets = list(db.scalars(select(WeighTicket).where(WeighTicket.ticket_date >= first, WeighTicket.ticket_date <= today,
+                                                       WeighTicket.archived_at.is_(None), scope.cond(WeighTicket.legal_entity_id))))
+    if not tickets and not db.scalar(select(func.count()).select_from(Vehicle).where(Vehicle.tonnage.is_(True), Vehicle.archived_at.is_(None),
+                                                                                       scope.cond(Vehicle.legal_entity_id))):
+        return None                                      # мусоровозов нет — карточка не нужна
+    vehicles = {v.id: v for v in db.scalars(select(Vehicle).where(Vehicle.id.in_({t.vehicle_id for t in tickets})))} if tickets else {}
+    tons = sum((Decimal(t.tons) for t in tickets if t.tons is not None), Decimal(0))
+    from app.services.weigh import trip_cost
+    cost = sum((trip_cost(t, vehicles.get(t.vehicle_id)) or Decimal(0) for t in tickets), Decimal(0))
+    see_pay = bool(p.scope("worklog.view").narrow(legal_entity_id))
+    fot = sum((r["amount"] for r in pay_svc.ton_rows(db, tickets)), Decimal(0)) if see_pay else None
+    by_v: dict[int, dict] = {}
+    for t in tickets:
+        a = by_v.setdefault(t.vehicle_id, {"trips": 0, "tons": 0.0})
+        a["trips"] += 1
+        a["tons"] += float(t.tons or 0)
+    trucks = sorted(({"plate": vehicles[k].plate, "trips": a["trips"], "tons": round(a["tons"], 2)} for k, a in by_v.items() if k in vehicles),
+                    key=lambda x: -x["tons"])
+    return {"month": rep.MONTHS_RU[today.month - 1], "trips": len(tickets), "tons": round(float(tons), 2), "cost": round(float(cost), 2),
+            "fot": round(float(fot), 2) if fot is not None else None, "fr": round(float(cost - fot), 2) if fot is not None else None,
+            "today_tons": round(sum(float(t.tons or 0) for t in tickets if t.ticket_date == today), 2),
+            "pending": sum(1 for t in tickets if t.tons is None), "trucks": trucks[:5]}
+
+
 def check_entity(p: Principal, legal_entity_id: int | None):
     if legal_entity_id is not None and not p.visible_entities().allows(legal_entity_id):
         raise fail(403, "forbidden", "Нет доступа к этому юридическому лицу")
@@ -185,7 +220,7 @@ def dashboard(legal_entity_id: int | None = None, p: Principal = Depends(current
     check_entity(p, legal_entity_id)
     today = org_today()
     data: dict = {"date": today.isoformat(), "vehicles": None, "requests": None, "waybills": None, "readings": None, "audit": None, "jobs": None,
-            "expenses": None, "maintenance": None, "osago": None, "fines": None, "orders": None, "reminders": None}
+            "expenses": None, "maintenance": None, "osago": None, "fines": None, "orders": None, "reminders": None, "garbage": None}
 
     if p.can("vehicles.view") or p.can("vehicles.view_own"):
         cond = and_(access.view_condition(p, db), Vehicle.archived_at.is_(None))
@@ -250,6 +285,7 @@ def dashboard(legal_entity_id: int | None = None, p: Principal = Depends(current
     data["osago"] = osago_summary(db, p, legal_entity_id)
     data["fines"] = fines_summary(db, p, legal_entity_id)
     data["orders"] = orders_summary(db, p, legal_entity_id)
+    data["garbage"] = garbage_summary(db, p, legal_entity_id)
     if p.can("reminders.view"):
         items = reminders_svc.reminders(db, p, legal_entity_id)
         data["reminders"] = {"total": len(items), "due": sum(1 for r in items if r["level"] == "due"), "items": items[:5]}

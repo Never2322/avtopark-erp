@@ -213,6 +213,8 @@ class Vehicle(Audited, Base):
     status_changed_at: Mapped[dt.datetime | None] = mapped_column(TS)
     # Водитель этой машины прикладывает талоны весов с полигона: у него появляется вкладка «Тоннаж» (мусоровозы и самосвалы включены сами).
     tonnage: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"))
+    # Цена за тонну для заказчика: подставляется в новые талоны весов этой машины (стоимость рейса = тонны × цена).
+    ton_price: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
     # Текущие показания пересчитываются из журнала показаний, руками не правятся.
     current_km: Mapped[Decimal | None] = mapped_column(Numeric(12, 1))
     current_hours: Mapped[Decimal | None] = mapped_column(Numeric(12, 1))
@@ -222,6 +224,7 @@ class Vehicle(Audited, Base):
     legal_entity: Mapped[LegalEntity] = relationship()
     __table_args__ = (
         CheckConstraint(check_in("status", VEHICLE_STATUSES), name="status"),
+        CheckConstraint("ton_price IS NULL OR ton_price >= 0", name="ton_price"),
         Index("uq_vehicles_plate_active", "plate", unique=True, postgresql_where=text("archived_at IS NULL")),
         Index("uq_vehicles_vin_active", "vin", unique=True, postgresql_where=text("archived_at IS NULL AND vin IS NOT NULL")),
         Index("ix_vehicles_entity_status", "legal_entity_id", "status"),
@@ -563,9 +566,13 @@ class Tariff(Audited, Voidable, Base):
     note: Mapped[str] = mapped_column(Text, default="", server_default="")
     # customer — цена работы техники для заказчика; work и repair — сколько платим водителю за час или за день
     kind: Mapped[str] = mapped_column(String(10), default="customer", server_default="customer")
+    # ton_tier (мусоровозы): если тонн у водителя за день меньше tier_tons — все тонны дня по rate, иначе все по rate_high
+    rate_high: Mapped[Decimal | None] = mapped_column(Money)
+    tier_tons: Mapped[Decimal | None] = mapped_column(Numeric(6, 2))
     __table_args__ = (
         CheckConstraint(check_in("kind", TARIFF_KINDS), name="kind"),
         CheckConstraint(check_in("unit", TARIFF_UNITS), name="unit"),
+        CheckConstraint("unit <> 'ton_tier' OR (rate_high IS NOT NULL AND rate_high >= 0 AND tier_tons IS NOT NULL AND tier_tons > 0)", name="tier"),
         CheckConstraint("rate >= 0 AND min_amount >= 0", name="amounts"),
         Index("uq_tariffs_name_active", text("lower(name)"), unique=True, postgresql_where=text("archived_at IS NULL")),
     )
@@ -859,6 +866,7 @@ class WeighTicket(Audited, Voidable, Base):
     driver_id: Mapped[int | None] = mapped_column(ForeignKey("employees.id"))
     ticket_date: Mapped[dt.date] = mapped_column(Date, index=True)
     tons: Mapped[Decimal | None] = mapped_column(Numeric(8, 3))                   # нетто, тонн
+    price: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))                 # цена за тонну для заказчика (из машины, можно поправить)
     tons_source: Mapped[str] = mapped_column(String(10), default="", server_default="")
     tons_guess: Mapped[Decimal | None] = mapped_column(Numeric(8, 3))             # что программа увидела, но не смогла подтвердить
     doc_number: Mapped[str] = mapped_column(String(60), default="", server_default="")
@@ -868,6 +876,7 @@ class WeighTicket(Audited, Voidable, Base):
     client_id: Mapped[str] = mapped_column(String(64), default="", server_default="")
     __table_args__ = (
         CheckConstraint("tons IS NULL OR (tons > 0 AND tons <= 200)", name="tons"),
+        CheckConstraint("price IS NULL OR price >= 0", name="price"),
         CheckConstraint("tons_source IN ('', 'read', 'manual')", name="tons_source"),
         Index("ix_weigh_tickets_vehicle_date", "vehicle_id", "ticket_date"),
         Index("uq_weigh_tickets_client", "created_by_id", "client_id", unique=True, postgresql_where=text("client_id <> ''")),

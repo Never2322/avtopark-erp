@@ -23,7 +23,7 @@ interface HomeVehicle {
 }
 export interface Earned {
   month: string; title: string; work_h: number; repair_h: number; work: number; repair: number; total: number; no_rate: number; entries: number;
-  by_tons?: boolean; tons?: number; tons_rate?: number; tons_amount?: number; tons_pending?: number;   // мусоровозы: работа по тоннам из талонов весов
+  by_tons?: boolean; tons?: number; tons_rate?: number; tons_amount?: number; tons_pending?: number; tons_rate_text?: string;   // мусоровозы: работа по тоннам из талонов весов
 }
 interface Home {
   today: string; name: string; has_vehicle: boolean; vehicles: HomeVehicle[];
@@ -88,7 +88,7 @@ function EarnedBlock({ e }: { e: Earned }) {
       <div className="kpi-row earned">
         <Card><span className="muted small">Всего</span><span className="pay-big">{fmtMoney(e.total)} ₽</span><span className="muted small">до вычета налогов</span></Card>
         {e.by_tons ? (
-          <Card><span className="muted small">Тонны</span><span className="pay-big">{fmtNum(e.tons, 2)} т</span><span className="small">{fmtMoney(e.tons_amount)} ₽ · {fmtMoney(e.tons_rate)} ₽ за тонну</span></Card>
+          <Card><span className="muted small">Тонны</span><span className="pay-big">{fmtNum(e.tons, 2)} т</span><span className="small">{fmtMoney(e.tons_amount)} ₽ · {e.tons_rate_text || `${fmtMoney(e.tons_rate)} ₽ за тонну`}</span></Card>
         ) : (
           <Card><span className="muted small">Работа</span><span className="pay-big">{fmtNum(e.work_h)} ч</span><span className="small">{fmtMoney(e.work)} ₽</span></Card>
         )}

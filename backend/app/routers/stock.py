@@ -354,9 +354,18 @@ def moves_file(fmt: str, kind: str = "", month: str = "", warehouse_id: int | No
 
 # ---------------------------------------------------------------- создание движения
 
+class NewItemIn(BaseModel):
+    """Товара на складе ещё нет: берём деталь из каталога (catalog_id) или вписываем вручную (name, sku, unit)."""
+    catalog_id: int | None = None
+    name: str = Field(default="", max_length=200)
+    sku: str = Field(default="", max_length=60)
+    unit: str = Field(default="", max_length=12)
+
+
 class MoveIn(BaseModel):
     kind: str
-    item_id: int
+    item_id: int | None = None
+    new_item: NewItemIn | None = None
     warehouse_id: int
     to_warehouse_id: int | None = None
     qty: Any = None
@@ -410,11 +419,48 @@ def move_result(db: Session, p: Principal, m: StockMove) -> dict:
     return {"move": move_out(p, m, c), "left_here": svc.qty_text(where), "left_total": svc.qty_text(sum(left.values(), Decimal(0)))}
 
 
+def item_for_receipt(db: Session, p: Principal, body: MoveIn) -> StockItem:
+    """Приход товара, которого на складе ещё нет: из каталога деталей или вписанного вручную. Если такой товар в юрлице склада
+    уже есть (то же название без учёта регистра и знаков), берётся он; иначе заводится новый (нужно право добавлять товары)."""
+    from app.enums import STOCK_UNITS
+    from app.models import PartCatalog
+    from app.parts_seed import norm as part_key
+    from app.services import parts as parts_svc
+    if body.kind != "receipt" or body.new_item is None:
+        raise fail(422, "no_item", "Выберите товар", "item_id")
+    w = db.get(Warehouse, body.warehouse_id) if body.warehouse_id else None
+    if not w or not p.can("stock_moves.create", w.legal_entity_id):
+        raise fail(422, "bad_warehouse", "Выберите склад", "warehouse_id")
+    ni = body.new_item
+    name, sku, unit = " ".join(ni.name.split()), ni.sku.strip(), ni.unit.strip()
+    if ni.catalog_id is not None:
+        c = db.get(PartCatalog, ni.catalog_id)
+        if c is None or c.archived_at is not None:
+            raise fail(422, "bad_catalog", "Такой детали нет в каталоге", "item_id")
+        name, sku, unit = name or c.name, sku or c.article, unit or c.unit
+    unit = unit or "шт"
+    key = part_key(name)
+    if not key:
+        raise fail(422, "part_name", "Впишите название товара буквами или цифрами", "new_name")
+    if unit not in STOCK_UNITS:
+        raise fail(422, "part_unit", f"Единица «{unit}» не из списка: {', '.join(STOCK_UNITS)}", "new_unit")
+    found = db.scalar(select(StockItem).where(StockItem.legal_entity_id == w.legal_entity_id, StockItem.name_key == key, StockItem.archived_at.is_(None)))
+    if found is not None:
+        return live_item(db, p, found.id)
+    need(p, "stock_items.create", w.legal_entity_id, "Нет права заводить новые товары: попросите кладовщика или директора")
+    item = StockItem(legal_entity_id=w.legal_entity_id, name=name, name_key=key, sku=sku, unit=unit, created_by_id=p.id, updated_by_id=p.id)
+    db.add(item)
+    db.flush()
+    parts_svc.learn(db, [{"name": name, "article": sku, "unit": unit}])     # вписанное вручную попадает в каталог для следующих раз
+    audit.log(db, p, "stock_items.create", "stock_items", item.id, item.legal_entity_id, name=name, source="каталог" if ni.catalog_id else "вручную")
+    return live_item(db, p, item.id)
+
+
 @router.post("/moves", status_code=201)
 def create_move(body: MoveIn, p: Principal = Depends(require("stock_moves.create")), db: Session = Depends(get_db)):
     if body.kind not in STOCK_MOVE_KINDS:
         raise fail(422, "bad_kind", "Выберите вид движения: поступление, расход, списание или перемещение", "kind")
-    item = live_item(db, p, body.item_id)
+    item = item_for_receipt(db, p, body) if body.item_id is None else live_item(db, p, body.item_id)
     need(p, "stock_moves.create", item.legal_entity_id)
     qty = qty_in(body.qty)
     price = None if body.price in (None, "") else bills_svc.to_money(body.price, what="Цена", field="price")

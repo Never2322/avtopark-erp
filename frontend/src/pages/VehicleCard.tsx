@@ -72,8 +72,10 @@ function EditModal({ v, onClose }: { v: Detail; onClose: () => void }) {
   const toast = useToast();
   const f = useForm({ type_id: String(v.type.id), plate: v.plate, internal_no: v.internal_no, make: v.make, model: v.model, vin: v.vin ?? "", year: v.year ? String(v.year) : "", note: v.note });
   const [tonnage, setTonnage] = useState(!!v.tonnage);
+  const [tonPrice, setTonPrice] = useState(v.ton_price != null ? String(v.ton_price).replace(".", ",") : "");
   const m = useMutation({
-    mutationFn: () => patch(`/vehicles/${v.id}`, { ...f.values, type_id: Number(f.values.type_id), year: numOrNull(f.values.year), department_id: v.department_id, tonnage }),
+    mutationFn: () => patch(`/vehicles/${v.id}`, { ...f.values, type_id: Number(f.values.type_id), year: numOrNull(f.values.year), department_id: v.department_id, tonnage,
+      ...(tonnage ? { ton_price: numOrNull(tonPrice) } : {}) }),
     onSuccess: () => { qc.invalidateQueries(); toast.success("Сохранено"); onClose(); },
     onError: f.fail,
   });
@@ -96,6 +98,11 @@ function EditModal({ v, onClose }: { v: Detail; onClose: () => void }) {
             <label className="check"><input type="checkbox" checked={tonnage} onChange={(e) => setTonnage(e.target.checked)} /> <span>Вести тоннаж</span></label>
             <div className="muted small">Водитель этой машины увидит вкладку «Тоннаж» и будет присылать фото талонов весов. Старые талоны останутся, если галочку снять.</div>
           </div>
+          {tonnage && (
+            <Field label="Цена за тонну для заказчика, ₽" error={f.errors.ton_price} hint="Подставляется в новые талоны этой машины: стоимость рейса = тонны × цена. В отдельном талоне цену можно поправить">
+              <input className="input" inputMode="decimal" value={tonPrice} placeholder="например 3814,9" onChange={(e) => setTonPrice(e.target.value)} />
+            </Field>
+          )}
         </div>
         <div className="muted small">Пробег и моточасы здесь не правятся: они считаются из журнала показаний.</div>
       </div>

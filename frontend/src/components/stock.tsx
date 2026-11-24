@@ -26,6 +26,37 @@ export function useStockOptions(entity?: number | null, enabled = true) {
     queryFn: () => get<StockOptions>("/stock/options", { legal_entity_id: entity ?? undefined }) });
 }
 
+interface CatalogPart { id: number; name: string; article: string; unit: string; category: string }
+const UNITS = ["шт", "комплект", "л", "кг", "м", "пара"];
+type Source = "stock" | "catalog" | "manual";
+
+/** Деталь из каталога: поиск по названию или артикулу, сначала самые частые. */
+function CatalogPicker({ value, onPick }: { value: CatalogPart | null; onPick: (c: CatalogPart | null) => void }) {
+  const [q, setQ] = useState("");
+  const list = useQuery({ queryKey: ["part-options", q], queryFn: () => get<{ items: CatalogPart[] }>("/part-options", { q, limit: 30 }), staleTime: 30_000 });
+  if (value) return (
+    <div className="row" style={{ justifyContent: "space-between", gap: 8 }}>
+      <span><strong>{value.name}</strong>{value.article ? <span className="muted"> · {value.article}</span> : null} <span className="muted small">({value.unit})</span></span>
+      <Button size="sm" onClick={() => onPick(null)}>Другая деталь</Button>
+    </div>
+  );
+  return (
+    <div className="stack-sm">
+      <input className="input" placeholder="Найти в каталоге по названию или артикулу" aria-label="Поиск в каталоге" value={q} onChange={(e) => setQ(e.target.value)} />
+      <div className="catalog-list" role="listbox" aria-label="Детали каталога">
+        {list.isLoading && <div className="muted small" style={{ padding: 8 }}>Ищу…</div>}
+        {list.data?.items.length === 0 && <div className="muted small" style={{ padding: 8 }}>В каталоге ничего не нашлось. Впишите товар вручную.</div>}
+        {list.data?.items.map((c) => (
+          <button key={c.id} type="button" role="option" aria-selected={false} aria-label={c.article ? `${c.name}, ${c.article}` : c.name} className="catalog-row" onClick={() => onPick(c)}>
+            <span>{c.name}{c.article ? <span className="muted"> · {c.article}</span> : null}</span>
+            <span className="muted small">{c.category || c.unit}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 const itemLabel = (i: StockOptItem, many: boolean, ents: Record<string, string>) =>
   `${many ? `[${ents[String(i.legal_entity_id)] ?? ""}] ` : ""}${i.name}${i.sku ? ` · ${i.sku}` : ""} — на складах ${i.total_text} ${i.unit}`;
 
@@ -38,9 +69,13 @@ export function StockMoveModal({ kind: first = "receipt", itemId, entity, onClos
   const f = useForm({ kind: first, item_id: itemId ? String(itemId) : "", filter: "", warehouse_id: "", to_warehouse_id: "", qty: "", price: "",
     move_date: todayIso(), counterparty_id: "", vehicle_id: "", doc_number: "", note: "" });
   const v = f.values;
+  const [source, setSource] = useState<Source>("stock");
+  const [part, setPart] = useState<CatalogPart | null>(null);
+  const [manual, setManual] = useState({ name: "", sku: "", unit: "шт" });
+  const isNew = v.kind === "receipt" && source !== "stock";
   const many = !!o && Object.keys(o.entities).length > 1;
   const kinds = (o?.kinds ?? []).map((k) => ({ id: k.code, label: k.label }));
-  const item = o?.items.find((i) => String(i.id) === v.item_id);
+  const item = isNew ? undefined : o?.items.find((i) => String(i.id) === v.item_id);
   const whs = useMemo(() => (o?.warehouses ?? []).filter((w) => !item || w.legal_entity_id === item.legal_entity_id), [o, item]);
   const vehicles = useMemo(() => (o?.vehicles ?? []).filter((x) => !item || x.legal_entity_id === item.legal_entity_id), [o, item]);
   const candidates = useMemo(() => {
@@ -66,23 +101,33 @@ export function StockMoveModal({ kind: first = "receipt", itemId, entity, onClos
 
   const m = useMutation({
     mutationFn: () => {
-      if (!item) throw new ApiError(422, "no_item", "Выберите товар", "item_id");
+      if (isNew && source === "catalog" && !part) throw new ApiError(422, "no_item", "Выберите деталь из каталога", "item_id");
+      if (isNew && source === "manual" && !manual.name.trim()) throw new ApiError(422, "part_name", "Впишите название товара", "new_name");
+      if (!isNew && !item) throw new ApiError(422, "no_item", "Выберите товар", "item_id");
       if (!v.warehouse_id) throw new ApiError(422, "no_warehouse", v.kind === "transfer" ? "Выберите склад, откуда перемещаем" : "Выберите склад", "warehouse_id");
       if (v.kind === "transfer" && !v.to_warehouse_id) throw new ApiError(422, "no_warehouse", "Выберите склад, куда перемещаем", "to_warehouse_id");
       return post<{ left_here: string; left_total: string; move: { unit: string; kind_label: string } }>("/stock/moves", {
-        kind: v.kind, item_id: item.id, warehouse_id: Number(v.warehouse_id), to_warehouse_id: v.kind === "transfer" ? Number(v.to_warehouse_id) : null,
+        kind: v.kind, item_id: isNew ? null : item!.id,
+        new_item: !isNew ? null : source === "catalog" ? { catalog_id: part!.id } : { name: manual.name, sku: manual.sku, unit: manual.unit },
+        warehouse_id: Number(v.warehouse_id), to_warehouse_id: v.kind === "transfer" ? Number(v.to_warehouse_id) : null,
         qty: v.qty, price: v.kind === "receipt" && v.price.trim() ? v.price : null, move_date: v.move_date || null,
         counterparty_id: v.kind === "receipt" && v.counterparty_id ? Number(v.counterparty_id) : null,
         vehicle_id: (v.kind === "issue" || v.kind === "writeoff") && v.vehicle_id ? Number(v.vehicle_id) : null,
         doc_number: v.doc_number, note: v.note,
       });
     },
-    onSuccess: (r) => { qc.invalidateQueries(); toast.success(`${r.move.kind_label}: готово. Остаток «${item!.name}»: на этом складе ${r.left_here} ${item!.unit}, всего ${r.left_total} ${item!.unit}`); onClose(); },
+    onSuccess: (r) => {
+      qc.invalidateQueries();
+      const nm = item?.name ?? (source === "catalog" ? part?.name : manual.name.trim()) ?? "";
+      const u = item?.unit ?? r.move.unit;
+      toast.success(`${r.move.kind_label}: готово. Остаток «${nm}»: на этом складе ${r.left_here} ${u}, всего ${r.left_total} ${u}`);
+      onClose();
+    },
     onError: f.fail,
   });
 
   const noWarehouse = !!o && o.warehouses.length === 0;
-  const unit = item?.unit ?? "";
+  const unit = item?.unit ?? (isNew ? (source === "catalog" ? part?.unit ?? "" : manual.unit) : "");
   return (
     <Modal title={TITLES[v.kind] ?? "Движение товара"} wide onClose={onClose}
       footer={<><Button onClick={onClose}>Отмена</Button><Button variant="primary" loading={m.isPending} disabled={!o || noWarehouse} onClick={() => { f.clear(); m.mutate(); }}>Записать</Button></>}>
@@ -93,7 +138,30 @@ export function StockMoveModal({ kind: first = "receipt", itemId, entity, onClos
         {o && (
           <>
             <FilterChips value={v.kind} options={kinds} onChange={(k) => { f.set("kind", k); f.clear(); }} />
-            <Field label="Товар" error={f.errors.item_id} hint={v.kind !== "receipt" && !candidates.length ? "На складе нет товара в наличии: сначала оформите приход" : o.can.items_create && v.kind === "receipt" ? <>Нужного товара нет в списке? <Link to="/stock-items">Добавьте его в разделе «Товары»</Link></> : undefined}>
+            {v.kind === "receipt" && (
+              <FilterChips<Source> value={source} onChange={(x) => { setSource(x); f.clear(); }} options={[
+                { id: "stock", label: "Товар со склада" }, { id: "catalog", label: "Из каталога деталей" },
+                ...(o.can.items_create ? [{ id: "manual" as Source, label: "Новый вручную" }] : []),
+              ]} />
+            )}
+            {isNew && source === "catalog" && (
+              <Field label="Деталь из каталога" error={f.errors.item_id} hint="Если такого товара на складе ещё нет, он заведётся сам. Нет в каталоге — выберите «Новый вручную»">
+                <CatalogPicker value={part} onPick={setPart} />
+              </Field>
+            )}
+            {isNew && source === "manual" && (
+              <div className="grid cols-2">
+                <Field label="Наименование" error={f.errors.new_name ?? f.errors.name} full>
+                  <input className="input" maxLength={200} value={manual.name} placeholder="Например: Фильтр масляный" onChange={(e) => setManual({ ...manual, name: e.target.value })} />
+                </Field>
+                <Field label="Артикул"><input className="input" maxLength={60} value={manual.sku} onChange={(e) => setManual({ ...manual, sku: e.target.value })} /></Field>
+                <Field label="Единица" error={f.errors.new_unit}>
+                  <select className="input" value={manual.unit} onChange={(e) => setManual({ ...manual, unit: e.target.value })}>{UNITS.map((u) => <option key={u} value={u}>{u}</option>)}</select>
+                </Field>
+              </div>
+            )}
+            {!isNew && (
+            <Field label="Товар" error={f.errors.item_id} hint={v.kind !== "receipt" && !candidates.length ? "На складе нет товара в наличии: сначала оформите приход" : v.kind === "receipt" ? "Нужного товара нет в списке? Выберите выше «Из каталога деталей» или «Новый вручную»" : undefined}>
               <div className="stack-sm">
                 <input className="input" placeholder="Найти по названию или артикулу" aria-label="Поиск товара" value={v.filter} onChange={(e) => f.set("filter", e.target.value)} />
                 <select className="input" aria-label="Товар" value={v.item_id} onChange={(e) => f.set("item_id", e.target.value)}>
@@ -102,6 +170,7 @@ export function StockMoveModal({ kind: first = "receipt", itemId, entity, onClos
                 </select>
               </div>
             </Field>
+            )}
             <div className="grid cols-2">
               <Field label={v.kind === "transfer" ? "Откуда" : "Склад"} error={f.errors.warehouse_id}
                 hint={item && v.kind !== "receipt" && v.warehouse_id ? `На этом складе: ${qtyAt(Number(v.warehouse_id))} ${unit}` : undefined}>

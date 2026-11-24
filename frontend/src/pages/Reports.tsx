@@ -20,7 +20,10 @@ interface ReportData {
   period: { kind: "month" | "range" | "year12" | "day"; from: string; to: string; month: string };
   table: Tbl; chart: ChartData | null; extras: Extra[]; can: { export: boolean };
   day_rows?: { employee_id: number | null; can_edit: boolean; kind: string }[];
+  matrix?: Matrix | null; table_title?: string;
 }
+interface MatrixRow { label: string; kind: "ton" | "money" | "text"; values: (number | string | null)[]; total: number | null; strong: boolean }
+interface Matrix { days: string[]; blocks: { title: string; rows: MatrixRow[] }[]; footer: MatrixRow | null; money: boolean }
 
 /* ---------------- даты ---------------- */
 
@@ -137,6 +140,48 @@ function DataTable({ t, empty, cell }: { t: Tbl; empty: string; cell?: (c: Cell,
         )}
       </table>
     </div>
+  );
+}
+
+/* ---------------- листы по машинам (как таблица «ЗП» в Excel) ---------------- */
+
+function mcell(r: MatrixRow, v: number | string | null): string {
+  if (v === null || v === undefined || v === "") return "";
+  if (typeof v === "string") return v;
+  return r.kind === "money" ? fmtMoney(v) : r.kind === "ton" ? fmtNum(v, 2) : String(v);
+}
+
+function MatrixRows({ rows, days }: { rows: MatrixRow[]; days: string[] }) {
+  return (
+    <>
+      {rows.map((r, i) => (
+        <tr key={i} className={r.strong ? "m-strong" : ""}>
+          <td>{r.label}</td>
+          {days.map((_, j) => <td key={j} className={r.kind === "text" ? "" : "num"}>{mcell(r, r.values[j])}</td>)}
+          <td className="num"><strong>{r.total === null ? "" : mcell(r, r.total)}</strong></td>
+        </tr>
+      ))}
+    </>
+  );
+}
+
+function MatrixView({ m }: { m: Matrix }) {
+  const head = (
+    <thead><tr><th>Дата</th>{m.days.map((d) => <th key={d} className="num">{d.slice(8, 10)}.{d.slice(5, 7)}</th>)}<th className="num">Итого</th></tr></thead>
+  );
+  return (
+    <>
+      {m.blocks.map((b) => (
+        <Card key={b.title} title={b.title} flush className="report-wide">
+          <div className="table-wrap"><table className="table report-table matrix-table">{head}<tbody><MatrixRows rows={b.rows} days={m.days} /></tbody></table></div>
+        </Card>
+      ))}
+      {m.footer && (
+        <Card flush className="report-wide">
+          <div className="table-wrap"><table className="table report-table matrix-table">{head}<tbody><MatrixRows rows={[m.footer]} days={m.days} /></tbody></table></div>
+        </Card>
+      )}
+    </>
   );
 }
 
@@ -302,7 +347,8 @@ export function ReportView() {
                   </Alert>
                 )}
                 {d.chart && <Card title="Диаграмма"><BarChart chart={d.chart} /></Card>}
-                <Card flush className={d.table.columns.length > 9 ? "report-wide" : ""}><DataTable t={d.table} cell={d.day_rows ? dayCell : undefined} empty="За выбранный период по доступным вам данным ничего нет. Измените период или юридическое лицо." /></Card>
+                {d.matrix && <MatrixView m={d.matrix} />}
+                <Card title={d.table_title} flush className={d.table.columns.length > 9 ? "report-wide" : ""}><DataTable t={d.table} cell={d.day_rows ? dayCell : undefined} empty="За выбранный период по доступным вам данным ничего нет. Измените период или юридическое лицо." /></Card>
                 {d.extras.map((e) => (
                   <Card key={e.title} title={e.title} flush><DataTable t={e} empty="Нет записей" /></Card>
                 ))}

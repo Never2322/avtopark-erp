@@ -127,6 +127,9 @@ def export_xlsx(name: str, legal_entity_id: int | None = None, month: str | None
     res = build(db, p, rep, legal_entity_id, month, frm, to)
     stamp = utcnow().astimezone(org_tz()).strftime("%d.%m.%Y %H:%M")
     sheets = []
+    if res.get("matrix"):
+        rows, kinds = svc.matrix_sheet(res["matrix"])
+        sheets.append(("ЗП по машинам", rows, kinds))
     for title, tbl in (res.get("sheets") or [(res["title"], res["table"])] + [(e["title"], e) for e in res["extras"]]):
         rows, kinds = sheet_of(tbl, native=True)
         sheets.append((title, rows, kinds))

@@ -13,7 +13,7 @@ interface TimeItem {
 }
 interface TimeTariff { id: number; name: string; unit: "hour" | "day" | "ton"; rate: number }
 /** Мусоровозы: работа оплачивается по тоннам из талонов весов, а не по часам. */
-interface TimeTons { by_tons: boolean; tons: number; tons_rate: number; tons_amount: number; tons_pending: number; tons_tariff: string }
+interface TimeTons { by_tons: boolean; tons: number; tons_rate: number; tons_amount: number; tons_pending: number; tons_tariff: string; tons_rate_text?: string }
 interface TimeData {
   month: string; title: string; items: TimeItem[];
   totals: { work_h: number; repair_h: number; work: number; repair: number; total: number };
@@ -56,7 +56,7 @@ export function MyTime() {
             <p className="muted small">Ваши тарифы. Работа: {tariffText(d.tariffs.work)}. Ремонт: {tariffText(d.tariffs.repair)}.</p>
             {d.tonnage && (
               <Alert tone="info">
-                Оплата за тонны: {fmtNum(d.tonnage.tons, 2)} т × {fmtMoney(d.tonnage.tons_rate)} ₽ = {fmtMoney(d.tonnage.tons_amount)} ₽. Тонны берутся с талонов весов.{d.totals.work_h > 0 && <> Часы работы ({fmtNum(d.totals.work_h)} ч) записываются, но отдельно не оплачиваются.</>}
+                Оплата за тонны: {fmtNum(d.tonnage.tons, 2)} т ({d.tonnage.tons_rate_text || `${fmtMoney(d.tonnage.tons_rate)} ₽/т`}) = {fmtMoney(d.tonnage.tons_amount)} ₽. Тонны берутся с талонов весов.{d.totals.work_h > 0 && <> Часы работы ({fmtNum(d.totals.work_h)} ч) записываются, но отдельно не оплачиваются.</>}
                 {d.tonnage.tons_pending > 0 && <> Талонов без веса: {d.tonnage.tons_pending}. Они оплатятся, когда вес внесут.</>}
               </Alert>
             )}

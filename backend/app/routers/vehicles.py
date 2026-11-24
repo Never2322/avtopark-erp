@@ -36,6 +36,8 @@ class VehicleIn(BaseModel):
     # «Вести тоннаж»: у водителя этой машины появляется вкладка «Тоннаж» (талоны весов). Не передано: у новой машины решает тип
     # (мусоровоз и самосвал: да), у существующей остаётся как есть.
     tonnage: bool | None = None
+    # Цена за тонну для заказчика (мусоровозы): подставляется в новые талоны весов этой машины. Не передано: у существующей остаётся как есть.
+    ton_price: Decimal | None = Field(default=None, ge=0, le=10_000_000)
 
 
 class VehicleCreate(VehicleIn):
@@ -76,6 +78,8 @@ def clean_vehicle(db: Session, body: VehicleIn, entity_id: int, vehicle_id: int 
             data["tonnage"] = weigh_svc.type_tonnage(vtype)
         else:
             data.pop("tonnage", None)
+    if "ton_price" not in body.model_fields_set and vehicle_id is not None:
+        data.pop("ton_price", None)
     if body.department_id is not None:
         d = db.get(Department, body.department_id)
         if not d or d.legal_entity_id != entity_id:
@@ -118,6 +122,7 @@ def out(db: Session, p: Principal, v: Vehicle, drivers: dict | None = None, deta
         "current_km": float(v.current_km) if v.current_km is not None else None,
         "current_hours": float(v.current_hours) if v.current_hours is not None else None,
         "driver": d, "archived": v.archived_at is not None, "tonnage": v.tonnage,
+        "ton_price": float(v.ton_price) if v.ton_price is not None and (p.can("vehicles.edit", v.legal_entity_id) or p.can("weigh_tickets.view", v.legal_entity_id)) else None,
     }
     if detailed:
         e = v.legal_entity_id
@@ -322,7 +327,8 @@ def update_vehicle(vid: int, body: VehicleIn, p: Principal = Depends(require("ve
     if v.archived_at:
         raise fail(409, "vehicle_archived", "Машина в архиве: сначала верните её из архива")
     data = clean_vehicle(db, body, v.legal_entity_id, v.id)
-    changed = {k: [getattr(v, k), val] for k, val in data.items() if getattr(v, k) != val}
+    js = lambda x: float(x) if isinstance(x, Decimal) else x       # noqa: E731  (цена за тонну — Decimal, в журнал пишется числом)
+    changed = {k: [js(getattr(v, k)), js(val)] for k, val in data.items() if getattr(v, k) != val}
     for k, val in data.items():
         setattr(v, k, val)
     v.updated_by_id = p.id
