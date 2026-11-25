@@ -2,10 +2,12 @@ FROM python:3.12-slim-bookworm
 
 # Клиент PostgreSQL той же версии, что и сервер (16): без него pg_dump не сделает копию.
 # tesseract-ocr (с русским словарём) и poppler-utils читают текст со сканов и фото счетов; без них программа работает, но читает только PDF с текстом.
-RUN apt-get update \
+# Плохая связь не должна ломать сборку: скачивание пакетов повторяется несколько раз.
+RUN echo 'Acquire::Retries "5";' > /etc/apt/apt.conf.d/80-retries \
+ && apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates curl gnupg \
  && install -d /usr/share/keyrings \
- && curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | gpg --dearmor -o /usr/share/keyrings/pgdg.gpg \
+ && curl -fsSL --retry 5 --retry-delay 3 https://www.postgresql.org/media/keys/ACCC4CF8.asc | gpg --dearmor -o /usr/share/keyrings/pgdg.gpg \
  && echo "deb [signed-by=/usr/share/keyrings/pgdg.gpg] http://apt.postgresql.org/pub/repos/apt bookworm-pgdg main" > /etc/apt/sources.list.d/pgdg.list \
  && apt-get update \
  && apt-get install -y --no-install-recommends postgresql-client-16 tesseract-ocr tesseract-ocr-rus poppler-utils \
@@ -15,7 +17,7 @@ RUN apt-get update \
 ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 PG_BIN_DIR=/usr/lib/postgresql/16/bin
 WORKDIR /srv
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --retries 10 --timeout 60 -r requirements.txt
 COPY alembic.ini .
 COPY alembic ./alembic
 COPY app ./app
