@@ -48,6 +48,8 @@ import { MapPage } from "./pages/MapPage";
 import { DriverEntries, EntriesFeed } from "./pages/Entries";
 import { Roster } from "./pages/Roster";
 import { DriverHome } from "./pages/DriverHome";
+import { LoaderHome } from "./pages/LoaderHome";
+import { LoaderCrews } from "./pages/LoaderCrews";
 import { OutboxPage } from "./pages/OutboxPage";
 import { Purchases } from "./pages/Purchases";
 import { Bills } from "./pages/Bills";
@@ -79,7 +81,9 @@ export function App() {
 
   // у водителя (своя техника, но не весь парк) главная — его кабинет; с главной людей без права на неё отправляем в первый доступный раздел
   const isDriver = canAny("vehicles.view_own") && !canAny("vehicles.view");
-  const home = isDriver ? <DriverHome /> : canAny("dashboard.view") ? <Dashboard /> : canAny(...REQ) ? <Navigate to="/requests" replace /> : canAny(...VEH) ? <Navigate to="/vehicles" replace /> : <Navigate to="/profile" replace />;
+  // у грузчика мусоровоза (нет ни своей техники, ни всего парка) главная — его кабинет
+  const isLoader = canAny("loaders.view_own") && !canAny("vehicles.view", "vehicles.view_own");
+  const home = isDriver ? <DriverHome /> : isLoader ? <LoaderHome /> : canAny("dashboard.view") ? <Dashboard /> : canAny(...REQ) ? <Navigate to="/requests" replace /> : canAny(...VEH) ? <Navigate to="/vehicles" replace /> : <Navigate to="/profile" replace />;
 
   return (
     <Routes>
@@ -105,6 +109,7 @@ export function App() {
         <Route path="tonnage" element={<Guard any={["weigh_tickets.view_own"]}><Tonnage /></Guard>} />
         <Route path="hauls" element={<Guard any={["hauls.use_own"]}><Hauls /></Guard>} />
         <Route path="my-routes" element={<Guard any={["route_plan.view_own"]}><MyRoutes /></Guard>} />
+        <Route path="loaders" element={<Guard any={["route_notes.view", "assignments.manage"]}><LoaderCrews /></Guard>} />
         <Route path="route-board" element={<Guard any={["route_plan.view"]}><RouteBoard /></Guard>} />
         <Route path="repair-photos" element={<Guard any={["repair_photos.view"]}><RepairPhotos /></Guard>} />
         <Route path="timesheet" element={<Guard any={["timesheet.view"]}><Timesheet /></Guard>} />

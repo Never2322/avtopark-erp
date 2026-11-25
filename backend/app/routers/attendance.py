@@ -18,7 +18,7 @@ from app.db import get_db
 from app.deps import Principal, current, entity_filter, require
 from app.enums import (ATTENDANCE_AHEAD_DAYS, ATTENDANCE_AHEAD_OFFICE_DAYS, ATTENDANCE_BACK_DAYS, ATTENDANCE_SHOW_DAYS,
                        ATTENDANCE_SOURCES)
-from app.models import Employee, EmploymentAssignment, ShiftPlan, Vehicle, VehicleAssignment
+from app.models import Employee, EmploymentAssignment, LoaderAssignment, ShiftPlan, Vehicle, VehicleAssignment
 from app.registry import allowed_entities
 from app.resources import job_today
 from app.routers.employees import full_name, get_visible
@@ -137,14 +137,16 @@ def answer_mine(body: AnswerIn, p: Principal = Depends(current), db: Session = D
 # ---------------------------------------------------------------- список для офиса
 
 def _people(db: Session, scope, day: dt.date) -> list[Employee]:
-    """Кто в списке: работает в доступном юрлице в этот день и водитель (или уже ответил)."""
+    """Кто в списке: работает в доступном юрлице в этот день и водитель, грузчик мусоровоза (или уже ответил)."""
     works = exists().where(EmploymentAssignment.employee_id == Employee.id, scope.cond(EmploymentAssignment.legal_entity_id),
                            or_(EmploymentAssignment.started_on.is_(None), EmploymentAssignment.started_on <= day),
                            or_(EmploymentAssignment.ended_on.is_(None), EmploymentAssignment.ended_on >= day))
     answered = exists().where(ShiftPlan.employee_id == Employee.id, ShiftPlan.plan_date == day)
+    loader = exists().where(LoaderAssignment.employee_id == Employee.id, LoaderAssignment.started_on <= day,
+                            or_(LoaderAssignment.ended_on.is_(None), LoaderAssignment.ended_on >= day))
     return list(db.scalars(select(Employee).where(
         works, Employee.archived_at.is_(None), or_(Employee.hired_on.is_(None), Employee.hired_on <= day),
-        or_(Employee.fired_on.is_(None), Employee.fired_on >= day), or_(Employee.is_driver.is_(True), answered))
+        or_(Employee.fired_on.is_(None), Employee.fired_on >= day), or_(Employee.is_driver.is_(True), loader, answered))
         .order_by(Employee.last_name, Employee.first_name, Employee.id)))
 
 
@@ -161,6 +163,10 @@ def day_list(date: str = "", legal_entity_id: int | None = None, p: Principal = 
         for eid, plate in db.execute(select(VehicleAssignment.employee_id, Vehicle.plate).join(Vehicle, Vehicle.id == VehicleAssignment.vehicle_id)
                                      .where(VehicleAssignment.employee_id.in_(ids), active_assignment_filter(day)).order_by(Vehicle.plate)):
             cars.setdefault(eid, []).append(plate)
+        for eid, plate in db.execute(select(LoaderAssignment.employee_id, Vehicle.plate).join(Vehicle, Vehicle.id == LoaderAssignment.vehicle_id)
+                                     .where(LoaderAssignment.employee_id.in_(ids), LoaderAssignment.started_on <= day,
+                                            or_(LoaderAssignment.ended_on.is_(None), LoaderAssignment.ended_on >= day)).order_by(Vehicle.plate)):
+            cars.setdefault(eid, []).append(f"{plate} (грузчик)")
     items = [{"employee_id": e.id, "name": full_name(e), "position": e.position, "vehicles": cars.get(e.id, []), **_plan_out(plans.get(e.id))} for e in people]
     counts = {k: sum(1 for i in items if i["status"] == k) for k in STATUS_LABELS}
     counts["total"] = len(items)

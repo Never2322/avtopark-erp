@@ -19,7 +19,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, deferred, mapped_column, relationship
 
 from app.db import Base
-from app.enums import (ATTENDANCE_SOURCES, TARIFF_KINDS, WORKLOG_KINDS, WORKLOG_SOURCES, ALL_STATUS_CODES, MAINTENANCE_KINDS, OUTBOX_CHANNELS, OUTBOX_STATES, TIRE_SEASONS, ROUTE_PLAN_KINDS, VEHICLE_FINANCE_KINDS, VEHICLE_REPAIR_KINDS, ALL_DOC_KINDS, ANNOUNCEMENT_AUDIENCES, NOTIFICATION_KINDS, CALENDAR_COLORS, CALENDAR_REMIND_MAX, EMPLOYEE_EVENT_KINDS, BACKUP_STATUSES, BILL_KINDS, BILL_STATUSES, CASH_ACCOUNT_KINDS, CASH_OP_KINDS, COUNTERPARTY_KINDS, DOC_TYPES, FINE_PAYERS,
+from app.enums import (ATTENDANCE_SOURCES, TARIFF_KINDS, WORKLOG_KINDS, WORKLOG_SOURCES, ALL_STATUS_CODES, MAINTENANCE_KINDS, OUTBOX_CHANNELS, OUTBOX_STATES, TIRE_SEASONS, ROUTE_PLAN_KINDS, ROUTE_NOTE_KINDS, VEHICLE_FINANCE_KINDS, VEHICLE_REPAIR_KINDS, ALL_DOC_KINDS, ANNOUNCEMENT_AUDIENCES, NOTIFICATION_KINDS, CALENDAR_COLORS, CALENDAR_REMIND_MAX, EMPLOYEE_EVENT_KINDS, BACKUP_STATUSES, BILL_KINDS, BILL_STATUSES, CASH_ACCOUNT_KINDS, CASH_OP_KINDS, COUNTERPARTY_KINDS, DOC_TYPES, FINE_PAYERS,
                        JOB_STAGES, JOB_STATES, ORDER_STATUSES, VAT_RATES,
                        PAYMENT_KINDS, RENTAL_DIRECTIONS, TARIFF_UNITS, TIMESHEET_CODES, READING_KINDS, READING_SOURCES, REQUEST_PRIORITIES, REQUEST_STATUSES, STOCK_MOVE_KINDS,
                        REVIEW_STATES, VEHICLE_CATEGORIES, VEHICLE_STATUSES, WAYBILL_SHIFTS, WAYBILL_STATUSES, check_in)
@@ -1530,3 +1530,40 @@ class RepairResultPhoto(Base):
     removed_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
     remove_reason: Mapped[str] = mapped_column(String(300), default="", server_default="")
     file: Mapped[StoredFile] = relationship()
+
+
+# ---------------------------------------------------------------- грузчики мусоровозов
+
+class LoaderAssignment(Base):
+    """Грузчик закреплён за мусоровозом на период. Отдельно от закрепления водителей: грузчик не становится водителем машины
+    (в талонах, зарплате, маршрутах водитель остаётся прежним). Закрывается датой окончания."""
+    __tablename__ = "loader_assignments"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    vehicle_id: Mapped[int] = mapped_column(ForeignKey("vehicles.id"), index=True)
+    employee_id: Mapped[int] = mapped_column(ForeignKey("employees.id"), index=True)
+    started_on: Mapped[dt.date] = mapped_column(Date)
+    ended_on: Mapped[dt.date | None] = mapped_column(Date)
+    created_at: Mapped[dt.datetime] = mapped_column(TS, server_default=func.now())
+    created_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    vehicle: Mapped[Vehicle] = relationship()
+    employee: Mapped[Employee] = relationship()
+    __table_args__ = (CheckConstraint("ended_on IS NULL OR ended_on >= started_on", name="dates"),)
+
+
+class RouteNote(Base):
+    """Замечание грузчика по маршруту: не вывезли, переполнено, сломан контейнер, нет проезда. Офис отмечает «Разобрались»."""
+    __tablename__ = "route_notes"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    legal_entity_id: Mapped[int] = mapped_column(ForeignKey("legal_entities.id"), index=True)
+    vehicle_id: Mapped[int] = mapped_column(ForeignKey("vehicles.id"))
+    employee_id: Mapped[int] = mapped_column(ForeignKey("employees.id"))
+    note_date: Mapped[dt.date] = mapped_column(Date)
+    kind: Mapped[str] = mapped_column(String(12))
+    street: Mapped[str] = mapped_column(String(200), default="", server_default="")
+    note: Mapped[str] = mapped_column(String(500), default="", server_default="")
+    created_at: Mapped[dt.datetime] = mapped_column(TS, server_default=func.now())
+    resolved_at: Mapped[dt.datetime | None] = mapped_column(TS)
+    resolved_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    vehicle: Mapped[Vehicle] = relationship()
+    employee: Mapped[Employee] = relationship()
+    __table_args__ = (CheckConstraint(check_in("kind", ROUTE_NOTE_KINDS), name="kind"), Index("ix_route_notes_date", "note_date"))

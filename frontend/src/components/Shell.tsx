@@ -28,6 +28,7 @@ const NAV: Group[] = [
     key: "home", title: "Главное", icon: LayoutDashboard, tone: "mint", flat: true,
     items: [
       { to: "/", label: "Главная", icon: LayoutDashboard, any: ["dashboard.view"], end: true, words: "сводка начало" },
+      { to: "/", label: "Мой мусоровоз", icon: Recycle, any: ["loaders.view_own"], unless: ["dashboard.view"], end: true, words: "грузчик машина маршрут замечание" },
       { to: "/calendar", label: "Календарь", icon: CalendarClock, any: ["calendar.view"], words: "даты сроки события" },
       { to: "/reminders", label: "Напоминания", icon: BellRing, any: ["reminders.view"], badge: "reminders", words: "сроки то просрочено" },
       { to: "/announcements", label: "Объявления", icon: Megaphone, any: ["announcements.view"], badge: "news", words: "новости сообщения" },
@@ -61,6 +62,7 @@ const NAV: Group[] = [
       ...withSub("Маршруты", [
         { to: "/my-routes", label: "Мои маршруты", icon: Signpost, any: ["route_plan.view_own"], unless: ["route_plan.view"], feature: "routes", end: true, words: "мусоровоз улицы объезд по дням" },
         { to: "/route-board", label: "Маршруты по дням", icon: CalendarRange, any: ["route_plan.view"], end: true, words: "какой мусоровоз где сегодня работает улицы" },
+        { to: "/loaders", label: "Бригады и замечания", icon: UsersRound, any: ["route_notes.view"], end: true, words: "грузчики бригада экипаж замечания не вывезли контейнер" },
         ...sectionItems("route_plan", "garbage_routes"),
       ]),
       ...withSub("Тоннаж и ходки", [

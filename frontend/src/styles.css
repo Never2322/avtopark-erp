@@ -1157,3 +1157,10 @@ a.deco:hover { border-color: var(--border-strong); text-decoration: none; transf
 .catalog-row { display: flex; justify-content: space-between; gap: 12px; width: 100%; padding: 8px 12px; background: none; border: 0; border-bottom: 1px solid var(--border); color: inherit; text-align: left; cursor: pointer; font: inherit; }
 .catalog-row:last-child { border-bottom: 0; }
 .catalog-row:hover, .catalog-row:focus-visible { background: var(--hover); }
+
+/* грузчики мусоровозов */
+.stack-xs { display: flex; flex-direction: column; gap: 4px; }
+.loader-kinds, .loader-streets { display: flex; flex-wrap: wrap; gap: 6px; }
+.loader-notes li { display: flex; flex-direction: column; gap: 2px; padding: 8px 0; border-bottom: 1px solid var(--border); }
+.loader-notes li:last-child { border-bottom: 0; }
+.loader-notes li.loader-note-row { flex-direction: row; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }

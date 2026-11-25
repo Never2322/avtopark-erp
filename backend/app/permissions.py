@@ -97,6 +97,9 @@ PERMISSIONS: list[tuple[str, str, str]] = [
     *_crud("repair_photos", "Фото ремонта", "фото ремонта (техника после ремонта и что отремонтировали)"),
     ("repair_photos.confirm", "Фото ремонта", "Подтверждать результат ремонта кнопкой «Подтверждено» и снимать подтверждение"),
     ("route_plan.view_own", "Маршруты мусоровозов", "Видеть свои маршруты: в какой день какой маршрут и по каким улицам едет закреплённая машина"),
+    ("loaders.view_own", "Грузчики мусоровозов", "Кабинет грузчика: своя машина и водитель, маршрут на день, тоннаж машины (без денег), замечания по маршруту"),
+    ("route_notes.view", "Грузчики мусоровозов", "Видеть бригады мусоровозов и замечания грузчиков по маршрутам"),
+    ("route_notes.resolve", "Грузчики мусоровозов", "Отмечать замечания грузчиков «Разобрались»"),
     ("hauls.use_own", "Счётчик ходок", "Считать свои ходки на самосвале: личный счётчик водителя, офис и директор его не видят"),
     *_crud("ppe", "СИЗ", "выдачу СИЗ"),
     *_crud("ppe_norms", "СИЗ", "нормы СИЗ (что выдаём и на сколько хватает)"),
@@ -142,6 +145,7 @@ ROLES: list[tuple[str, str, str]] = [
     ("storekeeper", "Кладовщик", "Видит технику, создаёт обращения (склад появится в следующих очередях)"),
     ("accountant", "Бухгалтер", "Смотрит технику, путевые листы, сотрудников (финансы появятся в следующих очередях)"),
     ("employee", "Сотрудник", "Свой профиль и обращения"),
+    ("loader", "Грузчик мусоровоза", "Своя машина и водитель, маршрут на день, тоннаж машины, замечания по маршруту, выход на работу"),
 ]
 
 _REQ_STAFF = ["requests.view", "requests.create"]
@@ -174,6 +178,7 @@ ROLE_DEFAULTS: dict[str, list[str]] = {
     "accountant": ["dashboard.view", "vehicles.view", "waybills.view", "employees.view", "requests.view", "vehicle_files.view",
                    "legal_entities.view"],
     "employee": ["dashboard.view", "requests.view_own", "requests.create"],
+    "loader": ["loaders.view_own", "attendance.mark_own", "requests.view_own", "requests.create", "worklog.view_own"],
 }
 
 
@@ -230,7 +235,7 @@ ROLE_DEFAULTS["storekeeper"] += _all("calendar_events", only=_VIEW) + ["calendar
 # уведомления на сайте получает каждый пользователь по своим делам (отдельного права на них нет).
 ROLE_DEFAULTS["director"] += _all("announcements")
 ROLE_DEFAULTS["dispatcher"] += _all("announcements", only=_WORK)
-for _role in ("director", "mechanic", "dispatcher", "driver", "storekeeper", "accountant", "employee"):
+for _role in ("director", "mechanic", "dispatcher", "driver", "storekeeper", "accountant", "employee", "loader"):
     ROLE_DEFAULTS[_role] += ["announcements.read_own"]
 # Склад (этап 4-1). Допущения: склад ведёт кладовщик (без права убирать записи в архив), директор делает всё, механик видит остатки и
 # списывает детали на ремонт, бухгалтер смотрит. Диспетчеру и водителю склад закрыт.
@@ -285,4 +290,9 @@ ROLE_DEFAULTS["driver"] += ["route_plan.view_own"]
 # Фото ремонта: директор видит, добавляет, подтверждает и убирает в архив; механик фотографирует и описывает ремонт, но не подтверждает.
 ROLE_DEFAULTS["director"] += _all("repair_photos") + ["repair_photos.confirm"]
 ROLE_DEFAULTS["mechanic"] += _all("repair_photos", only=_WORK)
+# Грузчики мусоровозов: грузчик видит свою машину, водителя, маршрут и тоннаж машины (без денег), пишет замечания по маршруту,
+# отмечает выход на работу. Бригады (кто за какой машиной) закрепляют те, кто закрепляет водителей; замечания видят директор
+# и диспетчер, они же отмечают «Разобрались».
+ROLE_DEFAULTS["director"] += ["route_notes.view", "route_notes.resolve"]
+ROLE_DEFAULTS["dispatcher"] += ["route_notes.view", "route_notes.resolve"]
 assert all(c in PERMISSION_CODES for codes in ROLE_DEFAULTS.values() for c in codes)
