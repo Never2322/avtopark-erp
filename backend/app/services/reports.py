@@ -17,9 +17,9 @@ from sqlalchemy.orm import Session, aliased
 
 from app.common import fail
 from app.deps import Principal, Scope
-from app.enums import EFFECTIVE_STATES, FINE_PAYERS, REQUEST_STATUSES, VEHICLE_STATUSES, status_now
-from app.models import (Counterparty, Employee, Fine, LegalEntity, FuelFill, MiscExpense, Order, Rental, RepairBill, ServiceRequest, StockMove, Trip, Vehicle,
-                        VehicleReading, VehicleStatusHistory, VehicleType, Waybill, WeighTicket, WorkLog)
+from app.enums import EFFECTIVE_STATES, FINE_PAYERS, INSURANCE_DOC_KINDS, REQUEST_STATUSES, VEHICLE_STATUSES, status_now
+from app.models import (Counterparty, DossierDoc, Employee, Fine, LegalEntity, FuelFill, MiscExpense, Order, Rental, RepairBill, ServiceRequest, StockMove, Trip, Vehicle,
+                        VehicleFinance, VehicleReading, VehicleStatusHistory, VehicleType, Waybill, WeighTicket, WorkLog)
 from app.services import payroll as pay
 from app.registry import _vehicle_label
 from app.services.fuel import norms, segments
@@ -152,14 +152,14 @@ def active(row: dict, v: Vehicle, keys: list[str]) -> bool:
 
 # ---------------------------------------------------------------- пробег
 
-def km_series(c: Ctx, ids: list[int], upto: dt.datetime) -> dict[int, tuple[list, list]]:
-    """Действующие показания пробега по машинам до момента upto: время и значение, по возрастанию."""
+def km_series(c: Ctx, ids: list[int], upto: dt.datetime, kind: str = "km") -> dict[int, tuple[list, list]]:
+    """Действующие показания (пробег или моточасы) по машинам до момента upto: время и значение, по возрастанию."""
     if not ids:
         return {}
     newer = aliased(VehicleReading)
     rows = c.db.execute(
         select(VehicleReading.vehicle_id, VehicleReading.recorded_at, VehicleReading.value)
-        .where(VehicleReading.vehicle_id.in_(ids), VehicleReading.kind == "km", VehicleReading.review_state.in_(EFFECTIVE_STATES),
+        .where(VehicleReading.vehicle_id.in_(ids), VehicleReading.kind == kind, VehicleReading.review_state.in_(EFFECTIVE_STATES),
                ~exists().where(newer.corrects_id == VehicleReading.id), VehicleReading.recorded_at < upto)
         .order_by(VehicleReading.vehicle_id, VehicleReading.recorded_at, VehicleReading.id)).all()
     out: dict[int, tuple[list, list]] = {}
@@ -184,27 +184,63 @@ def km_between(series: dict, vid: int, a: dt.datetime, b: dt.datetime) -> float:
     return round(max(vals[i_end - 1] - start, 0.0), 1)
 
 
+def value_at(series: dict, vid: int, at: dt.datetime) -> float | None:
+    """Последнее показание до момента at (или None)."""
+    s = series.get(vid)
+    if not s:
+        return None
+    i = bisect.bisect_left(s[0], at)
+    return s[1][i - 1] if i > 0 else None
+
+
+MILEAGE_DAYS_MAX = 62          # дольше — таблица «по дням» не помещается, остаётся только итог по машинам
+
+
 def report_mileage(c: Ctx) -> dict:
+    """Пробег за период, как отчёт по топливу: по каждой машине показание на начало и конец, сколько проехала, сколько дней ездила,
+    в среднем за день. У техники с моточасами — то же в моточасах. Ниже — пробег по каждому дню (по всем машинам и по каждой)."""
     vehicles = load_vehicles(c)
-    months = last_months(c.d_to)
-    b0 = day_start(month_bounds(*months[-1])[1] + dt.timedelta(days=1))
-    series = km_series(c, [v.id for v in vehicles], b0)
-    cols = [Col("name", "Машина")] + [Col(f"m{i}", month_label(y, m), "dec", True) for i, (y, m) in enumerate(months)] + [Col("sum", "Всего", "dec", True)]
-    rows = []
+    ids = [v.id for v in vehicles]
+    km = km_series(c, ids, c.end)
+    hrs = km_series(c, ids, c.end, "engine_hours")
+    days = [c.d_from + dt.timedelta(days=i) for i in range((c.d_to - c.d_from).days + 1)]
+    cols = [Col("name", "Машина"), Col("km_from", "Спидометр на начало, км", "dec"), Col("km_to", "Спидометр на конец, км", "dec"),
+            Col("km", "Пробег, км", "dec", True), Col("km_days", "Дней ездила", "int", True), Col("km_avg", "В среднем за день, км", "dec"),
+            Col("h", "Моточасы за период", "dec", True), Col("h_days", "Дней работала (м/ч)", "int", True)]
+    rows, per_day, per_day_n, by_vehicle = [], {d: 0.0 for d in days}, {d: 0 for d in days}, []
     for v in vehicles:
-        row = {"name": label(v)}
-        for i, (y, m) in enumerate(months):
-            lo, hi = month_bounds(y, m)
-            row[f"m{i}"] = km_between(series, v.id, day_start(lo), day_start(hi + dt.timedelta(days=1)))
-        row["sum"] = round(sum(row[f"m{i}"] for i in range(len(months))), 1)
-        if active(row, v, ["sum"]):
-            rows.append(row)
+        daily = [km_between(km, v.id, day_start(d), day_start(d + dt.timedelta(days=1))) for d in days]
+        hdaily = [km_between(hrs, v.id, day_start(d), day_start(d + dt.timedelta(days=1))) for d in days]
+        total = km_between(km, v.id, c.start, c.end)
+        moving = sum(1 for x in daily if x > 0)
+        row = {"name": label(v), "km_from": value_at(km, v.id, c.start), "km_to": value_at(km, v.id, c.end), "km": total,
+               "km_days": moving, "km_avg": round(total / moving, 1) if moving else None,
+               "h": km_between(hrs, v.id, c.start, c.end), "h_days": sum(1 for x in hdaily if x > 0)}
+        if row["km_from"] is None and row["km_to"] is None and not row["h"]:
+            continue                                    # нет ни одного показания — машину в отчёт не берём
+        if not active(row, v, ["km", "h"]):
+            continue
+        rows.append(row)
+        for d, x in zip(days, daily):
+            per_day[d] += x
+            per_day_n[d] += 1 if x > 0 else 0
+        if total > 0:
+            by_vehicle.append((v, daily))
     tbl = table(cols, rows)
-    totals = tbl["totals"] or []
-    ch = chart([month_label(y, m) for y, m in months], totals[1:-1] if totals else [], "км")
-    return {"title": "Пробег по месяцам", "table": tbl, "chart": ch, "extras": [],
-            "note": "Последние 12 месяцев по показаниям одометра: разница между показаниями на границах месяца. "
-                    "В первом месяце учёта считается от первого показания. Выбранный месяц — последний в таблице."}
+    extras = []
+    if len(days) <= MILEAGE_DAYS_MAX:
+        extras.append(extra("Пробег по дням, км", [{"key": "d", "label": "День", "kind": "date"}, {"key": "km", "label": "Всего, км", "kind": "dec", "sum": True},
+                                                  {"key": "n", "label": "Машин ездило", "kind": "int"}]
+                            + [{"key": f"v{v.id}", "label": v.plate, "kind": "dec", "sum": True} for v, _ in by_vehicle],
+                            [[d.isoformat(), round(per_day[d], 1), per_day_n[d]] + [daily[i] or None for _, daily in by_vehicle] for i, d in enumerate(days)],
+                            c, total_label=True))
+    else:
+        c.hide(f"Таблица «по дням» показывается за период не длиннее {MILEAGE_DAYS_MAX} дней")
+    ch = chart([d.strftime("%d.%m") for d in days], [per_day[d] for d in days], "км") if len(days) <= MILEAGE_DAYS_MAX else None
+    return {"title": "Пробег за период", "table": tbl, "chart": ch, "extras": extras,
+            "note": "Пробег — разница показаний спидометра на конец и на начало периода (за день — на конец и начало дня). Если до начала "
+                    "периода показаний не было, счёт идёт от первого показания в периоде. «Дней ездила» — дни, в которые спидометр вырос. "
+                    "Моточасы считаются так же, по показаниям моточасов."}
 
 
 # ---------------------------------------------------------------- топливо
@@ -290,6 +326,17 @@ def money_parts(c: Ctx, ids: list[int]) -> dict[str, dict[int, float]]:
                              sc.cond(Fine.legal_entity_id), Fine.fine_date >= a, Fine.fine_date <= b)
     parts["stock"] = grouped(c, StockMove.vehicle_id, StockMove.qty * StockMove.price, StockMove.vehicle_id.in_(ids), StockMove.archived_at.is_(None),
                              StockMove.kind.in_(("issue", "writeoff")), sc.cond(StockMove.legal_entity_id), StockMove.move_date >= a, StockMove.move_date <= b)
+    # счета, по которым детали пришли на склад: в затраты по машине идут не они, а выдача деталей со склада на машину (иначе дважды)
+    to_stock = exists().where(StockMove.bill_id == RepairBill.id, StockMove.kind == "receipt", StockMove.archived_at.is_(None))
+    parts["bills_net"] = grouped(c, RepairBill.vehicle_id, RepairBill.total, RepairBill.vehicle_id.in_(ids), RepairBill.archived_at.is_(None), ~to_stock,
+                                 sc.cond(RepairBill.legal_entity_id), RepairBill.bill_date >= a, RepairBill.bill_date <= b)
+    parts["other"] = grouped(c, VehicleFinance.vehicle_id, VehicleFinance.amount, VehicleFinance.vehicle_id.in_(ids), VehicleFinance.kind == "expense",
+                             VehicleFinance.archived_at.is_(None), sc.cond(VehicleFinance.legal_entity_id), VehicleFinance.op_date >= a, VehicleFinance.op_date <= b)
+    ins_day = func.coalesce(DossierDoc.issued_on, func.date(DossierDoc.created_at))
+    parts["insurance"] = {vid: float(t or 0) for vid, t in c.db.execute(
+        select(DossierDoc.vehicle_id, func.sum(DossierDoc.cost)).join(Vehicle, Vehicle.id == DossierDoc.vehicle_id)
+        .where(DossierDoc.vehicle_id.in_(ids), DossierDoc.kind.in_(INSURANCE_DOC_KINDS), DossierDoc.cost.is_not(None), DossierDoc.archived_at.is_(None),
+               sc.cond(Vehicle.legal_entity_id), ins_day >= a, ins_day <= b).group_by(DossierDoc.vehicle_id))}
     parts["orders"] = grouped(c, Order.vehicle_id, Order.amount, Order.vehicle_id.in_(ids), Order.archived_at.is_(None), Order.status == "done",
                               sc.cond(Order.legal_entity_id), Order.order_date >= a, Order.order_date <= b)
     parts["rent_in"], parts["rent_out"] = {}, {}
@@ -311,35 +358,43 @@ def income_total(parts: dict, vid: int) -> float:
     return sum(parts.get(k, {}).get(vid, 0.0) for k in ("orders", "rent_out"))
 
 
+COST_KEYS = ("fuel", "bills_net", "requests", "fines", "stock", "insurance", "other")
+
+
+def vehicle_cost(parts: dict, vid: int) -> float:
+    """Все затраты на машину: топливо, ремонт (счета и обращения без счёта), штрафы компании, детали со склада, страховка, прочие затраты."""
+    return sum(parts.get(k, {}).get(vid, 0.0) for k in COST_KEYS)
+
+
 def report_costs(c: Ctx) -> dict:
     vehicles = load_vehicles(c)
     ids = [v.id for v in vehicles]
     parts = money_parts(c, ids)
-    series = km_series(c, ids, c.end)
-    cols = [Col("name", "Машина"), Col("fuel", "Топливо, ₽", "money", True), Col("bills", "Ремонт: счета, ₽", "money", True),
-            Col("requests", "Ремонт: обращения без счёта, ₽", "money", True), Col("fines", "Штрафы (платит компания), ₽", "money", True),
-            Col("rent_in", "Аренда: берём, ₽", "money", True), Col("cost", "Всего затрат, ₽", "money", True),
-            Col("orders", "Доходы: заказы без НДС, ₽", "money", True), Col("rent_out", "Доходы: аренда, ₽", "money", True),
-            Col("result", "Доходы минус затраты, ₽", "money", True), Col("per_km", "Затраты на 1 км, ₽", "money"),
-            Col("stock", "Детали со склада (справочно), ₽", "money", True)]
+    liters = {vid: d["liters"] for vid, d in fuel_data(c, ids)[0].items()} if c.sc("fuel_fills.view") else {}
+    cols = [Col("name", "Машина"), Col("liters", "Топливо, л", "dec", True), Col("fuel", "Топливо, ₽", "money", True),
+            Col("bills_net", "Ремонт: счета, ₽", "money", True), Col("requests", "Ремонт: обращения без счёта, ₽", "money", True),
+            Col("fines", "Штрафы (платит компания), ₽", "money", True), Col("stock", "Детали со склада, ₽", "money", True),
+            Col("insurance", "Страховка, ₽", "money", True), Col("other", "Прочие затраты, ₽", "money", True),
+            Col("cost", "Всего затрат, ₽", "money", True)]
     rows = []
     for v in vehicles:
-        km = km_between(series, v.id, c.start, c.end)
-        cost, income = cost_total(parts, v.id), income_total(parts, v.id)
-        row = {"name": label(v), **{k: fl(parts.get(k, {}).get(v.id)) for k in ("fuel", "bills", "requests", "fines", "rent_in", "orders", "rent_out", "stock")},
-               "cost": fl(cost), "result": fl(income - cost), "per_km": fl(cost / km) if km > 0 and cost else None}
-        if active(row, v, ["cost", "orders", "rent_out"]):
+        cost = vehicle_cost(parts, v.id)
+        row = {"name": label(v), "liters": round(liters.get(v.id, 0.0), 1), **{k: fl(parts.get(k, {}).get(v.id)) for k in COST_KEYS}, "cost": fl(cost)}
+        if active(row, v, ["cost", "liters"]):
             rows.append(row)
+    to_stock = exists().where(StockMove.bill_id == RepairBill.id, StockMove.kind == "receipt", StockMove.archived_at.is_(None))
     free = c.money and c.db.scalar(select(func.coalesce(func.sum(RepairBill.total), 0)).where(
-        RepairBill.vehicle_id.is_(None), RepairBill.archived_at.is_(None), c.money.cond(RepairBill.legal_entity_id), RepairBill.bill_date >= c.d_from, RepairBill.bill_date <= c.d_to))
-    if free:                                             # счета без машины (например, запчасти на склад) не пропадают из затрат
-        rows.append({"name": "Без привязки к технике", "bills": fl(free), "cost": fl(free), "result": -fl(free)})
+        RepairBill.vehicle_id.is_(None), RepairBill.archived_at.is_(None), ~to_stock, c.money.cond(RepairBill.legal_entity_id),
+        RepairBill.bill_date >= c.d_from, RepairBill.bill_date <= c.d_to))
+    if free:                                             # счета без машины (кроме закупок на склад) не пропадают из затрат
+        rows.append({"name": "Без привязки к технике", "bills_net": fl(free), "cost": fl(free)})
     tbl = table(cols, rows)
     ch = chart([short(r["name"].split(" · ")[0]) for r in rows], [r["cost"] for r in rows], "₽", [r["name"] for r in rows])
-    return {"title": "Затраты и доходы по технике", "table": tbl, "chart": ch, "extras": [],
-            "note": "Строка «Без привязки к технике»: счета на ремонт и запчасти, у которых не выбрана машина. Топливо по заправкам, ремонт по счетам на ремонт (по дате счёта) и по фактическим затратам закрытых обращений, у которых нет счёта "
-                    "(чтобы не считать дважды), штрафы только те, что платит компания, аренда по суткам внутри периода. Доходы: выполненные заказы без НДС "
-                    "и аренда, которую сдаём. Детали со склада показаны справочно и в затраты не входят: они уже учтены в счетах, по которым их принимали."}
+    return {"title": "Затраты по технике", "table": tbl, "chart": ch, "extras": [],
+            "note": "Топливо — по заправкам (литры и сумма). Ремонт — по счетам (по дате счёта) и по фактическим затратам закрытых обращений без счёта. "
+                    "Детали со склада — то, что выдано или списано на машину, по закупочной цене; счета, по которым детали пришли на склад, "
+                    "в затраты не идут, чтобы не считать дважды. Штрафы — только те, что платит компания. Страховка — стоимость полисов ОСАГО и КАСКО "
+                    "по дате выдачи. Прочие затраты — внесённые в «Затраты на спецтехнику». «Без привязки к технике» — счета без машины, кроме закупок на склад."}
 
 
 def report_repairs(c: Ctx) -> dict:
@@ -1059,16 +1114,32 @@ def matrix_sheet(m: dict) -> tuple[list[list], list]:
 
 
 def report_tonnage(c: Ctx) -> dict:
-    """Тоннаж за месяц по мусоровозам и самосвалам: сколько ходок и тонн привезла каждая машина. Тонны берутся с талонов весов
+    return tonnage_report(c, garbage=False)
+
+
+def report_garbage(c: Ctx) -> dict:
+    return tonnage_report(c, garbage=True)
+
+
+def tonnage_report(c: Ctx, garbage: bool) -> dict:
+    """Тоннаж за месяц: в обычном отчёте — самосвалы и другая техника с тоннажем, в отчёте «Мусоровозы» — только мусоровозы, и у них ещё
+    пробег, топливо и затраты по машине. Сколько ходок и тонн привезла каждая машина. Тонны берутся с талонов весов
     (нетто), которые водители прикладывают в «Тоннаже». Талон без тоннажа считается ходкой, но в тонны не входит: его вес ещё нужно внести
     в «Журнале тоннажа»; такие талоны и возможные повторы одного талона перечислены в отдельной таблице."""
     db = c.db
     sc = c.sc("weigh_tickets.view")
     if not sc:
         raise fail(403, "forbidden", "Нет доступа к тоннажу")
-    tickets = list(db.scalars(select(WeighTicket).where(WeighTicket.ticket_date >= c.d_from, WeighTicket.ticket_date <= c.d_to, WeighTicket.archived_at.is_(None),
-                                                        sc.cond(WeighTicket.legal_entity_id)).order_by(WeighTicket.ticket_date, WeighTicket.id)))
-    flagged = list(db.scalars(select(Vehicle).where(Vehicle.tonnage.is_(True), Vehicle.archived_at.is_(None), sc.cond(Vehicle.legal_entity_id))))
+    from app.services import routes as routes_svc
+    waste = {v.id for v in routes_svc.waste_vehicles(db, sc.cond(Vehicle.legal_entity_id))}
+    waste |= set(routes_svc.waste_vehicle_ids(db, list(db.scalars(select(WeighTicket.vehicle_id).where(
+        WeighTicket.ticket_date >= c.d_from, WeighTicket.ticket_date <= c.d_to, sc.cond(WeighTicket.legal_entity_id)).distinct()))))
+    mine = (lambda vid: vid in waste) if garbage else (lambda vid: vid not in waste)
+    tickets = [t for t in db.scalars(select(WeighTicket).where(WeighTicket.ticket_date >= c.d_from, WeighTicket.ticket_date <= c.d_to, WeighTicket.archived_at.is_(None),
+                                                               sc.cond(WeighTicket.legal_entity_id)).order_by(WeighTicket.ticket_date, WeighTicket.id)) if mine(t.vehicle_id)]
+    flagged = [v for v in db.scalars(select(Vehicle).where(Vehicle.tonnage.is_(True), Vehicle.archived_at.is_(None), sc.cond(Vehicle.legal_entity_id))) if mine(v.id)]
+    if garbage:
+        flagged += [v for v in routes_svc.waste_vehicles(db, sc.cond(Vehicle.legal_entity_id)) if v not in flagged]
     ids = {t.vehicle_id for t in tickets} | {v.id for v in flagged}
     vehicles = {v.id: v for v in db.scalars(select(Vehicle).where(Vehicle.id.in_(ids)))} if ids else {}
     types = {t.id: t.name for t in db.scalars(select(VehicleType))}
@@ -1110,6 +1181,26 @@ def report_tonnage(c: Ctx) -> dict:
         counted = a["trips"] - a["pending"]
         rows.append({"veh": label(v), "type": types.get(v.type_id, ""), "ent": ents.get(v.legal_entity_id, ""), "trips": a["trips"], "tons": round(a["tons"], 3),
                      "avg": round(a["tons"] / counted, 3) if counted else None, "cost": round(a["cost"], 2), "pending": a["pending"]})
+    if garbage:                                       # мусоровозы: ещё пробег, топливо и затраты по машине
+        vid_of = {label(v): v.id for v in vehicles.values()}
+        vids = list(vid_of.values())
+        series = km_series(c, vids, c.end)
+        fuel = fuel_data(c, vids)[0] if c.sc("fuel_fills.view") else {}
+        parts = money_parts(c, vids) if c.money else {}
+        for r in rows:
+            vid = vid_of.get(r["veh"])
+            r["km"] = km_between(series, vid, c.start, c.end)
+            f = fuel.get(vid, {})
+            r["liters"], r["per100"] = round(f.get("liters", 0.0), 1), f.get("per100")
+            r["fuel"] = fl(f.get("amount"))
+            r["costs"] = fl(vehicle_cost(parts, vid)) if parts else None
+            r["t_per_l"] = round(r["tons"] / r["liters"], 3) if r["liters"] else None
+        money = bool(c.money)
+        if not money:
+            c.hide("Затраты и топливо в рублях: нет права видеть деньги в отчётах")
+        cols = cols[:-1] + [Col("km", "Пробег, км", "dec", True), Col("liters", "Топливо, л", "dec", True), Col("per100", "Расход, л/100 км", "dec"),
+                            Col("fuel", "Топливо, ₽", "money", True, money), Col("costs", "Все затраты на машину, ₽", "money", True, money),
+                            Col("t_per_l", "Тонн на 1 л", "ton"), cols[-1]]
     rows.sort(key=lambda r: (-r["tons"], r["veh"]))
     top = [r for r in rows if r["tons"]][:10]
     ch = chart([short(r["veh"].split(" · ")[0], 12) for r in top], [r["tons"] for r in top], "т", [r["veh"] for r in top])
@@ -1141,7 +1232,14 @@ def report_tonnage(c: Ctx) -> dict:
     if pending:
         note += (f" Внимание: у {pending} талонов тоннаж ещё не внесён (программа не смогла уверенно прочитать вес с фото). Они посчитаны как ходки, но тонн в итоге нет: "
                  "откройте «Журнал тоннажа», отберите «Тоннаж не внесён» и впишите вес по фото.")
-    return {"title": f"Тоннаж за {MONTHS_RU[c.d_from.month - 1]} {c.d_from.year}", "table": table(cols, rows), "chart": ch, "extras": extras, "note": note}
+    if garbage:
+        note = note.replace("В таблице машины, по которым ведётся тоннаж", "В таблице все мусоровозы") + (
+            " Пробег — по показаниям спидометра, топливо — по заправкам за месяц, «Все затраты на машину» — как в отчёте «Затраты по технике»: "
+            "топливо, ремонт, детали со склада, штрафы, страховка и прочие затраты.")
+    else:
+        note += " Мусоровозы здесь не показываются: для них отдельный отчёт «Мусоровозы за месяц»."
+    title = "Мусоровозы" if garbage else "Тоннаж самосвалов"
+    return {"title": f"{title} за {MONTHS_RU[c.d_from.month - 1]} {c.d_from.year}", "table": table(cols, rows), "chart": ch, "extras": extras, "note": note}
 
 
 @dataclass
@@ -1157,9 +1255,9 @@ class Report:
 
 REPORTS: dict[str, Report] = {r.name: r for r in (
     Report("month", "Итоги месяца", "month", ("vehicles.view",), report_month, desc="Всё за месяц по каждой машине одной таблицей"),
-    Report("mileage", "Пробег по месяцам", "year12", ("vehicles.view",), report_mileage, desc="Сколько проехала каждая машина за 12 месяцев"),
+    Report("mileage", "Пробег", "range", ("vehicles.view",), report_mileage, desc="Сколько проехала каждая машина за период и по дням"),
     Report("fuel", "Топливо", "range", ("fuel_fills.view",), report_fuel, desc="Литры, расход на 100 км и сравнение с нормой"),
-    Report("costs", "Затраты и доходы по технике", "range", ("vehicles.view",), report_costs, True, "Топливо, ремонт, штрафы, аренда и доходы по машинам"),
+    Report("costs", "Затраты по технике", "range", ("vehicles.view",), report_costs, True, "Топливо, ремонт, детали со склада, штрафы и страховка по машинам"),
     Report("repairs", "Ремонты по месяцам", "year12", ("vehicles.view",), report_repairs, True, "Во что обошёлся ремонт каждой машины по месяцам"),
     Report("waybill_fuel", "Расход по путевым листам", "range", ("waybills.view",), report_waybill_fuel, desc="Расход топлива по закрытым листам и перерасход"),
     Report("downtime", "Простои", "range", ("vehicles.view",), report_downtime, desc="Сколько суток машина в работе, на ремонте, в отпуске"),
@@ -1168,8 +1266,10 @@ REPORTS: dict[str, Report] = {r.name: r for r in (
            desc="Сколько заработал каждый сотрудник за месяц по часам работы и ремонта, итог к выплате"),
     Report("garbage_salary", "Зарплата мусоровозов", "month", ("worklog.view",), report_garbage_salary,
            desc="Ходки, тонны и заработок водителей мусоровозов за месяц: за тонны, за ремонт, премии, удержания и остаток к выплате"),
-    Report("tonnage", "Тоннаж за месяц", "month", ("weigh_tickets.view",), report_tonnage,
-           desc="Сколько тонн привёз каждый мусоровоз и самосвал за месяц по талонам весов, итог"),
+    Report("tonnage", "Тоннаж самосвалов", "month", ("weigh_tickets.view",), report_tonnage,
+           desc="Сколько тонн привёз каждый самосвал за месяц по талонам весов, итог"),
+    Report("garbage", "Мусоровозы за месяц", "month", ("weigh_tickets.view",), report_garbage,
+           desc="Тоннаж мусоровозов, ходки, пробег, топливо и все затраты по каждой машине"),
     Report("day", "Отчёт за день", "day", ("worklog.view", "waybills.view", "fuel_fills.view"), report_day,
            desc="По водителям за один день: техника, путевой лист, спидометр, топливо, часы и заработок"),
 )}

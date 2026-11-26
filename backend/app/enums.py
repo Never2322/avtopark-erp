@@ -31,6 +31,8 @@ STATUS_NEEDS_REASON = {"in_repair"}
 
 VEHICLE_CATEGORIES = {"truck": "Грузовой", "special": "Спецтехника", "car": "Легковой", "trailer": "Прицеп", "other": "Прочее"}
 READING_KINDS = {"km": "Пробег, км", "engine_hours": "Моточасы, ч"}
+# Типы техники без спидометра: показания только в моточасах (километры вводить нельзя).
+HOURS_ONLY_TYPES = ("loader", "grader", "excavator", "bulldozer")
 READING_SOURCES = {"manual": "Ручной ввод", "waybill": "Путевой лист", "gps": "GPS", "import": "Импорт", "fuel": "Заправка"}
 # ok и confirmed учитываются в текущих показаниях; pending ждёт проверки; rejected отклонено.
 REVIEW_STATES = ("ok", "pending", "confirmed", "rejected")
@@ -48,19 +50,19 @@ REQUEST_STATUSES = {
 }
 REQUEST_PRIORITIES = {"low": "Низкий", "normal": "Обычный", "high": "Высокий", "urgent": "Срочный"}
 REQUEST_OPEN = ("new", "diagnostics", "approval", "in_progress", "waiting_parts", "done")
-# Откуда куда можно переводить обращение. Всё остальное запрещено.
+# Откуда куда можно переводить обращение. Всё остальное запрещено. Закрыть можно на любом этапе (не из «Выполнено» — с комментарием).
 REQUEST_FLOW = {
-    "new": ("diagnostics", "cancelled"),
-    "diagnostics": ("approval", "in_progress", "cancelled"),
-    "approval": ("in_progress", "diagnostics", "cancelled"),
-    "in_progress": ("waiting_parts", "done"),
-    "waiting_parts": ("in_progress", "done"),
+    "new": ("diagnostics", "closed", "cancelled"),
+    "diagnostics": ("approval", "in_progress", "closed", "cancelled"),
+    "approval": ("in_progress", "diagnostics", "closed", "cancelled"),
+    "in_progress": ("waiting_parts", "done", "closed"),
+    "waiting_parts": ("in_progress", "done", "closed"),
     "done": ("closed", "in_progress"),
     "closed": (),
     "cancelled": (),
 }
 # Эти переходы — решение о согласовании: нужно отдельное право requests.approve.
-REQUEST_APPROVAL_STEPS = {("approval", "in_progress"), ("approval", "cancelled")}
+REQUEST_APPROVAL_STEPS = {("approval", "in_progress"), ("approval", "cancelled"), ("approval", "closed")}
 
 WAYBILL_STATUSES = {"draft": "Черновик", "open": "Открыт", "closed": "Закрыт", "cancelled": "Аннулирован"}
 WAYBILL_SHIFTS = {"day": "Дневная", "night": "Ночная", "full": "Сутки"}
@@ -96,6 +98,8 @@ VEHICLE_DOC_KINDS = {
     "permit": "Разрешение или пропуск",
     "other": "Другой документ",
 }
+# Полисы, у которых бывает стоимость: она идёт в затраты по машине.
+INSURANCE_DOC_KINDS = ("osago", "kasko")
 ALL_DOC_KINDS = {**EMPLOYEE_DOC_KINDS, **VEHICLE_DOC_KINDS}
 # Виды без срока действия: для них даты окончания не спрашиваем.
 DOC_KINDS_NO_EXPIRY = {"photo"}

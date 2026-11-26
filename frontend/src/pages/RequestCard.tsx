@@ -45,16 +45,17 @@ function TransitionModal({ r, to, onClose }: { r: Detail; to: { status: string; 
     onError: f.fail,
   });
   const cancel = to.status === "cancelled";
-  const suggested = to.status === "in_progress" && r.status !== "waiting_parts" ? "in_repair" : to.status === "done" ? "in_work" : "";
+  const early = to.status === "closed" && r.status !== "done";   // закрыть, не дожидаясь «Выполнено»: нужна причина
+  const suggested = to.status === "in_progress" && r.status !== "waiting_parts" ? "in_repair" : to.status === "done" || early ? "in_work" : "";
   return (
     <Modal title={transitionLabel(r.status, to.status)} onClose={onClose} footer={<>
       <Button onClick={onClose}>Отмена</Button>
-      <Button variant={cancel ? "danger" : "primary"} loading={m.isPending} onClick={() => { f.clear(); m.mutate(); }}>{cancel ? (r.status === "approval" ? "Отклонить" : "Отменить обращение") : "Перевести"}</Button>
+      <Button variant={cancel ? "danger" : "primary"} loading={m.isPending} onClick={() => { f.clear(); m.mutate(); }}>{cancel ? (r.status === "approval" ? "Отклонить" : "Отменить обращение") : to.status === "closed" ? "Закрыть" : "Перевести"}</Button>
     </>}>
       <div className="stack">
         <div className="row wrap"><RequestStatus code={r.status} label={r.status_label} /><ArrowRight size={16} aria-hidden /><strong>{to.label}</strong></div>
         {f.formError && !f.errors.comment && !f.errors.vehicle_status && <Alert tone="error">{f.formError}</Alert>}
-        <Field label={cancel ? "Причина отмены (обязательно)" : "Комментарий (по желанию)"} error={f.errors.comment}>
+        <Field label={cancel ? "Причина отмены (обязательно)" : early ? "Почему закрываете (обязательно)" : "Комментарий (по желанию)"} error={f.errors.comment}>
           <textarea className="input" value={f.values.comment} maxLength={2000} onChange={(e) => f.set("comment", e.target.value)} />
         </Field>
         {r.actions.set_vehicle_status && !cancel && (

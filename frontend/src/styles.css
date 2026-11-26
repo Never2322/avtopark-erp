@@ -1164,3 +1164,94 @@ a.deco:hover { border-color: var(--border-strong); text-decoration: none; transf
 .loader-notes li { display: flex; flex-direction: column; gap: 2px; padding: 8px 0; border-bottom: 1px solid var(--border); }
 .loader-notes li:last-child { border-bottom: 0; }
 .loader-notes li.loader-note-row { flex-direction: row; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+
+/* бригады и кабинет грузчика: плитки с кольцами, как у недели на главной, карточки машин с номером-«табличкой» */
+.crew-hero { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; }
+.crew-tile { --tone: 53, 199, 181; min-height: 104px;
+  background: radial-gradient(120% 150% at 100% 0%, rgba(var(--tone), 0.18), transparent 60%), var(--card); }
+.crew-tile::after { border-color: rgba(var(--tone), 0.24); box-shadow: 0 0 0 14px rgba(var(--tone), 0.06), 0 0 0 30px rgba(var(--tone), 0.03); }
+.crew-tile.tone-blue { --tone: 85, 169, 232; }
+.crew-tile.tone-amber { --tone: 242, 184, 75; }
+.crew-tile.tone-rose { --tone: 241, 108, 108; }
+.crew-tile-ico { position: relative; z-index: 1; flex: none; width: 46px; height: 46px; border-radius: 14px; display: grid; place-items: center;
+  color: rgb(var(--tone)); background: rgba(var(--tone), 0.14); box-shadow: inset 0 0 0 1px rgba(var(--tone), 0.25); }
+html[data-theme="light"] .crew-tile.tone-mint, html[data-theme="light"] .crew-tile:not([class*="tone-"]) { --tone: 10, 117, 105; }
+html[data-theme="light"] .crew-tile.tone-blue { --tone: 26, 104, 173; }
+html[data-theme="light"] .crew-tile.tone-amber { --tone: 154, 91, 6; }
+html[data-theme="light"] .crew-tile.tone-rose { --tone: 196, 54, 54; }
+.crew-tile.tone-mint { --tone: 53, 199, 181; }
+html[data-theme="light"] .crew-tile.tone-mint { --tone: 10, 117, 105; }
+
+.plate-tag { display: inline-flex; align-items: center; padding: 3px 9px; border-radius: 7px; font-weight: 700; font-size: 17px; letter-spacing: 0.06em;
+  font-variant-numeric: tabular-nums; background: #f7fafb; color: #10181c; border: 2px solid #10181c; box-shadow: 0 2px 0 rgba(0, 0, 0, 0.25); width: fit-content; }
+.plate-tag.sm { font-size: 12px; padding: 1px 6px; border-width: 1.5px; border-radius: 5px; box-shadow: none; }
+
+.crew-card { position: relative; overflow: hidden; display: flex; flex-direction: column; gap: 14px;
+  background: radial-gradient(110% 120% at 100% 0%, rgba(53, 199, 181, 0.12), transparent 55%), var(--card); }
+.crew-card::after { content: ""; position: absolute; right: -40px; top: -40px; width: 110px; height: 110px; border-radius: 50%; pointer-events: none;
+  border: 1px solid rgba(53, 199, 181, 0.2); box-shadow: 0 0 0 16px rgba(53, 199, 181, 0.04), 0 0 0 34px rgba(53, 199, 181, 0.025); }
+.crew-card.is-empty { background: radial-gradient(110% 120% at 100% 0%, rgba(242, 184, 75, 0.12), transparent 55%), var(--card); }
+.crew-card.is-empty::after { border-color: rgba(242, 184, 75, 0.22); box-shadow: 0 0 0 16px rgba(242, 184, 75, 0.05), 0 0 0 34px rgba(242, 184, 75, 0.03); }
+.crew-card > * { position: relative; z-index: 1; }
+.crew-card-head { display: flex; align-items: center; gap: 12px; }
+.crew-card-head .job-title { display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 0; }
+.crew-truck-ico { flex: none; width: 44px; height: 44px; border-radius: 13px; display: grid; place-items: center; color: var(--mint-ink);
+  background: linear-gradient(150deg, var(--mint), var(--success)); box-shadow: 0 6px 16px rgba(53, 199, 181, 0.3); }
+.crew-card.is-empty .crew-truck-ico { background: linear-gradient(150deg, #f2b84b, #e8913a); color: #2a1a02; box-shadow: 0 6px 16px rgba(242, 184, 75, 0.28); }
+.crew-people { display: flex; flex-direction: column; gap: 6px; }
+.crew-person { display: flex; align-items: center; gap: 10px; padding: 7px 10px; border-radius: 12px; background: var(--field); border: 1px solid var(--border); }
+.crew-person.is-driver { background: linear-gradient(90deg, rgba(85, 169, 232, 0.12), var(--field) 70%); }
+.crew-person-name { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.crew-ava { flex: none; width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; font-size: 12px; font-weight: 700;
+  background: rgba(53, 199, 181, 0.16); color: var(--mint); box-shadow: inset 0 0 0 1px rgba(53, 199, 181, 0.35); }
+.crew-ava.drv { background: rgba(85, 169, 232, 0.16); color: var(--info); box-shadow: inset 0 0 0 1px rgba(85, 169, 232, 0.35); }
+.crew-card-foot { display: flex; flex-wrap: wrap; gap: 8px; justify-content: space-between; }
+
+.crew-notes-card .loader-notes li.loader-note-row { padding: 10px 12px; margin-bottom: 6px; border: 1px solid var(--border); border-left: 4px solid var(--faint);
+  border-radius: 12px; background: var(--field); }
+.loader-notes li.note-error { border-left-color: var(--error); }
+.loader-notes li.note-warning { border-left-color: var(--warning); }
+.loader-notes li.note-info { border-left-color: var(--info); }
+.loader-notes li.is-done { opacity: 0.65; }
+.crew-calm { display: flex; align-items: center; gap: 10px; padding: 14px; border-radius: 12px; color: var(--success);
+  background: linear-gradient(90deg, rgba(39, 199, 138, 0.12), transparent); }
+.crew-calm span { color: var(--text); }
+.crew-search { position: relative; }
+.crew-search svg { position: absolute; left: 11px; top: 50%; transform: translateY(-50%); color: var(--text-2); pointer-events: none; }
+.crew-search .input { padding-left: 34px; }
+.crew-pick { max-height: 50vh; overflow: auto; }
+.crew-pick li { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 2px; border-bottom: 1px solid var(--border); }
+.crew-pick li:last-child { border-bottom: 0; }
+.crew-pick-name { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+
+/* кабинет грузчика: приветственная плашка */
+.loader-hero { position: relative; overflow: hidden; display: flex; align-items: center; gap: 16px; flex-wrap: wrap; padding: 20px;
+  background: radial-gradient(120% 160% at 100% 0%, rgba(53, 199, 181, 0.22), transparent 55%), radial-gradient(90% 140% at 0% 100%, rgba(85, 169, 232, 0.14), transparent 60%), var(--card); }
+.loader-hero::after { content: ""; position: absolute; right: -50px; bottom: -50px; width: 150px; height: 150px; border-radius: 50%; pointer-events: none;
+  border: 1px solid rgba(53, 199, 181, 0.22); box-shadow: 0 0 0 18px rgba(53, 199, 181, 0.05), 0 0 0 40px rgba(53, 199, 181, 0.03); }
+.loader-hero > * { position: relative; z-index: 1; }
+.loader-hero-main { display: flex; flex-direction: column; gap: 6px; flex: 1; min-width: 200px; }
+.loader-hero-stats { display: flex; gap: 10px; flex-wrap: wrap; }
+.loader-hero-stat { display: flex; flex-direction: column; align-items: center; min-width: 86px; padding: 10px 12px; border-radius: 14px; background: var(--field); border: 1px solid var(--border); }
+.loader-hero-stat strong { font-size: 22px; font-variant-numeric: tabular-nums; line-height: 1.1; }
+.loader-hero-stat span { font-size: 11px; color: var(--text-2); text-transform: uppercase; letter-spacing: 0.04em; }
+.loader-hero-stat.accent { background: linear-gradient(160deg, var(--mint), var(--success)); border-color: transparent; box-shadow: 0 6px 16px rgba(53, 199, 181, 0.3); }
+.loader-hero-stat.accent strong, .loader-hero-stat.accent span { color: var(--mint-ink); }
+
+/* затраты на спецтехнику: плитки статей */
+.vc-cats { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; }
+.vc-cat { --tone: 53, 199, 181; position: relative; overflow: hidden; display: flex; flex-direction: column; align-items: flex-start; gap: 4px; padding: 14px;
+  text-align: left; color: var(--text); font: inherit; cursor: pointer; transition: border-color 0.15s, transform 0.15s;
+  background: radial-gradient(120% 140% at 100% 0%, rgba(var(--tone), 0.14), transparent 60%), var(--card); }
+.vc-cat:hover { border-color: var(--border-strong); transform: translateY(-1px); }
+.vc-cat.on { border-color: rgb(var(--tone)); box-shadow: 0 0 0 1px rgb(var(--tone)) inset; }
+.vc-cat.tone-blue { --tone: 85, 169, 232; }
+.vc-cat.tone-amber { --tone: 242, 184, 75; }
+.vc-cat.tone-rose { --tone: 241, 108, 108; }
+html[data-theme="light"] .vc-cat { --tone: 10, 117, 105; }
+html[data-theme="light"] .vc-cat.tone-blue { --tone: 26, 104, 173; }
+html[data-theme="light"] .vc-cat.tone-amber { --tone: 154, 91, 6; }
+html[data-theme="light"] .vc-cat.tone-rose { --tone: 196, 54, 54; }
+.vc-cat-ico { width: 30px; height: 30px; border-radius: 9px; display: grid; place-items: center; color: rgb(var(--tone)); background: rgba(var(--tone), 0.14); }
+.vc-cat-name { font-size: 12px; color: var(--text-2); }
+.vc-cat strong { font-size: 18px; font-variant-numeric: tabular-nums; }

@@ -68,7 +68,7 @@ def test_full_request_path_with_approval(make_client, world):
     req = open_request(driver, world.va1)
     assert req["status"] == "new" and req["number"] == 1
     assert go(mech, req["id"], "diagnostics").status_code == 200
-    assert go(mech, req["id"], "closed").status_code == 409                          # перескочить нельзя
+    assert go(mech, req["id"], "done").status_code == 409                            # перескочить нельзя
     assert go(mech, req["id"], "approval", "Нужна замена КПП, 85 000 ₽").status_code == 200
     r = go(mech, req["id"], "in_progress")                                           # механик сам себе согласовать не может
     assert r.status_code == 403 and r.json()["code"] == "approve_required"

@@ -5,7 +5,7 @@ import {
   AlertTriangle, Archive, CheckCircle2, Clock, Download, ExternalLink, FileText, ImagePlus, Pencil, Plus, RotateCcw, Truck, Upload, User as UserIcon, X,
 } from "lucide-react";
 import { patch, post, upload } from "../../api";
-import { fmtDate, fmtSize, plural } from "../../format";
+import { fmtDate, fmtMoney, fmtSize, plural } from "../../format";
 import { Alert, Badge, Button, ConfirmModal, Field, Modal, useForm, useToast } from "../../ui";
 
 export interface DocFile {
@@ -14,7 +14,7 @@ export interface DocFile {
 }
 export type Expiry = "none" | "ok" | "expiring" | "expired";
 export interface Doc {
-  id: number; kind: string; kind_label: string; title: string; doc_number: string; issued_on: string | null; valid_until: string | null;
+  id: number; kind: string; kind_label: string; title: string; doc_number: string; issued_on: string | null; valid_until: string | null; cost?: number | null;
   expiry: Expiry; days_left: number | null; issued_by: string; note: string; archived: boolean; archive_reason: string; archived_at: string | null;
   created_at: string; files: DocFile[]; removed_files: number;
 }
@@ -155,11 +155,13 @@ function FilePicker({ files, onChange, imagesOnly, error, multiple = true }: { f
 /* ---------------- добавление документа ---------------- */
 
 const nul = (s: string) => (s.trim() === "" ? null : s);
+const INSURANCE = ["osago", "kasko"];
+const costNum = (s: string) => { const t = s.replace(/\s/g, "").replace(",", "."); return t ? Number(t) : null; };
 
 export function NewDocModal({ owner, kinds, kind, onClose }: { owner: Owner; kinds: Kind[]; kind: string; onClose: () => void }) {
   const qc = useQueryClient();
   const toast = useToast();
-  const f = useForm({ kind, title: "", doc_number: "", issued_on: "", valid_until: "", issued_by: "", note: "" });
+  const f = useForm({ kind, title: "", doc_number: "", issued_on: "", valid_until: "", issued_by: "", note: "", cost: "" });
   const [files, setFiles] = useState<File[]>([]);
   const k = kinds.find((x) => x.code === f.values.kind);
   const isPhoto = f.values.kind === "photo";
@@ -172,6 +174,7 @@ export function NewDocModal({ owner, kinds, kind, onClose }: { owner: Owner; kin
       body.set("doc_number", v.doc_number);
       body.set("issued_by", v.issued_by);
       body.set("note", v.note);
+      if (INSURANCE.includes(v.kind) && v.cost.trim()) body.set("cost", v.cost);
       if (!isPhoto) {
         const a = nul(v.issued_on), b = nul(v.valid_until);
         if (a) body.set("issued_on", a);
@@ -205,6 +208,11 @@ export function NewDocModal({ owner, kinds, kind, onClose }: { owner: Owner; kin
               <input className="input" type="date" value={f.values.valid_until} onChange={(e) => f.set("valid_until", e.target.value)} />
             </Field>
           )}
+          {INSURANCE.includes(f.values.kind) && (
+            <Field label="Стоимость полиса, ₽" error={f.errors.cost} hint="Попадёт в «Затраты на спецтехнику» и отчёт по затратам на дату выдачи">
+              <input className="input" inputMode="decimal" value={f.values.cost} onChange={(e) => f.set("cost", e.target.value)} placeholder="Например: 12500" />
+            </Field>
+          )}
           {!isPhoto && <Field label="Кем выдан" full error={f.errors.issued_by}><input className="input" value={f.values.issued_by} maxLength={200} onChange={(e) => f.set("issued_by", e.target.value)} /></Field>}
           <Field label="Название" full error={f.errors.title} hint="Можно не заполнять: подставится вид документа"><input className="input" value={f.values.title} maxLength={200} onChange={(e) => f.set("title", e.target.value)} /></Field>
           <Field label="Заметка" full error={f.errors.note}><textarea className="input" value={f.values.note} maxLength={2000} onChange={(e) => f.set("note", e.target.value)} /></Field>
@@ -225,9 +233,9 @@ function EditDocModal({ doc, onClose }: { doc: Doc; onClose: () => void }) {
   const qc = useQueryClient();
   const toast = useToast();
   const isPhoto = doc.kind === "photo";
-  const f = useForm({ title: doc.title, doc_number: doc.doc_number, issued_on: doc.issued_on ?? "", valid_until: doc.valid_until ?? "", issued_by: doc.issued_by, note: doc.note });
+  const f = useForm({ title: doc.title, doc_number: doc.doc_number, issued_on: doc.issued_on ?? "", valid_until: doc.valid_until ?? "", issued_by: doc.issued_by, note: doc.note, cost: doc.cost != null ? String(doc.cost).replace(".", ",") : "" });
   const m = useMutation({
-    mutationFn: () => patch(`/dossier/docs/${doc.id}`, { ...f.values, issued_on: nul(f.values.issued_on), valid_until: nul(f.values.valid_until) }),
+    mutationFn: () => patch(`/dossier/docs/${doc.id}`, { ...f.values, issued_on: nul(f.values.issued_on), valid_until: nul(f.values.valid_until), cost: costNum(f.values.cost) }),
     onSuccess: () => { qc.invalidateQueries(); toast.success("Сохранено"); onClose(); },
     onError: f.fail,
   });
@@ -244,6 +252,7 @@ function EditDocModal({ doc, onClose }: { doc: Doc; onClose: () => void }) {
           {!isPhoto && <Field label="Кем выдан" error={f.errors.issued_by}><input className="input" value={f.values.issued_by} maxLength={200} onChange={(e) => f.set("issued_by", e.target.value)} /></Field>}
           {!isPhoto && <Field label="Когда выдан" error={f.errors.issued_on}><input className="input" type="date" value={f.values.issued_on} onChange={(e) => f.set("issued_on", e.target.value)} /></Field>}
           {!isPhoto && <Field label="Действует до" error={f.errors.valid_until}><input className="input" type="date" value={f.values.valid_until} onChange={(e) => f.set("valid_until", e.target.value)} /></Field>}
+          {INSURANCE.includes(doc.kind) && <Field label="Стоимость полиса, ₽" error={f.errors.cost} hint="Идёт в затраты по машине на дату выдачи"><input className="input" inputMode="decimal" value={f.values.cost} onChange={(e) => f.set("cost", e.target.value)} /></Field>}
           <Field label="Заметка" full error={f.errors.note}><textarea className="input" value={f.values.note} maxLength={2000} onChange={(e) => f.set("note", e.target.value)} /></Field>
         </div>
       </div>
@@ -294,11 +303,12 @@ export function DocCard({ doc, canEdit }: { doc: Doc; canEdit: boolean }) {
         </div>
         {doc.archived ? <Badge icon={Archive}>в архиве</Badge> : <ExpiryBadge doc={doc} />}
       </header>
-      {!isPhoto && (doc.issued_on || doc.issued_by || doc.valid_until) && (
+      {!isPhoto && (doc.issued_on || doc.issued_by || doc.valid_until || doc.cost != null) && (
         <dl className="kv compact small">
           {doc.issued_on && <><dt>Выдан</dt><dd>{fmtDate(doc.issued_on)}</dd></>}
           {doc.issued_by && <><dt>Кем</dt><dd>{doc.issued_by}</dd></>}
           {doc.valid_until && <><dt>Действует до</dt><dd>{fmtDate(doc.valid_until)}</dd></>}
+          {doc.cost != null && <><dt>Стоимость</dt><dd>{fmtMoney(doc.cost)} ₽</dd></>}
         </dl>
       )}
       {doc.note && <div className="small" style={{ whiteSpace: "pre-wrap" }}>{doc.note}</div>}

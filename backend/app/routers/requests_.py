@@ -301,6 +301,8 @@ def transition(rid: int, body: TransitionIn, p: Principal = Depends(current), db
     comment = body.comment.strip()
     if body.to_status == "cancelled" and not comment:
         raise fail(422, "reason_required", "Укажите причину отмены", "comment")
+    if body.to_status == "closed" and r.status != "done" and not comment:
+        raise fail(422, "reason_required", "Обращение ещё не выполнено: напишите, почему закрываете", "comment")
     old = r.status
     r.status, r.updated_by_id = body.to_status, p.id
     r.closed_at = utcnow() if body.to_status in ("closed", "cancelled") else None

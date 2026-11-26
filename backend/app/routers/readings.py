@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session, aliased
 from app.common import fail, page_of
 from app.db import get_db
 from app.deps import Principal, current, require
-from app.enums import READING_KINDS, READING_SOURCES
+from app.enums import HOURS_ONLY_TYPES, READING_KINDS, READING_SOURCES
 from app.models import User, Vehicle, VehicleReading
 from app.routers.vehicles import get_vehicle
 from app.services import access, readings as svc
@@ -68,11 +68,21 @@ def add_reading(vid: int, body: ReadingIn, p: Principal = Depends(current), db: 
     v = get_vehicle(db, p, vid)
     if not access.reading_allowed(p, db, v):
         raise fail(403, "forbidden", "Нет права вводить показания этой техники")
+    hours_only_check(v, body.kind)
     r = svc.add_reading(db, p, v, body.kind, body.value, recorded_at=body.recorded_at, note=body.note.strip())
     db.commit()
     return {**out(r, p.user.display_name or p.login, None), "needs_review": r.is_anomaly,
             "current_km": float(v.current_km) if v.current_km is not None else None,
             "current_hours": float(v.current_hours) if v.current_hours is not None else None}
+
+
+def hours_only(v: Vehicle) -> bool:
+    return v.type is not None and v.type.code in HOURS_ONLY_TYPES
+
+
+def hours_only_check(v: Vehicle, kind: str) -> None:
+    if kind == "km" and hours_only(v):
+        raise fail(422, "hours_only", f"У техники «{v.type.name}» нет спидометра: вводятся только моточасы", "kind")
 
 
 def reading_or_404(db: Session, p: Principal, rid: int) -> tuple[VehicleReading, Vehicle]:
@@ -161,7 +171,7 @@ def manual_list(legal_entity_id: int | None = None, p: Principal = Depends(curre
     """Список техники для ручного ввода показаний: госномер, текущий пробег и моточасы, что в ней главное."""
     if not (p.can("readings.create") or p.can("readings.create_own")):
         raise fail(403, "forbidden", "Нет права вводить показания")
-    items = [{"id": v.id, "plate": v.plate, "name": f"{v.make} {v.model}".strip(), "primary": v.type.primary_reading,
+    items = [{"id": v.id, "plate": v.plate, "name": f"{v.make} {v.model}".strip(), "primary": v.type.primary_reading, "hours_only": hours_only(v),
               "current_km": float(v.current_km) if v.current_km is not None else None,
               "current_hours": float(v.current_hours) if v.current_hours is not None else None}
              for v in _enterable(db, p, legal_entity_id)]
@@ -182,6 +192,7 @@ def manual_batch(body: BatchIn, p: Principal = Depends(current), db: Session = D
             continue
         sp = db.begin_nested()
         try:
+            hours_only_check(v, it.kind)
             r = svc.add_reading(db, p, v, it.kind, it.value, recorded_at=it.recorded_at, note=body.note.strip())
             sp.commit()
             results.append({"vehicle_id": v.id, "ok": True, "needs_review": r.is_anomaly,

@@ -102,7 +102,7 @@ def seed_may(world):
 
 def test_list_depends_on_rights(make_client, world):
     names = lambda who: {x["name"] for x in make_client(who).get("/reports").json()["items"]}          # noqa: E731
-    assert names("dir_a") == {"month", "mileage", "fuel", "costs", "repairs", "waybill_fuel", "downtime", "orders", "salary", "garbage_salary", "tonnage", "day"}
+    assert names("dir_a") == {"month", "mileage", "fuel", "costs", "repairs", "waybill_fuel", "downtime", "orders", "salary", "garbage_salary", "tonnage", "garbage", "day"}
     assert names("acc_a") >= {"costs", "repairs", "orders", "mileage"}
     disp = names("disp_a")
     assert {"month", "mileage", "fuel", "downtime", "orders"} <= disp and not ({"costs", "repairs"} & disp)
@@ -154,21 +154,25 @@ def test_mileage_uses_boundaries_and_corrections(make_client, world):
         feb = rows[1].id
         vid = v.id
     boss = make_client("dir_a")
-    res = rep(boss, "mileage", "month=2026-03")
+    q = "from=2026-02-01&to=2026-03-31"
+    res = rep(boss, "mileage", q)
     row = row_of(res, "П777")
-    labels = [c["label"] for c in res["table"]["columns"]]
-    assert labels[1] == "апр 25" and labels[-2] == "мар 26" and len(labels) == 14
-    assert (row["m9"], row["m10"], row["m11"], row["sum"]) == (0.0, 500.0, 300.0, 800.0)      # янв — первое показание, фев +500, мар +300
-    assert res["chart"]["unit"] == "км" and len(res["chart"]["labels"]) == 12
+    assert (row["km_from"], row["km_to"], row["km"], row["km_days"], row["km_avg"]) == (1000.0, 1800.0, 800.0, 2, 400.0)
+    assert res["period"]["kind"] == "range" and res["chart"]["unit"] == "км" and len(res["chart"]["labels"]) == 59
+    daily = next(e for e in res["extras"] if e["title"].startswith("Пробег по дням"))
+    feb10 = next(r for r in daily["rows"] if r[0] == "2026-02-10")
+    assert feb10[1] == 500.0 and feb10[2] == 1 and daily["totals"][1] == 800.0
     with session_factory()() as db:                                               # исправление заменяет показание, старое остаётся в журнале
         db.add(VehicleReading(vehicle_id=vid, kind="km", value=Decimal(1400), recorded_at=at(2026, 2, 10), corrects_id=feb, review_state="ok"))
         db.commit()
-    row = row_of(rep(boss, "mileage", "month=2026-03"), "П777")
-    assert (row["m10"], row["m11"], row["sum"]) == (400.0, 400.0, 800.0)
+    assert row_of(rep(boss, "mileage", q), "П777")["km"] == 800.0
+    assert row_of(rep(boss, "mileage", "from=2026-02-01&to=2026-02-28"), "П777")["km"] == 400.0
     with session_factory()() as db:                                               # показание на проверке не учитывается
         db.add(VehicleReading(vehicle_id=vid, kind="km", value=Decimal(9999), recorded_at=at(2026, 3, 20), review_state="pending"))
         db.commit()
-    assert row_of(rep(boss, "mileage", "month=2026-03"), "П777")["sum"] == 800.0
+    assert row_of(rep(boss, "mileage", q), "П777")["km"] == 800.0
+    long = rep(boss, "mileage", "from=2025-01-01&to=2026-03-31")                  # длинный период: без таблицы по дням
+    assert row_of(long, "П777")["km"] == 800.0 and not long["extras"]
 
 
 def test_fuel_report(make_client, world):
@@ -183,20 +187,34 @@ def test_fuel_report(make_client, world):
 
 
 def test_costs_do_not_count_twice(make_client, world):
-    seed_may(world)
+    vid = seed_may(world)
+    with session_factory()() as db:
+        from app.models import DossierDoc, VehicleFinance
+        v = db.get(Vehicle, vid)
+        db.add_all([DossierDoc(vehicle_id=vid, kind="osago", title="ОСАГО", issued_on=dt.date(2026, 5, 3), cost=Decimal("8000")),
+                    DossierDoc(vehicle_id=vid, kind="osago", title="старый", issued_on=dt.date(2025, 5, 3), cost=Decimal("7000")),
+                    VehicleFinance(legal_entity_id=v.legal_entity_id, vehicle_id=vid, op_date=dt.date(2026, 5, 4), kind="expense", category="мойка", amount=Decimal("500")),
+                    VehicleFinance(legal_entity_id=v.legal_entity_id, vehicle_id=vid, op_date=dt.date(2026, 5, 4), kind="income", amount=Decimal("9999"))])
+        # счёт, по которому деталь пришла на склад: в затраты машины идёт выдача со склада, а не сам счёт
+        b = RepairBill(legal_entity_id=v.legal_entity_id, kind="uploaded", number="Б-С", bill_date=dt.date(2026, 5, 7), vehicle_id=vid, total=Decimal("450"), vat=Decimal("0"))
+        db.add(b)
+        db.flush()
+        mv = db.scalar(select(StockMove).where(StockMove.kind == "issue"))
+        db.add(StockMove(legal_entity_id=v.legal_entity_id, move_date=dt.date(2026, 5, 7), kind="receipt", item_id=mv.item_id, warehouse_id=mv.warehouse_id,
+                         qty=Decimal("3"), price=Decimal("150"), bill_id=b.id))
+        db.commit()
     res = rep(make_client("dir_a"), "costs", RANGE_MAY)
     row = row_of(res, "К100")
     assert row["fuel"] == 10000.0
-    assert row["bills"] == 12000.0                                               # счета Б-1 и Б-2; архивный Б-3 не считается
+    assert row["bills_net"] == 12000.0                                           # счета Б-1 и Б-2; архивный Б-3 и складской Б-С не считаются
     assert row["requests"] == 3000.0                                             # только обращение без счёта: у второго есть счёт Б-2
     assert row["fines"] == 700.0                                                 # штраф, который платит водитель, не затраты компании
-    assert row["rent_in"] == 1000.0                                              # 2 суток по 500
-    assert row["cost"] == 26700.0
-    assert row["orders"] == 20000.0 and row["rent_out"] == 3000.0                # только выполненный заказ; 3 суток по 1000
-    assert row["result"] == -3700.0
-    assert row["per_km"] == round(26700 / 650, 2)                                # 5000 → 5650 км за период
-    assert row["stock"] == 300.0                                                 # справочно, в затраты не входит
-    assert res["table"]["totals"][-1] == 300.0
+    assert row["stock"] == 300.0                                                 # детали со склада теперь в затратах
+    assert row["insurance"] == 8000.0 and row["other"] == 500.0                  # полис за период и прочая затрата; доход не затрата
+    assert row["cost"] == 10000 + 12000 + 3000 + 700 + 300 + 8000 + 500
+    labels = [c["label"] for c in res["table"]["columns"]]
+    assert not any("Доход" in x or "Аренда" in x or "1 км" in x for x in labels)
+    assert labels.index("Детали со склада, ₽") == labels.index("Штрафы (платит компания), ₽") + 1
     assert make_client("acc_a").get("/reports/costs?" + RANGE_MAY).status_code == 200
 
 
@@ -320,7 +338,7 @@ def test_entities_are_separated(make_client, world):
 
 def test_bad_periods_are_rejected(make_client, world):
     boss = make_client("dir_a")
-    for url, field in (("/reports/month?month=2026-13", "month"), ("/reports/month?month=abc", "month"), ("/reports/mileage?month=2026-5", "month"),
+    for url, field in (("/reports/month?month=2026-13", "month"), ("/reports/month?month=abc", "month"), ("/reports/mileage?from=2026-5", "from"),
                        ("/reports/fuel?from=вчера", "from"), ("/reports/fuel?from=2026-05-10&to=2026-05-01", "to"), ("/reports/fuel?from=2015-01-01&to=2026-05-01", "to")):
         r = boss.get(url)
         assert r.status_code == 422 and r.json()["code"] == "bad_period" and r.json()["field"] == field, (url, r.text)
@@ -398,9 +416,9 @@ def test_csv_export(make_client, world):
     assert r.status_code == 200 and r.content.startswith("\ufeff".encode())
     text = r.content.decode("utf-8-sig")
     lines = text.split("\r\n")
-    assert lines[0].startswith("Машина;Топливо, ₽;")
+    assert lines[0].startswith("Машина;Топливо, л;Топливо, ₽;")
     k = [x for x in lines if x.startswith("К100")][0].split(";")
-    assert "26700.0".replace(".", ",") in k and "10000,0" in k                                          # десятичная запятая, как ждёт Excel
+    assert "26000,0" in k and "10000,0" in k                                          # десятичная запятая, как ждёт Excel
     m = make_client("dir_a").get(f"/reports/month/export.csv?{P_MAY}").content.decode("utf-8-sig")
     assert "Штрафы за месяц" in m and "'=SUM(A1)" in m                                                  # формулу Excel обезвреживает апостроф
     assert "11.05.2026" in m

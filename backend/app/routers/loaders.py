@@ -180,8 +180,10 @@ def _office_scope(p: Principal, legal_entity_id: int | None):
 
 
 def _garbage_trucks(db: Session, scope) -> list[Vehicle]:
-    waste = {v.id: v for v in routes_svc.waste_vehicles(db, scope.cond(Vehicle.legal_entity_id))}
-    for v in db.scalars(select(Vehicle).where(Vehicle.tonnage.is_(True), Vehicle.archived_at.is_(None), scope.cond(Vehicle.legal_entity_id))):
+    """Машины в бригадах: сами попадают мусоровозы и машины с тоннажем, плюс добавленные вручную, минус убранные."""
+    waste = {v.id: v for v in routes_svc.waste_vehicles(db, scope.cond(Vehicle.legal_entity_id)) if v.in_crews is not False}
+    for v in db.scalars(select(Vehicle).where(Vehicle.archived_at.is_(None), scope.cond(Vehicle.legal_entity_id),
+                                              or_(Vehicle.in_crews.is_(True), and_(Vehicle.in_crews.is_(None), Vehicle.tonnage.is_(True))))):
         waste.setdefault(v.id, v)
     return sorted(waste.values(), key=lambda v: v.plate)
 
@@ -234,7 +236,12 @@ def crews(legal_entity_id: int | None = None, p: Principal = Depends(current), d
                  for n in db.scalars(select(RouteNote).where(ns.cond(RouteNote.legal_entity_id),
                                                             or_(RouteNote.resolved_at.is_(None), RouteNote.note_date >= since))
                                      .order_by(RouteNote.resolved_at.is_not(None), RouteNote.created_at.desc(), RouteNote.id.desc()).limit(200))]
-    return {"today": today.isoformat(), "items": items, "people": people, "notes": notes,
+    # остальная техника, которую можно добавить в бригады
+    shown = {v.id for v in trucks}
+    others = [{"id": v.id, "plate": v.plate, "label": _vehicle_label(v), "legal_entity_id": v.legal_entity_id}
+              for v in db.scalars(select(Vehicle).where(Vehicle.archived_at.is_(None), Vehicle.legal_entity_id.in_(ents or [0]))
+                                  .order_by(Vehicle.plate)) if v.id not in shown] if ents else []
+    return {"today": today.isoformat(), "items": items, "people": people, "notes": notes, "others": others,
             "open_notes": sum(1 for n in notes if not n["resolved"]),
             "entities": allowed_entities(db, p, "route_notes.view") if p.scope("route_notes.view") else allowed_entities(db, p, "assignments.manage"),
             "can": {"notes": bool(p.scope("route_notes.view")), "assign": bool(p.scope("assignments.manage"))}}
@@ -301,6 +308,31 @@ def end(aid: int, p: Principal = Depends(current), db: Session = Depends(get_db)
     audit.log(db, p, "loaders.unassign", "vehicle", v.id, v.legal_entity_id, plate=v.plate, employee_id=a.employee_id, removed=removed)
     db.commit()
     return dict(out, removed=removed)
+
+
+class CrewVehicleIn(BaseModel):
+    in_crews: bool
+
+
+@router.post("/vehicles/{vid}")
+def set_crew_vehicle(vid: int, body: CrewVehicleIn, p: Principal = Depends(current), db: Session = Depends(get_db)):
+    """Добавить машину в бригады или убрать её оттуда. Убрали — грузчики с этой машины снимаются."""
+    v = _truck_for_manage(db, p, vid)
+    today = org_today()
+    ended = 0
+    if not body.in_crews:
+        last = today - dt.timedelta(days=1)
+        for a in db.scalars(select(LoaderAssignment).where(LoaderAssignment.vehicle_id == v.id,
+                                                           or_(LoaderAssignment.ended_on.is_(None), LoaderAssignment.ended_on >= today))):
+            if last < a.started_on:
+                db.delete(a)
+            else:
+                a.ended_on = last
+            ended += 1
+    v.in_crews = body.in_crews
+    audit.log(db, p, "loaders.vehicle", "vehicle", v.id, v.legal_entity_id, plate=v.plate, in_crews=body.in_crews, loaders_removed=ended)
+    db.commit()
+    return {"id": v.id, "in_crews": v.in_crews, "loaders_removed": ended}
 
 
 @router.post("/notes/{nid}/resolve")

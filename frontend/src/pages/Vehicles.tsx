@@ -15,7 +15,7 @@ export interface VehicleRow {
   id: number; legal_entity_id: number; legal_entity: string; plate: string; internal_no: string; make: string; model: string;
   vin: string | null; year: number | null; status: string; status_label: string; current_km: number | null; current_hours: number | null;
   archived: boolean; tonnage?: boolean; ton_price?: number | null; driver: { id: number; name: string } | null; next_service?: string | null; insurance?: Insurance[] | null;
-  type: { id: number; name: string; category: string; primary_reading: string };
+  type: { id: number; name: string; category: string; primary_reading: string; hours_only?: boolean };
 }
 
 interface VehiclePage extends Page<VehicleRow> { facets: { categories: Record<string, number>; statuses: Record<string, number> } }

@@ -13,7 +13,7 @@ from app.common import fail, like, norm_plate, org_today, page_of, utcnow
 from app.db import get_db
 from app.exporting import check_format, table_response
 from app.deps import Principal, current, entity_filter, require
-from app.enums import READING_KINDS, REQUEST_OPEN, VEHICLE_CATEGORIES, VEHICLE_DOC_KINDS, VEHICLE_STATUSES, status_label
+from app.enums import HOURS_ONLY_TYPES, READING_KINDS, REQUEST_OPEN, VEHICLE_CATEGORIES, VEHICLE_DOC_KINDS, VEHICLE_STATUSES, status_label
 from app.models import (Department, DossierDoc, Employee, LegalEntity, MaintenanceItem, ServiceRequest, User, Vehicle, VehicleAssignment, VehicleStatusHistory,
                         VehicleType, Waybill)
 from app.services import access, notify, readings as readings_svc, weigh as weigh_svc
@@ -115,7 +115,7 @@ def out(db: Session, p: Principal, v: Vehicle, drivers: dict | None = None, deta
     data = {
         "id": v.id, "legal_entity_id": v.legal_entity_id,
         "legal_entity": v.legal_entity.short_name or v.legal_entity.name,
-        "type": {"id": v.type.id, "name": v.type.name, "category": v.type.category, "primary_reading": v.type.primary_reading},
+        "type": {"id": v.type.id, "name": v.type.name, "category": v.type.category, "primary_reading": v.type.primary_reading, "hours_only": v.type.code in HOURS_ONLY_TYPES},
         "plate": v.plate, "internal_no": v.internal_no, "make": v.make, "model": v.model, "vin": v.vin, "year": v.year,
         "department_id": v.department_id, "status": v.status, "status_label": VEHICLE_STATUSES[v.status],
         "status_changed_at": v.status_changed_at.isoformat() if v.status_changed_at else None,

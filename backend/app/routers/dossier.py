@@ -21,7 +21,7 @@ from app import audit
 from app.common import fail, like, org_today, page_of, utcnow
 from app.db import get_db
 from app.deps import Principal, current, entity_filter, require
-from app.enums import (ALL_DOC_KINDS, DOC_EXPIRING_DAYS, DOC_KINDS_NO_EXPIRY, EMPLOYEE_DOC_KINDS, EMPLOYEE_SENSITIVE_KINDS,
+from app.enums import (ALL_DOC_KINDS, DOC_EXPIRING_DAYS, DOC_KINDS_NO_EXPIRY, INSURANCE_DOC_KINDS, EMPLOYEE_DOC_KINDS, EMPLOYEE_SENSITIVE_KINDS,
                        FUEL_TYPES, OWNERSHIP, READING_KINDS, REQUEST_STATUSES, VEHICLE_DOC_KINDS, VEHICLE_STATUSES, status_label)
 from app.models import (DossierDoc, DossierDocFile, Employee, EmploymentAssignment, LegalEntity, ServiceRequest, StoredFile,
                         Vehicle, VehicleAssignment, VehicleReading, VehicleSpecs, VehicleStatusHistory)
@@ -111,7 +111,7 @@ def doc_out(doc: DossierDoc) -> dict:
         "issued_on": doc.issued_on.isoformat() if doc.issued_on else None,
         "valid_until": doc.valid_until.isoformat() if doc.valid_until else None,
         "expiry": status, "days_left": days_left(doc.valid_until),
-        "issued_by": doc.issued_by, "note": doc.note,
+        "issued_by": doc.issued_by, "note": doc.note, "cost": float(doc.cost) if doc.cost is not None else None,
         "archived": doc.archived_at is not None, "archive_reason": doc.archive_reason,
         "archived_at": doc.archived_at.isoformat() if doc.archived_at else None,
         "created_at": doc.created_at.isoformat(),
@@ -254,9 +254,22 @@ def attach(doc: DossierDoc, stored: list[StoredFile], p: Principal) -> None:
         doc.files.append(DossierDocFile(file_id=sf.id, position=start + i, added_by_id=p.id, file=sf))
 
 
+def parse_cost(text: str | None) -> Decimal | None:
+    t = (text or "").replace(" ", "").replace(" ", "").replace(",", ".").strip()
+    if not t:
+        return None
+    try:
+        v = Decimal(t)
+    except Exception:
+        raise fail(422, "bad_cost", "Стоимость полиса: впишите число, например 12500", "cost") from None
+    if v < 0 or v > 100_000_000:
+        raise fail(422, "bad_cost", "Стоимость полиса указана неверно", "cost")
+    return v.quantize(Decimal("0.01"))
+
+
 def create_doc(db: Session, p: Principal, *, employee: Employee | None, vehicle: Vehicle | None, kind: str, title: str,
                doc_number: str, issued_on: str | None, valid_until: str | None, issued_by: str, note: str,
-               files: list[UploadFile]) -> DossierDoc:
+               files: list[UploadFile], cost: str | None = None) -> DossierDoc:
     kinds = EMPLOYEE_DOC_KINDS if employee else VEHICLE_DOC_KINDS
     if kind not in kinds:
         raise fail(422, "bad_kind", "Выберите вид документа из списка", "kind")
@@ -265,10 +278,11 @@ def create_doc(db: Session, p: Principal, *, employee: Employee | None, vehicle:
         issued = until = None
     if issued and until and until < issued:
         raise fail(422, "bad_dates", "Срок действия не может кончаться раньше даты выдачи", "valid_until")
+    price = parse_cost(cost) if kind in INSURANCE_DOC_KINDS else None
     prepared = read_uploads(files, images_only=kind == "photo", required=kind == "photo")
     doc = DossierDoc(employee_id=employee.id if employee else None, vehicle_id=vehicle.id if vehicle else None, kind=kind,
                      title=(title.strip() or kinds[kind])[:200], doc_number=doc_number.strip()[:60], issued_on=issued,
-                     valid_until=until, issued_by=issued_by.strip()[:200], note=note.strip()[:2000],
+                     valid_until=until, issued_by=issued_by.strip()[:200], note=note.strip()[:2000], cost=price,
                      created_by_id=p.id, updated_by_id=p.id)
     db.add(doc)
     db.flush()
@@ -303,6 +317,7 @@ class DocPatch(BaseModel):
     valid_until: dt.date | None = None
     issued_by: str = Field(default="", max_length=200)
     note: str = Field(default="", max_length=2000)
+    cost: Decimal | None = Field(default=None, ge=0, le=100_000_000)
 
 
 @router.patch("/docs/{doc_id}")
@@ -315,7 +330,11 @@ def update_doc(doc_id: int, body: DocPatch, p: Principal = Depends(current), db:
     if body.issued_on and body.valid_until and body.valid_until < body.issued_on:
         raise fail(422, "bad_dates", "Срок действия не может кончаться раньше даты выдачи", "valid_until")
     changed = []
-    for field in ("title", "doc_number", "issued_on", "valid_until", "issued_by", "note"):
+    if doc.kind not in INSURANCE_DOC_KINDS:
+        body.cost = None
+    elif body.cost is not None:
+        body.cost = body.cost.quantize(Decimal("0.01"))
+    for field in ("title", "doc_number", "issued_on", "valid_until", "issued_by", "note", "cost"):
         value = getattr(body, field)
         if isinstance(value, str):
             value = value.strip()
@@ -566,10 +585,10 @@ def save_specs(vid: int, body: SpecsIn, p: Principal = Depends(require("vehicle_
 @router.post("/vehicles/{vid}/docs", status_code=201)
 def add_vehicle_doc(vid: int, kind: str = Form(...), title: str = Form(""), doc_number: str = Form(""),
                     issued_on: str | None = Form(None), valid_until: str | None = Form(None), issued_by: str = Form(""),
-                    note: str = Form(""), files: list[UploadFile] = File(default=[]),
+                    note: str = Form(""), cost: str | None = Form(None), files: list[UploadFile] = File(default=[]),
                     p: Principal = Depends(require("vehicle_files.edit")), db: Session = Depends(get_db)):
     v = get_vehicle(db, p, vid, "vehicle_files.edit")
     doc = create_doc(db, p, employee=None, vehicle=v, kind=kind, title=title, doc_number=doc_number, issued_on=issued_on,
-                     valid_until=valid_until, issued_by=issued_by, note=note, files=files)
+                     valid_until=valid_until, issued_by=issued_by, note=note, files=files, cost=cost)
     db.commit()
     return doc_out(get_doc(db, p, doc.id))

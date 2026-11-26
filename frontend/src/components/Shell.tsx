@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import {
   BellRing, Building2, Camera, CalendarCheck, CalendarClock, CalendarDays, ChevronDown, ChevronRight, ClipboardList, DatabaseBackup, Gauge, LayoutDashboard, LogOut, Menu, ScrollText, Search, ShieldCheck,
   Truck, User as UserIcon, UserCheck, UserCog, UserSquare2, Users, UsersRound, Wrench, FolderOpen, Fuel, NotebookPen, ShoppingCart, ReceiptText, Receipt, Megaphone, Newspaper, Boxes, ArrowLeftRight, BarChart3, FileUp, Hourglass, ListOrdered, MapPin, Recycle, Signpost, CalendarRange, Send, Settings, Wallet, Weight, X, type LucideIcon,
+  PiggyBank,
 } from "lucide-react";
 import { ConnectionBar, useOutboxSync } from "./Outbox";
 import { BellMenu, useNotifSummary } from "./Bell";
@@ -69,7 +70,7 @@ const NAV: Group[] = [
         { to: "/tonnage", label: "Тоннаж", icon: Weight, any: ["weigh_tickets.view_own"], unless: ["weigh_tickets.view"], feature: "tonnage", end: true, words: "талон вес весы тонны" },
         { to: "/hauls", label: "Счётчик ходок", icon: ListOrdered, any: ["hauls.use_own"], feature: "hauls", end: true, words: "ходки рейсы" },
         ...sectionItems("weigh_tickets"),
-        { to: "/reports/tonnage", label: "Тоннаж за месяц", icon: BarChart3, any: ["weigh_tickets.view"], all: ["reports.view"], words: "тонны итог отчёт" },
+        { to: "/reports/garbage", label: "Мусоровозы за месяц", icon: BarChart3, any: ["weigh_tickets.view"], all: ["reports.view"], words: "тонны итог отчёт мусоровозы пробег топливо затраты" },
       ]),
       ...withSub("Зарплата", [
         { to: "/reports/garbage_salary", label: "Зарплата мусоровозов", icon: Wallet, any: ["worklog.view"], all: ["reports.view"], words: "зарплата заработок выплата тонны водители мусоровозов аванс" },
@@ -83,7 +84,7 @@ const NAV: Group[] = [
       { to: "/roster", label: "Водители и техника", icon: UsersRound, any: ["roster.view"], words: "закрепление кто на чём" },
       { to: "/dossier/vehicles", label: "Личные дела техники", icon: FolderOpen, any: ["vehicle_files.view"], words: "документы птс страховка осаго" },
       ...withSub("Обслуживание", sectionItems("maintenance", "vehicle_events", "tires", "vehicle_repairs")),
-      ...withSub("Деньги по технике", sectionItems("vehicle_finance", "fines", "fuel_cards", "rentals")),
+      ...withSub("Деньги по технике", [{ to: "/vehicle-finance", label: "Затраты на спецтехнику", icon: PiggyBank, any: ["vehicle_finance.view"], end: true, words: "расходы затраты страховка топливо склад детали" }, ...sectionItems("fines", "fuel_cards", "rentals")]),
     ],
   },
   {

@@ -141,3 +141,27 @@ def test_loader_marks_attendance_and_appears_in_office_list(world, make_client):
     assert me["vehicles"] == ["М100ММ54 (грузчик)"]
     ldr = make_client("ldr1")
     assert ldr.get("/attendance/mine").status_code == 200
+
+
+def test_choose_crew_vehicles(world, make_client):
+    t = waste("М100ММ54", world.A, driver=world.d1)
+    lid = make_loader(world)
+    d = make_client("dir_a")
+    d.post("/loaders/assign", {"vehicle_id": t, "employee_id": lid, "started_on": (TODAY - dt.timedelta(days=2)).isoformat()})
+    crews = d.get("/loaders/crews").json()
+    assert [x["id"] for x in crews["items"]] == [t]
+    other = next(x for x in crews["others"] if x["id"] == world.va1)      # обычная машина: её можно добавить
+    assert other["plate"]
+    assert make_client("mech_a").post(f"/loaders/vehicles/{world.va1}", {"in_crews": True}).status_code in (403, 404)
+    assert d.post(f"/loaders/vehicles/{world.va1}", {"in_crews": True}).status_code == 200
+    ids = [x["id"] for x in d.get("/loaders/crews").json()["items"]]
+    assert set(ids) == {t, world.va1}
+    # убрали мусоровоз: пропал из бригад, грузчик снят, водитель прежний
+    r = d.post(f"/loaders/vehicles/{t}", {"in_crews": False}).json()
+    assert r["loaders_removed"] == 1
+    crews = d.get("/loaders/crews").json()
+    assert [x["id"] for x in crews["items"]] == [world.va1] and any(x["id"] == t for x in crews["others"])
+    assert make_client("ldr1").get("/loaders/home").json()["has_vehicle"] is False
+    with session_factory()() as db:
+        assert current_driver_id(db, t) == world.d1
+    assert make_client("dir_b").post(f"/loaders/vehicles/{t}", {"in_crews": True}).status_code == 404

@@ -113,7 +113,7 @@ function EditModal({ v, onClose }: { v: Detail; onClose: () => void }) {
 function AddReading({ v, onClose }: { v: Detail; onClose: () => void }) {
   const qc = useQueryClient();
   const toast = useToast();
-  const f = useForm({ kind: v.type.primary_reading, value: "", recorded_at: "", note: "" });
+  const f = useForm({ kind: v.type.hours_only ? "engine_hours" : v.type.primary_reading, value: "", recorded_at: "", note: "" });
   const m = useMutation({
     mutationFn: () => post<{ review_state: string }>(`/vehicles/${v.id}/readings`, { kind: f.values.kind, value: numOrNull(f.values.value), recorded_at: f.values.recorded_at ? new Date(f.values.recorded_at).toISOString() : null, note: f.values.note }),
     onSuccess: (r) => {
@@ -131,9 +131,11 @@ function AddReading({ v, onClose }: { v: Detail; onClose: () => void }) {
         {f.formError && !f.errors.value && <Alert tone="error">{f.formError}</Alert>}
         <div className="form-grid">
           <Field label="Что вводим">
-            <select className="input" value={f.values.kind} onChange={(e) => f.set("kind", e.target.value)}>
-              <option value="km">Пробег, км</option><option value="engine_hours">Моточасы, м·ч</option>
-            </select>
+            {v.type.hours_only ? <input className="input" value="Моточасы, м·ч (спидометра нет)" readOnly /> : (
+              <select className="input" value={f.values.kind} onChange={(e) => f.set("kind", e.target.value)}>
+                <option value="km">Пробег, км</option><option value="engine_hours">Моточасы, м·ч</option>
+              </select>
+            )}
           </Field>
           <Field label="Значение" error={f.errors.value} hint={cur !== null ? `Сейчас: ${fmtNum(cur)} ${readingUnit(f.values.kind)}. Меньше нельзя.` : "Показаний ещё нет"}>
             <input className="input" inputMode="decimal" value={f.values.value} onChange={(e) => f.set("value", e.target.value)} aria-invalid={!!f.errors.value} />

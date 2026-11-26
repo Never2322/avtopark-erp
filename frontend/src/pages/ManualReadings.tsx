@@ -9,7 +9,7 @@ import { fmtNum, todayIso } from "../format";
 import { useEntityParam } from "../hooks";
 import { Alert, Badge, Button, Card, Empty, QueryState, useToast } from "../ui";
 
-interface Item { id: number; plate: string; name: string; primary: "km" | "engine_hours"; current_km: number | null; current_hours: number | null }
+interface Item { id: number; plate: string; name: string; primary: "km" | "engine_hours"; hours_only?: boolean; current_km: number | null; current_hours: number | null }
 interface Res { vehicle_id: number; ok: boolean; message?: string; needs_review?: boolean }
 
 const parse = (s: string): number | null => {
@@ -92,9 +92,9 @@ export function ManualReadings() {
                     return (
                       <tr key={v.id}>
                         <td><Link to={`/vehicles/${v.id}`}><strong>{v.plate}</strong></Link><div className="muted small">{v.name}</div></td>
-                        <td className="num nowrap">{v.current_km !== null ? `${fmtNum(v.current_km, 0)} км` : "—"}{v.current_hours !== null && <div className="muted small">{fmtNum(v.current_hours, 1)} м/ч</div>}</td>
-                        <td>{input(v, "km")}</td>
-                        <td>{v.primary === "engine_hours" || v.current_hours !== null ? input(v, "engine_hours") : <span className="muted small">не считаются</span>}</td>
+                        <td className="num nowrap">{v.hours_only ? "" : v.current_km !== null ? `${fmtNum(v.current_km, 0)} км` : "—"}{v.current_hours !== null && <div className="muted small">{fmtNum(v.current_hours, 1)} м/ч</div>}</td>
+                        <td>{v.hours_only ? <span className="muted small">только моточасы</span> : input(v, "km")}</td>
+                        <td>{v.hours_only || v.primary === "engine_hours" || v.current_hours !== null ? input(v, "engine_hours") : <span className="muted small">не считаются</span>}</td>
                         <td>{r ? (r.ok ? <Badge tone={r.needs_review ? "warning" : "success"}>{r.needs_review ? "На проверку" : "Сохранено"}</Badge> : <span className="bad small">{r.message}</span>) : null}</td>
                       </tr>
                     );

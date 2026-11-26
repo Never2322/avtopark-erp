@@ -213,6 +213,8 @@ class Vehicle(Audited, Base):
     status_changed_at: Mapped[dt.datetime | None] = mapped_column(TS)
     # Водитель этой машины прикладывает талоны весов с полигона: у него появляется вкладка «Тоннаж» (мусоровозы и самосвалы включены сами).
     tonnage: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"))
+    # Показывать в «Бригадах мусоровозов»: None — само (мусоровоз или тоннаж), True — добавлена вручную, False — убрана.
+    in_crews: Mapped[bool | None] = mapped_column(Boolean)
     # Цена за тонну для заказчика: подставляется в новые талоны весов этой машины (стоимость рейса = тонны × цена).
     ton_price: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
     # Текущие показания пересчитываются из журнала показаний, руками не правятся.
@@ -467,6 +469,8 @@ class DossierDoc(Audited, Base):
     valid_until: Mapped[dt.date | None] = mapped_column(Date)
     issued_by: Mapped[str] = mapped_column(String(200), default="")
     note: Mapped[str] = mapped_column(Text, default="")
+    # Стоимость полиса (ОСАГО, КАСКО): идёт в затраты по машине по дате выдачи.
+    cost: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
     archived_at: Mapped[dt.datetime | None] = mapped_column(TS)
     archived_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
     archive_reason: Mapped[str] = mapped_column(String(300), default="")
@@ -475,6 +479,7 @@ class DossierDoc(Audited, Base):
         CheckConstraint(check_in("kind", ALL_DOC_KINDS), name="kind"),
         CheckConstraint("num_nonnulls(employee_id, vehicle_id) = 1", name="one_owner"),
         CheckConstraint("issued_on IS NULL OR valid_until IS NULL OR valid_until >= issued_on", name="dates"),
+        CheckConstraint("cost IS NULL OR cost >= 0", name="cost"),
         Index("ix_dossier_docs_valid_until", "valid_until"),
     )
 

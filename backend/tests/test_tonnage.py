@@ -319,7 +319,7 @@ def test_month_report_by_vehicle(world, make_client, reads):
     month = seed_month(world, make_client, reads)
     d = make_client("dir_a")
     rep = d.get(f"/reports/tonnage?month={month}").json()
-    assert rep["title"].startswith("Тоннаж за ")
+    assert rep["title"].startswith("Тоннаж самосвалов за ")
     cols = [c["key"] for c in rep["table"]["columns"]]
     rows = {r[0].split(" · ")[0]: dict(zip(cols, r)) for r in rep["table"]["rows"]}
     a1, a2 = rows["А001АА54"], rows["А002АА54"]

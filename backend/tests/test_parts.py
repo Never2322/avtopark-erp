@@ -292,3 +292,13 @@ def test_driver_does_not_get_hints_about_other_requests(make_client, world):
     block = add(driver, mine["id"], part("Стартер")).json()
     assert block["items"][0]["hint"] == ""            # водитель не видит других обращений — и номеров из них тоже
     assert make_client("dir_a").get(f"/requests/{mine['id']}/parts").json()["items"][0]["hint"].startswith("Уже есть")
+
+
+def test_request_can_be_closed_at_any_stage(world, make_client):
+    c = make_client("admin")
+    r = new_request(c, world.va1)
+    assert "closed" in [x["status"] for x in c.get(f"/requests/{r['id']}").json()["allowed_transitions"]]
+    assert go(c, r["id"], "closed").status_code == 422                     # не выполнено — нужна причина
+    x = go(c, r["id"], "closed", "Сделали сами, без ремонта")
+    assert x.status_code == 200, x.text
+    assert x.json()["status"] == "closed" and x.json()["closed_at"]

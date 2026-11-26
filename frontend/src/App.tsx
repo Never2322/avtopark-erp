@@ -59,6 +59,7 @@ import { Stock } from "./pages/Stock";
 import { StockMoves } from "./pages/StockMoves";
 import { ReportsIndex, ReportView } from "./pages/Reports";
 import { Expenses } from "./pages/Expenses";
+import { VehicleCosts } from "./pages/VehicleCosts";
 
 const VEH = ["vehicles.view", "vehicles.view_own"];
 const REQ = ["requests.view", "requests.view_own"];
@@ -122,6 +123,7 @@ export function App() {
         <Route path="reports" element={<Guard any={["reports.view"]}><ReportsIndex /></Guard>} />
         <Route path="reports/:name" element={<Guard any={["reports.view"]}><ReportView /></Guard>} />
         <Route path="expenses" element={<Guard any={["reports.money"]}><Expenses /></Guard>} />
+        <Route path="vehicle-finance" element={<Guard any={["vehicle_finance.view"]}><VehicleCosts /></Guard>} />
         <Route path="bills" element={<Guard any={["bills.view"]}><Bills /></Guard>} />
         <Route path="bills/new" element={<Guard any={["bills.create"]}><BillForm /></Guard>} />
         <Route path="bills/:id" element={<Guard any={["bills.view"]}><BillCard /></Guard>} />
