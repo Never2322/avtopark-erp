@@ -47,7 +47,7 @@ def encrypt(data: bytes, password: str) -> bytes:
 
 def decrypt(blob: bytes, password: str) -> bytes:
     if not blob.startswith(MAGIC) or len(blob) < len(MAGIC) + 16 + 12 + 16:
-        raise ValueError("Это не зашифрованная копия программы «Автопарк»")
+        raise ValueError("Это не зашифрованная копия программы «Контур»")
     salt, nonce, body = blob[len(MAGIC):len(MAGIC) + 16], blob[len(MAGIC) + 16:len(MAGIC) + 28], blob[len(MAGIC) + 28:]
     try:
         return AESGCM(derive(password, salt)).decrypt(nonce, body, MAGIC)
@@ -117,7 +117,7 @@ def send(job_id: int) -> dict | None:
         checked = bool((job.restore_check or {}).get("ok"))
         when = job.finished_at.astimezone(ZoneInfo(s.org_timezone)).strftime("%d.%m.%Y %H:%M") if job.finished_at else ""
         size_mb = len(blob) / 1024 / 1024
-        caption = (f"Копия базы «Автопарк» от {when}, {size_mb:.1f} МБ, "
+        caption = (f"Копия базы «Контур» от {when}, {size_mb:.1f} МБ, "
                    f"{'проверена восстановлением' if checked else 'проверка восстановлением не пройдена или не завершена'}. "
                    f"Файл зашифрован паролем OFFSITE_PASSWORD. Расшифровка: python -m app.cli decrypt-backup")
         if chats:
@@ -137,7 +137,7 @@ def send(job_id: int) -> dict | None:
                 result["email"] = {"ok": False, "error": f"файл {size_mb:.0f} МБ больше предела {s.offsite_email_max_mb} МБ"}
             else:
                 try:
-                    msg = channels.build_mail(", ".join(mails), f"[Автопарк] Копия базы от {when}", caption,
+                    msg = channels.build_mail(", ".join(mails), f"[Контур] Копия базы от {when}", caption,
                                               [(name, blob, "application/octet-stream")])
                     channels.send_mail(msg)
                     result["email"] = {"ok": True, "sent": len(mails), "error": ""}

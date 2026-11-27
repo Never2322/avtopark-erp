@@ -5,7 +5,7 @@ import { useSyncExternalStore } from "react";
 export type Theme = "dark" | "light" | "crimson";
 export const THEMES: { id: Theme; label: string }[] = [{ id: "dark", label: "Чёрная" }, { id: "light", label: "Светлая" }, { id: "crimson", label: "Багровая" }];
 const KEY = "erp-theme";
-const COLOR: Record<Theme, string> = { dark: "#0B1115", light: "#F2F5F6", crimson: "#13090C" };
+const COLOR: Record<Theme, string> = { dark: "#040915", light: "#EDF2FA", crimson: "#0D0207" };
 const listeners = new Set<() => void>();
 
 function stored(): Theme {

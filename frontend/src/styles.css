@@ -1414,3 +1414,246 @@ html[data-theme="light"] .vc-cat.tone-rose { --tone: 196, 54, 54; }
 .theme-dot-light { background: #f2f5f6; color: #0a7569; }
 .theme-dot-crimson { background: #2a0d15; color: #e0435e; }
 html[data-theme="crimson"] .crew-tile.tone-mint, html[data-theme="crimson"] .crew-tile:not([class*="tone-"]), html[data-theme="crimson"] .vc-cat:not([class*="tone-"]), html[data-theme="crimson"] .vc-cat.tone-mint { --tone: 224, 67, 94; }
+
+/* =====================================================================================================================
+   «КОНТУР»: оформление по образцам. Тёмная — глубокий тёмно-синий с неоновым синим, светлая — бело-голубая, багровая — с красным.
+   Только цвета, свечение и фон: расположение элементов на страницах не меняется.
+   ===================================================================================================================== */
+:root {
+  --bg: #040915;
+  --sidebar: #050c1d;
+  --card: #0a1429;
+  --hover: #11234a;
+  --border: #182a4f;
+  --border-strong: #2a4682;
+  --border-soft: rgba(24, 42, 79, 0.6);
+  --text: #eaf1ff;
+  --text-2: #93a6cb;
+  --mint: #2f80ff;
+  --mint-hover: #4b93ff;
+  --mint-ink: #ffffff;
+  --info: #44a6ff;
+  --violet: #9d8cff;
+  --surface: #07112a;
+  --field: #061024;
+  --placeholder: #5a6d93;
+  --faint: #3f5279;
+  --off-ink: #7f90b3;
+  --topbar-bg: rgba(4, 9, 21, 0.82);
+  --overlay: rgba(1, 4, 12, 0.72);
+  --scrim: rgba(1, 4, 12, 0.6);
+  --shimmer-a: #0a1530;
+  --shimmer-b: #12224a;
+  --well: #050d20;
+  --glow: 47, 128, 255;
+  --glow-2: 255, 43, 74;
+  --shadow: 0 14px 40px rgba(0, 0, 0, 0.55);
+}
+html[data-theme="light"] {
+  --bg: #edf2fa;
+  --sidebar: #f7faff;
+  --card: #ffffff;
+  --hover: #e8f0ff;
+  --border: #d9e3f3;
+  --border-strong: #b7c8e6;
+  --text: #0f1c36;
+  --text-2: #5a6a88;
+  --mint: #1f6bff;
+  --mint-hover: #0f58e6;
+  --mint-ink: #ffffff;
+  --info: #1a74d8;
+  --surface: #f2f6fd;
+  --field: #f6f9fe;
+  --placeholder: #8592ad;
+  --topbar-bg: rgba(247, 250, 255, 0.82);
+  --shimmer-a: #e7eef9;
+  --shimmer-b: #f5f8fd;
+  --well: #e9f0fb;
+  --glow: 31, 107, 255;
+  --glow-2: 255, 43, 74;
+  --shadow: 0 14px 36px rgba(28, 62, 130, 0.14);
+}
+html[data-theme="crimson"] {
+  --bg: #0d0207;
+  --sidebar: #12030a;
+  --card: #1a0610;
+  --hover: #2b0a18;
+  --border: #3d0f20;
+  --border-strong: #6d1a33;
+  --text: #fdebef;
+  --text-2: #c9959f;
+  --mint: #ff2d50;
+  --mint-hover: #ff5270;
+  --mint-ink: #ffffff;
+  --surface: #14040b;
+  --field: #110309;
+  --topbar-bg: rgba(13, 2, 7, 0.82);
+  --shimmer-a: #1d0711;
+  --shimmer-b: #2c0b19;
+  --well: #12040a;
+  --glow: 255, 45, 80;
+  --glow-2: 255, 45, 80;
+}
+
+/* фон: мягкие пятна света по углам и тонкие светящиеся диагональные полосы, как на образцах */
+.app { position: relative; isolation: isolate; }
+.app::before { content: ""; position: fixed; inset: 0; z-index: -1; pointer-events: none;
+  background:
+    linear-gradient(118deg, transparent 0 62.6%, rgba(var(--glow), 0.12) 62.9%, rgba(var(--glow), 0.6) 63.15%, rgba(var(--glow), 0.12) 63.4%, transparent 63.8%),
+    linear-gradient(118deg, transparent 0 69.6%, rgba(var(--glow-2), 0.1) 69.9%, rgba(var(--glow-2), 0.5) 70.1%, rgba(var(--glow-2), 0.1) 70.35%, transparent 70.7%),
+    linear-gradient(118deg, transparent 0 76%, rgba(var(--glow), 0.25) 76.1%, transparent 76.4%),
+    linear-gradient(118deg, transparent 0 23.8%, rgba(var(--glow-2), 0.22) 24.1%, transparent 24.4%),
+    radial-gradient(55% 45% at 100% 0%, rgba(var(--glow), 0.16), transparent 70%),
+    radial-gradient(45% 40% at 0% 100%, rgba(var(--glow-2), 0.12), transparent 70%),
+    radial-gradient(40% 35% at 60% 100%, rgba(var(--glow), 0.08), transparent 70%); }
+html[data-theme="light"] .app::before { opacity: 0.75; }
+.content::before { display: none; }
+
+/* логотип */
+.kontur-logo { position: relative; display: inline-grid; place-items: center; flex: none; width: 150px; height: 40px; }
+.kontur-logo.lg { width: 260px; height: 68px; }
+.kontur-frame { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; fill: none; stroke-width: 3; stroke-linecap: square; }
+.kontur-logo.lg .kontur-frame { stroke-width: 3.5; }
+.k-blue { stroke: #2f86ff; filter: drop-shadow(0 0 3px rgba(47, 134, 255, 0.95)) drop-shadow(0 0 7px rgba(47, 134, 255, 0.6)); }
+.k-red { stroke: #ff2b4a; filter: drop-shadow(0 0 3px rgba(255, 43, 74, 0.95)) drop-shadow(0 0 7px rgba(255, 43, 74, 0.6)); }
+.kontur-word { font-weight: 700; font-size: 17px; letter-spacing: 0.34em; margin-right: -0.34em; line-height: 1;
+  background: linear-gradient(180deg, #ffffff, #c6d3ea 55%, #9fb0cf); -webkit-background-clip: text; background-clip: text; color: transparent;
+  filter: drop-shadow(0 0 6px rgba(120, 170, 255, 0.35)); }
+.kontur-logo.lg .kontur-word { font-size: 29px; }
+html[data-theme="light"] .kontur-word { background: linear-gradient(180deg, #23345a, #0e1a33); -webkit-background-clip: text; background-clip: text; filter: none; }
+.brand { padding: 6px 4px 18px; justify-content: flex-start; }
+.login-brand { display: flex; flex-direction: column; align-items: center; gap: 10px; text-align: center; margin-bottom: 4px; }
+.login-brand .kontur-logo { margin-bottom: 8px; }
+
+/* боковое меню */
+.sidebar { background: linear-gradient(180deg, color-mix(in srgb, var(--sidebar) 92%, rgb(var(--glow))) 0%, var(--sidebar) 40%), var(--sidebar);
+  border-right: 1px solid color-mix(in srgb, rgb(var(--glow)) 22%, var(--border)); box-shadow: 1px 0 22px rgba(var(--glow), 0.08); }
+.nav-search { border-radius: 10px; background: var(--field); }
+.nav-link { border-radius: 10px; }
+.nav-link.active, .nav-group.flat .nav-link.active { color: #fff; font-weight: 600;
+  background: linear-gradient(90deg, var(--mint), color-mix(in srgb, var(--mint) 55%, transparent));
+  box-shadow: 0 0 0 1px rgba(var(--glow), 0.55), 0 0 18px rgba(var(--glow), 0.35); }
+.nav-link.active::before { display: none; }
+.nav-link.active svg { color: #fff; }
+html[data-theme="light"] .nav-link.active, html[data-theme="light"] .nav-group.flat .nav-link.active { color: var(--mint);
+  background: color-mix(in srgb, var(--mint) 9%, #fff); box-shadow: 0 0 0 1px color-mix(in srgb, var(--mint) 55%, transparent), 0 4px 14px rgba(var(--glow), 0.15); }
+html[data-theme="light"] .nav-link.active svg { color: var(--mint); }
+.nav-ico { border-radius: 9px; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--tone) 30%, transparent); }
+
+/* верхняя строка: стекло и светящаяся линия снизу (синяя, переходящая в красную) */
+.topbar { border-bottom: 0; box-shadow: none; }
+.topbar::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 1px; pointer-events: none;
+  background: linear-gradient(90deg, rgba(var(--glow), 0.05), rgba(var(--glow), 0.55) 35%, rgba(var(--glow-2), 0.55) 75%, rgba(var(--glow-2), 0.05)); }
+.topbar .search input { border-radius: 999px; background: color-mix(in srgb, var(--field) 85%, transparent); }
+
+/* шапка страницы: без рамки, заголовок с цветной светящейся чертой */
+.page-head { background: none; border: 0; padding: 2px 0; overflow: visible; }
+.page-head::after { display: none; }
+.page-head h1 { font-size: 24px; letter-spacing: -0.015em; }
+.page-head h1::before { width: 4px; height: 24px; background: linear-gradient(180deg, rgb(var(--glow)), rgb(var(--glow-2))); box-shadow: 0 0 10px rgba(var(--glow), 0.7); }
+
+/* карточки: тонкая светящаяся кромка, отблеск сверху, глубокая тень */
+.card, .modal, .menu, .bell-pop, .qnav { border-color: color-mix(in srgb, rgb(var(--glow)) 20%, var(--border)); }
+.card { background-image: linear-gradient(180deg, rgba(var(--glow), 0.07), transparent 42%); border-radius: 14px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05), 0 0 0 1px rgba(var(--glow), 0.04), 0 10px 30px rgba(0, 0, 0, 0.35), 0 0 22px rgba(var(--glow), 0.06); }
+html[data-theme="light"] .card { background-image: linear-gradient(180deg, rgba(var(--glow), 0.035), transparent 40%);
+  box-shadow: inset 0 1px 0 #fff, 0 6px 22px rgba(28, 62, 130, 0.08); }
+.card.deco { transition: box-shadow 0.2s, border-color 0.2s; }
+a.card.deco:hover, button.card:hover { border-color: color-mix(in srgb, rgb(var(--glow)) 55%, var(--border)); box-shadow: 0 0 0 1px rgba(var(--glow), 0.25), 0 0 26px rgba(var(--glow), 0.22); }
+.card-head .card-icon { background: rgba(var(--glow), 0.14); box-shadow: 0 0 12px rgba(var(--glow), 0.25); }
+.ring { filter: drop-shadow(0 0 10px rgba(var(--glow), 0.5)); }
+
+/* кнопки и поля */
+.btn { border-radius: 10px; }
+.btn.primary { border-color: transparent; background: linear-gradient(135deg, var(--mint-hover), color-mix(in srgb, var(--mint) 75%, #000));
+  box-shadow: 0 0 0 1px rgba(var(--glow), 0.6), 0 0 20px rgba(var(--glow), 0.45); }
+.btn.primary:hover { background: linear-gradient(135deg, var(--mint-hover), var(--mint)); box-shadow: 0 0 0 1px rgba(var(--glow), 0.8), 0 0 28px rgba(var(--glow), 0.6); }
+.input:focus { box-shadow: 0 0 0 3px rgba(var(--glow), 0.22), 0 0 14px rgba(var(--glow), 0.25); }
+
+/* таблицы */
+.table th { background: linear-gradient(180deg, rgba(var(--glow), 0.08), transparent), var(--surface); }
+.table tbody tr:hover td { background-color: rgba(var(--glow), 0.05); }
+
+/* переключатели вида */
+.page-switch-btn.on, .seg-btn.on { background: linear-gradient(90deg, rgba(var(--glow), 0.28), rgba(var(--glow), 0.12)); color: var(--text); box-shadow: inset 0 0 0 1px rgba(var(--glow), 0.5); }
+
+/* плитки с цветным тоном: акцент темы вместо бирюзового */
+.crew-tile, .crew-tile.tone-mint, .vc-cat,
+html[data-theme="light"] .crew-tile.tone-mint, html[data-theme="light"] .crew-tile:not([class*="tone-"]), html[data-theme="light"] .vc-cat,
+html[data-theme="crimson"] .crew-tile.tone-mint, html[data-theme="crimson"] .crew-tile:not([class*="tone-"]), html[data-theme="crimson"] .vc-cat:not([class*="tone-"]), html[data-theme="crimson"] .vc-cat.tone-mint { --tone: var(--glow); }
+
+/* вход */
+.login-wrap { background: none; isolation: isolate; }
+.login-wrap::before { content: ""; position: fixed; inset: 0; z-index: -1; pointer-events: none;
+  background: linear-gradient(118deg, transparent 0 63%, rgba(var(--glow), 0.32) 63.15%, transparent 63.5%),
+              linear-gradient(118deg, transparent 0 70%, rgba(var(--glow-2), 0.22) 70.1%, transparent 70.4%),
+              radial-gradient(55% 45% at 100% 0%, rgba(var(--glow), 0.18), transparent 70%),
+              radial-gradient(45% 40% at 0% 100%, rgba(var(--glow-2), 0.14), transparent 70%), var(--bg); }
+.login-card { box-shadow: 0 0 0 1px rgba(var(--glow), 0.25), 0 0 40px rgba(var(--glow), 0.18), 0 20px 50px rgba(0, 0, 0, 0.4); }
+
+/* выбор темы: образцы цветов */
+.theme-dot-dark { background: #040915; color: #2f80ff; }
+.theme-dot-light { background: #edf2fa; color: #1f6bff; }
+.theme-dot-crimson { background: #2a0612; color: #ff2d50; }
+
+@media print {
+  .app::before, .login-wrap::before, .topbar::after { display: none; }
+  .card { box-shadow: none; background-image: none; }
+}
+.week-day.today { background: linear-gradient(160deg, var(--mint-hover), color-mix(in srgb, var(--mint) 70%, #000)); box-shadow: 0 0 0 1px rgba(var(--glow), 0.6), 0 0 16px rgba(var(--glow), 0.5); }
+
+/* ---------- вход: картинка «Контур» целиком, форма стоит ровно на нарисованной ---------- */
+.login-wrap { position: fixed; inset: 0; overflow: hidden; display: block; padding: 0; background: #02050d; }
+.login-wrap::before { display: none; }
+/* «сцена» повторяет пропорции картинки и закрывает весь экран (как cover), поэтому места формы и кнопки совпадают с рисунком */
+.login-stage { position: absolute; left: 50%; top: 50%; width: max(100vw, calc(100vh * 1672 / 941)); aspect-ratio: 1672 / 941; transform: translate(-50%, -50%);
+  background: url("/login/bg.webp") center / 100% 100% no-repeat; }
+.login-theme { position: absolute; right: 18px; top: 18px; width: 48px; aspect-ratio: 1; z-index: 2; }
+.login-theme .theme-pick, .login-theme .theme-toggle { width: 100%; height: 100%; }
+.login-theme .theme-toggle { position: static; border-radius: 12px; background: #0a1226; border: 1px solid rgba(120, 150, 220, 0.35); color: #dfe8ff; }
+.login-theme .theme-menu { color: var(--text); }
+.login-stage .login-card { position: absolute; left: 33.1%; top: 29.3%; width: 34.6%; min-height: 57.5%; max-width: none; margin: 0;
+  padding: clamp(18px, 2.4%, 40px) clamp(18px, 2.6%, 42px); gap: 14px; border-radius: 22px; color: #eaf1ff;
+  border: 1.5px solid transparent;
+  background: linear-gradient(160deg, rgba(10, 20, 44, 0.94), rgba(6, 10, 26, 0.96)) padding-box,
+              linear-gradient(120deg, #2f86ff, #6d55ff 50%, #ff2b4a) border-box;
+  -webkit-backdrop-filter: blur(16px); backdrop-filter: blur(16px);
+  box-shadow: -10px 0 34px rgba(47, 134, 255, 0.45), 10px 0 34px rgba(255, 43, 74, 0.42), 0 24px 60px rgba(0, 0, 0, 0.6); }
+.login-stage .login-card .muted { color: #a9b8d8; }
+.login-head { display: flex; align-items: center; gap: 16px; margin-bottom: 4px; }
+.login-head h1 { font-size: 26px; color: #fff; }
+.login-badge { flex: none; width: 64px; height: 64px; border-radius: 14px; display: grid; place-items: center;
+  background: linear-gradient(160deg, #0d1a3a, #070d22); border: 1px solid rgba(110, 140, 230, 0.35); box-shadow: 0 0 18px rgba(47, 134, 255, 0.25); }
+.login-badge svg { width: 44px; height: 44px; fill: none; stroke-width: 3.2; overflow: visible; }
+.login-field { display: flex; flex-direction: column; gap: 7px; }
+.login-label { display: flex; align-items: center; gap: 8px; font-size: 14px; color: #dfe7fb; }
+.login-label svg { color: #b9c7e6; }
+.login-input { position: relative; display: block; }
+.login-stage .login-input .input { width: 100%; height: 50px; padding: 0 46px 0 18px; border-radius: 12px; font-size: 16px; color: #fff;
+  background: rgba(10, 20, 44, 0.85); border: 1px solid rgba(110, 140, 230, 0.38); }
+.login-stage .login-input .input::placeholder { color: #7f8fb2; }
+.login-stage .login-input .input:focus { border-color: #4b93ff; box-shadow: 0 0 0 3px rgba(47, 128, 255, 0.25), 0 0 16px rgba(47, 128, 255, 0.35); }
+.login-input-ico, .login-eye { position: absolute; right: 12px; top: 50%; transform: translateY(-50%); color: #c9d5f0; }
+.login-eye { display: grid; place-items: center; width: 32px; height: 32px; right: 8px; padding: 0; border: 0; border-radius: 8px; background: none; cursor: pointer; }
+.login-eye:hover { background: rgba(120, 150, 220, 0.15); }
+.login-stage .check { color: #e6edff; }
+.login-stage .check input { accent-color: #2f80ff; width: 18px; height: 18px; }
+.login-stage .btn.login-go { width: 100%; height: 54px; border-radius: 12px; font-size: 18px; color: #fff; border: 0;
+  background: linear-gradient(90deg, #12b4ff, #2f6bff 40%, #ff2b4a); box-shadow: -6px 0 22px rgba(47, 134, 255, 0.5), 6px 0 22px rgba(255, 43, 74, 0.5); }
+.login-stage .btn.login-go:hover:not(:disabled) { filter: brightness(1.1); }
+.login-stage .btn.login-go:disabled { opacity: 0.75; }
+.login-foot { display: flex; align-items: center; gap: 12px; line-height: 1.45; }
+.login-foot svg { flex: none; color: #4b8dff; }
+
+/* узкий экран (телефон): картинка остаётся фоном, форма просто по центру */
+@media (max-width: 760px), (max-height: 520px) {
+  .login-wrap { overflow-y: auto; }
+  .login-stage { position: relative; left: 0; top: 0; transform: none; width: 100%; min-height: 100%; aspect-ratio: auto; display: grid; place-items: center;
+    align-items: start; padding: 31vh 16px 24px;
+    background: linear-gradient(180deg, rgba(2, 5, 13, 0) 0%, rgba(2, 5, 13, 0) 24%, rgba(2, 5, 13, 0.94) 30%, #02050d 100%),
+                url("/login/bg.webp") 50% 0 / auto 100vh no-repeat, #02050d; }
+  .login-stage .login-card { position: static; width: 100%; max-width: 440px; min-height: 0; }
+  .login-theme { right: 14px; top: 14px; width: 44px; }
+  .login-head h1 { font-size: 22px; }
+  .login-badge { width: 52px; height: 52px; }
+}

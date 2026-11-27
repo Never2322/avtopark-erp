@@ -9,6 +9,7 @@ import {
 import { ConnectionBar, useOutboxSync } from "./Outbox";
 import { BellMenu, useNotifSummary } from "./Bell";
 import { ThemeToggle } from "./ThemeToggle";
+import { Logo } from "./Logo";
 import { useAuth } from "../auth";
 import { get } from "../api";
 import { applyLayout, MenuEditor, type MenuLayoutRes } from "./MenuEditor";
@@ -237,15 +238,14 @@ export function Shell() {
   useEffect(() => { if (hereKey) setOpenKey(hereKey); }, [hereKey]);
 
   // название раздела в заголовке вкладки браузера
-  useEffect(() => { document.title = hereTitle ? `${hereTitle} · Автопарк ERP` : "Автопарк ERP"; }, [hereTitle]);
+  useEffect(() => { document.title = hereTitle ? `${hereTitle} · Контур` : "Контур"; }, [hereTitle]);
 
   return (
     <div className={`app ${editing ? "menu-editing" : ""}`}>
       <a className="skip" href="#content">К содержимому</a>
       <aside className={`sidebar ${open ? "open" : ""}`} aria-label="Главное меню">
         <div className="brand">
-          <span className="logo"><Truck size={18} aria-hidden /></span>
-          Автопарк
+          <Logo />
           <button type="button" className="btn ghost icon-btn drawer-close" onClick={() => setOpen(false)} aria-label="Закрыть меню"><X size={18} aria-hidden /></button>
         </div>
         <button type="button" className="nav-search" onClick={() => { setOpen(false); setQuick(true); }} aria-haspopup="dialog" title="Найти раздел по названию (Ctrl+K)">

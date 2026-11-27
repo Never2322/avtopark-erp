@@ -1,7 +1,7 @@
 @echo off
 chcp 65001 >nul
 cd /d "%~dp0"
-title Автопарк
+title Контур
 
 echo.
 echo  Останавливаю программу...

@@ -92,7 +92,7 @@ async def lifespan(app: FastAPI):
 
 def create_app() -> FastAPI:
     s = get_settings()
-    app = FastAPI(title="Автопарк ERP", version="0.1.0", lifespan=lifespan,
+    app = FastAPI(title="Контур", version="0.1.0", lifespan=lifespan,
                   description="API внутренней ERP автопарка (очередь 1: вход и роли, юрлица, сотрудники, техника, показания, "
                               "статусы, обращения и ремонты, путевые листы, личные дела водителей и техники, журнал действий, резервные копии).",
                   docs_url="/api/docs" if s.docs_enabled else None,

@@ -45,7 +45,7 @@ CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"        # без похожи�
 CODE_RE = re.compile(r"[A-Z2-9]{8}")
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
-HELP_TEXT = ("Это бот уведомлений программы «Автопарк».\n"
+HELP_TEXT = ("Это бот уведомлений программы «Контур».\n"
              "Чтобы подключить его, откройте на сайте «Профиль», нажмите «Подключить Telegram» и пришлите сюда полученный код.\n"
              "Отключить уведомления: /stop")
 
@@ -167,7 +167,7 @@ def bot_name() -> str:
 def build_mail(to: str, subject: str, body: str, attachments=()) -> EmailMessage:
     msg = EmailMessage()
     sender = sender_address()
-    msg["From"] = formataddr(("Автопарк", sender))
+    msg["From"] = formataddr(("Контур", sender))
     msg["To"] = to
     msg["Subject"] = " ".join(subject.split())[:200]
     msg["Date"] = formatdate(localtime=True)
@@ -227,8 +227,8 @@ def telegram_text(r: Outbox) -> str:
 def mail_parts(r: Outbox) -> tuple[str, str]:
     link = page_link(r.url)
     body = "\n\n".join(p for p in (r.text, f"Открыть: {link}" if link else "",
-                                   "Это автоматическое сообщение программы «Автопарк». Отключить такие письма можно в разделе «Профиль».") if p)
-    return f"[Автопарк] {r.title}", body
+                                   "Это автоматическое сообщение программы «Контур». Отключить такие письма можно в разделе «Профиль».") if p)
+    return f"[Контур] {r.title}", body
 
 
 def enqueue(db: Session, user_ids, title: str, text_: str = "", url: str = "") -> int:
@@ -422,7 +422,7 @@ def send_test(db: Session, user: User) -> dict:
     """Пробное сообщение сразу, без очереди: человек должен увидеть результат. Возвращает итог по каждому каналу."""
     ch = channel_of(db, user.id)
     result: dict = {}
-    hello = f"Проверка связи: уведомления программы «Автопарк» приходят сюда, {user.display_name or user.login}."
+    hello = f"Проверка связи: уведомления программы «Контур» приходят сюда, {user.display_name or user.login}."
     if telegram_enabled():
         if ch and ch.telegram_chat_id:
             try:
@@ -435,7 +435,7 @@ def send_test(db: Session, user: User) -> dict:
     if email_enabled():
         if ch and ch.email:
             try:
-                send_mail(build_mail(ch.email, "[Автопарк] Проверка связи", hello + "\n\nЭто пробное письмо, отвечать на него не нужно."))
+                send_mail(build_mail(ch.email, "[Контур] Проверка связи", hello + "\n\nЭто пробное письмо, отвечать на него не нужно."))
                 result["email"] = {"ok": True}
             except SendError as exc:
                 result["email"] = {"ok": False, "error": str(exc)}

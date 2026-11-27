@@ -15,7 +15,7 @@ export function TimesheetPrint() {
   const d = q.data;
   useEffect(() => {
     if (d) document.title = `Табель ${d.title}`;
-    return () => { document.title = "Автопарк ERP"; };
+    return () => { document.title = "Контур"; };
   }, [d]);
 
   return (

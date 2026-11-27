@@ -278,7 +278,7 @@ export function PrintPage() {
   const nav = useNavigate();
   const q = useQuery({ queryKey: ["print", kind, id], queryFn: () => get<P>(`/print/${kind}/${id}`), enabled: KINDS.has(kind), retry: false });
   const d = q.data;
-  useEffect(() => { if (d) document.title = `${d.title} № ${d.prefix ? `${d.prefix}-` : ""}${d.number}`; return () => { document.title = "Автопарк ERP"; }; }, [d]);
+  useEffect(() => { if (d) document.title = `${d.title} № ${d.prefix ? `${d.prefix}-` : ""}${d.number}`; return () => { document.title = "Контур"; }; }, [d]);
 
   let sheet: ReactNode = null;
   if (d?.kind === "order") sheet = <OrderSheet d={d} />;

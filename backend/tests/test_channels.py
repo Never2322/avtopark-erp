@@ -189,7 +189,7 @@ def test_notification_goes_to_telegram_and_email_with_link(make_client, world, t
     assert len(tg.texts(DIR_CHAT)) == 1
     mail = smtp.messages[0]
     assert mail["to"] == ["mech@example.ru"] and mail["from"] == "erp@example.ru"
-    assert mail["msg"]["Subject"] == "[Автопарк] Новое обращение"
+    assert mail["msg"]["Subject"] == "[Контур] Новое обращение"
     body = mail["msg"].get_content()
     assert "Стук в подвеске" in body and "Открыть: https://erp.example.ru/requests/5" in body
     assert all(r.state == "sent" and r.sent_at for r in outbox())
@@ -386,7 +386,7 @@ def test_test_message_reports_each_channel(make_client, world, tg, smtp):
                                                            "email": {"ok": False, "error": "Адрес почты не указан"}}
     link_chat("mech_a", MECH_CHAT, "mech@example.ru", True)
     assert c.post("/me/channels/test").json()["result"] == {"telegram": {"ok": True}, "email": {"ok": True}}
-    assert "Проверка связи" in tg.texts(MECH_CHAT)[0] and smtp.messages[0]["msg"]["Subject"] == "[Автопарк] Проверка связи"
+    assert "Проверка связи" in tg.texts(MECH_CHAT)[0] and smtp.messages[0]["msg"]["Subject"] == "[Контур] Проверка связи"
     tg.fail["sendMessage"] = (403, "Forbidden: bot was blocked by the user")
     assert c.post("/me/channels/test").json()["result"]["telegram"]["ok"] is False
 
