@@ -19,7 +19,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, deferred, mapped_column, relationship
 
 from app.db import Base
-from app.enums import (ATTENDANCE_SOURCES, TARIFF_KINDS, WORKLOG_KINDS, WORKLOG_SOURCES, ALL_STATUS_CODES, MAINTENANCE_KINDS, OUTBOX_CHANNELS, OUTBOX_STATES, TIRE_SEASONS, ROUTE_PLAN_KINDS, ROUTE_NOTE_KINDS, VEHICLE_FINANCE_KINDS, VEHICLE_REPAIR_KINDS, ALL_DOC_KINDS, ANNOUNCEMENT_AUDIENCES, NOTIFICATION_KINDS, CALENDAR_COLORS, CALENDAR_REMIND_MAX, EMPLOYEE_EVENT_KINDS, BACKUP_STATUSES, BILL_KINDS, BILL_STATUSES, CASH_ACCOUNT_KINDS, CASH_OP_KINDS, COUNTERPARTY_KINDS, DOC_TYPES, FINE_PAYERS,
+from app.enums import (ATTENDANCE_SOURCES, TARIFF_KINDS, WORKLOG_KINDS, WORKLOG_SOURCES, ALL_STATUS_CODES, MAINTENANCE_KINDS, OUTBOX_CHANNELS, OUTBOX_STATES, TIRE_SEASONS, ROUTE_PLAN_KINDS, ROUTE_NOTE_KINDS, VEHICLE_FINANCE_KINDS, VEHICLE_REPAIR_KINDS, ALL_DOC_KINDS, ANNOUNCEMENT_AUDIENCES, NOTIFICATION_KINDS, CALENDAR_COLORS, CALENDAR_REMIND_MAX, EMPLOYEE_EVENT_KINDS, BACKUP_STATUSES, BILL_CATEGORIES, BILL_KINDS, BILL_STATUSES, CASH_ACCOUNT_KINDS, CASH_OP_KINDS, COUNTERPARTY_KINDS, DOC_TYPES, FINE_PAYERS,
                        JOB_STAGES, JOB_STATES, ORDER_STATUSES, VAT_RATES,
                        PAYMENT_KINDS, RENTAL_DIRECTIONS, TARIFF_UNITS, TIMESHEET_CODES, READING_KINDS, READING_SOURCES, REQUEST_PRIORITIES, REQUEST_STATUSES, STOCK_MOVE_KINDS,
                        REVIEW_STATES, VEHICLE_CATEGORIES, VEHICLE_STATUSES, WAYBILL_SHIFTS, WAYBILL_STATUSES, check_in)
@@ -838,7 +838,8 @@ class Trip(Audited, Voidable, Base):
 
 
 class FuelFill(Audited, Voidable, Base):
-    """Заправка: литры, сумма, пробег, полный ли бак. По полным заправкам считается расход на 100 км."""
+    """Заправка: литры, сумма, пробег по спидометру или моточасы. По ним считается расход: л/100 км или л/моточас.
+    full_tank больше не спрашивается (новые заправки считаются до полного бака), поле оставлено для старых записей."""
     __tablename__ = "fuel_fills"
     id: Mapped[int] = mapped_column(primary_key=True)
     legal_entity_id: Mapped[int] = mapped_column(ForeignKey("legal_entities.id"), index=True)
@@ -848,6 +849,7 @@ class FuelFill(Audited, Voidable, Base):
     liters: Mapped[Decimal] = mapped_column(Numeric(8, 2))
     amount: Mapped[Decimal] = mapped_column(Money, default=0, server_default="0")
     odometer: Mapped[int | None] = mapped_column(Integer)
+    engine_hours: Mapped[Decimal | None] = mapped_column(Numeric(9, 1))
     full_tank: Mapped[bool] = mapped_column(Boolean, default=True, server_default=text("true"))
     station: Mapped[str] = mapped_column(String(80), default="", server_default="")
     note: Mapped[str] = mapped_column(String(300), default="", server_default="")
@@ -856,6 +858,7 @@ class FuelFill(Audited, Voidable, Base):
         CheckConstraint("liters > 0", name="liters"),
         CheckConstraint("amount >= 0", name="amount"),
         CheckConstraint("odometer IS NULL OR odometer >= 0", name="odometer"),
+        CheckConstraint("engine_hours IS NULL OR engine_hours >= 0", name="engine_hours"),
         Index("ix_fuel_fills_vehicle_date", "vehicle_id", "fill_date"),
         Index("uq_fuel_fills_client", "created_by_id", "client_id", unique=True, postgresql_where=text("client_id <> ''")),
     )
@@ -967,9 +970,11 @@ class RepairBill(Audited, Voidable, Base):
     vat: Mapped[Decimal] = mapped_column(Money, default=0, server_default="0")
     status: Mapped[str] = mapped_column(String(10), default="unpaid", server_default="unpaid")
     paid_date: Mapped[dt.date | None] = mapped_column(Date)
+    category: Mapped[str | None] = mapped_column(String(12))
     note: Mapped[str] = mapped_column(String(500), default="", server_default="")
     __table_args__ = (
         CheckConstraint(check_in("kind", BILL_KINDS), name="kind"),
+        CheckConstraint("category IS NULL OR " + check_in("category", BILL_CATEGORIES), name="category"),
         CheckConstraint(check_in("status", BILL_STATUSES), name="status"),
         CheckConstraint("vat_pct IN (" + ", ".join(VAT_RATES) + ")", name="vat_pct"),
         CheckConstraint("total >= 0 AND vat >= 0 AND vat <= total", name="amounts"),
@@ -1572,3 +1577,40 @@ class RouteNote(Base):
     vehicle: Mapped[Vehicle] = relationship()
     employee: Mapped[Employee] = relationship()
     __table_args__ = (CheckConstraint(check_in("kind", ROUTE_NOTE_KINDS), name="kind"), Index("ix_route_notes_date", "note_date"))
+
+
+class AppSetting(Base):
+    """Общая настройка программы одной записью: ключ и значение в JSON (например, порядок и названия пунктов меню)."""
+    __tablename__ = "app_settings"
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    value: Mapped[dict] = mapped_column(JSONB)
+    updated_at: Mapped[dt.datetime] = mapped_column(TS, server_default=func.now(), onupdate=func.now())
+    updated_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+
+
+class BillBudget(Base):
+    """Бюджет на месяц по категории счетов (запчасти, жидкости, расходники): из него вычитаются счета этой категории за месяц."""
+    __tablename__ = "bill_budgets"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    month: Mapped[dt.date] = mapped_column(Date)                 # первое число месяца
+    category: Mapped[str] = mapped_column(String(12))
+    amount: Mapped[Decimal] = mapped_column(Money)
+    updated_at: Mapped[dt.datetime] = mapped_column(TS, server_default=func.now(), onupdate=func.now())
+    updated_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    __table_args__ = (UniqueConstraint("month", "category", name="uq_bill_budgets"), CheckConstraint("amount >= 0", name="amount"),
+                      CheckConstraint(check_in("category", BILL_CATEGORIES), name="category"))
+
+
+class GarbageDayRate(Base):
+    """Ставка за тонну, проставленная вручную в «Зарплате мусоровозов» на один день: сотрудник (водитель или грузчик) на мусоровозе.
+    Если её нет, берётся тариф «за тонну» сотрудника."""
+    __tablename__ = "garbage_day_rates"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    legal_entity_id: Mapped[int] = mapped_column(ForeignKey("legal_entities.id"), index=True)
+    work_date: Mapped[dt.date] = mapped_column(Date, index=True)
+    vehicle_id: Mapped[int] = mapped_column(ForeignKey("vehicles.id"))
+    employee_id: Mapped[int] = mapped_column(ForeignKey("employees.id"))
+    rate: Mapped[Decimal] = mapped_column(Money)
+    updated_at: Mapped[dt.datetime] = mapped_column(TS, server_default=func.now(), onupdate=func.now())
+    updated_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    __table_args__ = (UniqueConstraint("work_date", "vehicle_id", "employee_id", name="uq_garbage_day_rates"), CheckConstraint("rate >= 0", name="rate"))

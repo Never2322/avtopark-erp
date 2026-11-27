@@ -15,7 +15,7 @@ import { useBillMeta, type BillMeta } from "./Bills";
 interface Detail {
   id: number; legal_entity_id: number; kind: string; number: string; bill_date: string; supplier_id: number | null;
   supplier_name: string; supplier_inn: string; supplier_kpp: string; supplier_addr: string; supplier_phone: string; bank_name: string; bik: string; corr_account: string; account: string;
-  basis: string; vehicle_id: number | null; request_id: number | null; request: { id: number | null; number: number } | null; vat_pct: number; total: number; vat: number; note: string;
+  basis: string; vehicle_id: number | null; request_id: number | null; request: { id: number | null; number: number } | null; vat_pct: number; total: number; vat: number; note: string; category: string | null;
   items: { name: string; article: string; qty_text: string; unit: string; price: number }[]; can: { edit: boolean };
 }
 interface Prefill {
@@ -57,7 +57,7 @@ function Body({ edit, meta, prefill, kind: kind0 }: { edit?: Detail; meta: BillM
     basis: edit?.basis ?? prefill?.basis ?? hf.basis ?? "", vehicle_id: String(edit?.vehicle_id ?? prefill?.vehicle_id ?? hf.vehicle_id ?? ""), request_id: String(edit?.request_id ?? prefill?.request_id ?? ""),
     legal_entity_id: String(edit?.legal_entity_id ?? prefill?.legal_entity_id ?? hf.legal_entity_id ?? (handoff?.legalEntityId || (meta.entities.length === 1 ? meta.entities[0].id : meta.entities.some((x) => x.id === entityId) ? entityId : ""))),
     vat_pct: String(edit?.vat_pct ?? hf.vat_pct ?? 22), total: edit ? String(edit.total).replace(".", ",") : hf.total != null ? String(hf.total).replace(".", ",") : "", vat: !edit && hf.vat != null ? String(hf.vat).replace(".", ",") : "",
-    paid: false, paid_date: "", note: edit?.note ?? handoff?.note ?? "",
+    paid: false, paid_date: "", note: edit?.note ?? handoff?.note ?? "", category: edit?.category ?? "",
   });
   const [rows, setRows] = useState<PartRow[]>(() =>
     edit?.items.length ? edit.items.map((i) => ({ name: i.name, article: i.article, qty: i.qty_text, unit: i.unit, price: String(i.price).replace(".", ",") }))
@@ -106,6 +106,7 @@ function Body({ edit, meta, prefill, kind: kind0 }: { edit?: Detail; meta: BillM
       const body: Record<string, unknown> = {
         number: v.number, bill_date: v.bill_date, supplier_name: v.supplier_name, supplier_inn: v.supplier_inn, supplier_kpp: v.supplier_kpp, supplier_addr: v.supplier_addr,
         supplier_phone: v.supplier_phone, bank_name: v.bank_name, bik: v.bik, corr_account: v.corr_account, account: v.account, basis: v.basis, note: v.note, vat_pct: pct,
+        category: v.category || null,
       };
       if (v.supplier_id) body.supplier_id = Number(v.supplier_id);
       if (v.vehicle_id) body.vehicle_id = Number(v.vehicle_id); else if (edit?.vehicle_id) body.vehicle_id = null;
@@ -141,7 +142,7 @@ function Body({ edit, meta, prefill, kind: kind0 }: { edit?: Detail; meta: BillM
   };
   const e = f.errors;
   const itemsErr = e.items ?? e.name ?? e.qty ?? e.unit;
-  const otherErrors = Object.keys(e).filter((k) => !["number", "bill_date", "supplier_name", "supplier_inn", "supplier_kpp", "supplier_addr", "supplier_phone", "bank_name", "bik", "corr_account", "account", "basis", "vehicle_id", "request_id", "legal_entity_id", "vat_pct", "total", "vat", "items", "name", "qty", "unit", "paid_date", "status", "note", "files"].includes(k));
+  const otherErrors = Object.keys(e).filter((k) => !["number", "bill_date", "supplier_name", "supplier_inn", "supplier_kpp", "supplier_addr", "supplier_phone", "bank_name", "bik", "corr_account", "account", "basis", "vehicle_id", "request_id", "legal_entity_id", "vat_pct", "total", "vat", "items", "name", "qty", "unit", "paid_date", "status", "note", "files", "category"].includes(k));
 
   return (
     <>
@@ -188,6 +189,12 @@ function Body({ edit, meta, prefill, kind: kind0 }: { edit?: Detail; meta: BillM
                 <input className="input" value={f.values.number} maxLength={40} onChange={(ev) => f.set("number", ev.target.value)} />
               </Field>
               <Field label="Дата счёта" error={e.bill_date}><input className="input" type="date" value={f.values.bill_date} onChange={(ev) => f.set("bill_date", ev.target.value)} /></Field>
+              <Field label="Категория" error={e.category} hint="Из бюджета этой категории на месяц вычтется сумма счёта">
+                <select className="input" value={f.values.category} onChange={(ev) => f.set("category", ev.target.value)}>
+                  <option value="">Без категории</option>
+                  {meta.categories.map((c) => <option key={c.code} value={c.code}>{c.label}</option>)}
+                </select>
+              </Field>
               <Field label="Машина" error={e.vehicle_id} hint="Если счёт относится к конкретной машине">
                 <select className="input" value={f.values.vehicle_id} disabled={!!prefill?.request_id && !edit} onChange={(ev) => { f.set("vehicle_id", ev.target.value); f.set("request_id", ""); }}>
                   <option value="">Не привязан к машине</option>

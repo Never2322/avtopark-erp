@@ -350,14 +350,6 @@ def money_parts(c: Ctx, ids: list[int]) -> dict[str, dict[int, float]]:
     return parts
 
 
-def cost_total(parts: dict, vid: int) -> float:
-    return sum(parts.get(k, {}).get(vid, 0.0) for k in ("fuel", "bills", "requests", "fines", "rent_in"))
-
-
-def income_total(parts: dict, vid: int) -> float:
-    return sum(parts.get(k, {}).get(vid, 0.0) for k in ("orders", "rent_out"))
-
-
 COST_KEYS = ("fuel", "bills_net", "requests", "fines", "stock", "insurance", "other")
 
 
@@ -618,7 +610,7 @@ def report_month(c: Ctx) -> dict:
     fuel_ok = bool(c.sc("fuel_fills.view"))
     trips_sc = c.sc("trips.view")
     if not money:
-        c.hide("Затраты, доходы и штрафы в рублях: нет права видеть деньги в отчётах")
+        c.hide("Затраты в рублях: нет права видеть деньги в отчётах")
     if not fuel_ok:
         c.hide("Заправки и расход: нет права видеть заправки")
     if not trips_sc:
@@ -631,16 +623,14 @@ def report_month(c: Ctx) -> dict:
     series = km_series(c, ids, c.end)
     down = downtime_data(c, vehicles)
     cols = [Col("name", "Машина"), Col("km", "Пробег, км", "dec", True), Col("liters", "Заправлено, л", "dec", True, fuel_ok),
-            Col("per100", "Расход, л/100 км", "dec", False, fuel_ok), Col("cost", "Затраты, ₽", "money", True, money),
-            Col("income", "Доходы, ₽", "money", True, money), Col("trips", "Рейсов", "int", True, bool(trips_sc)),
-            Col("repair", "На ремонте, сут.", "dec", True), Col("fines", "Штрафы (платит компания), ₽", "money", True, money)]
+            Col("per100", "Расход, л/100 км", "dec", False, fuel_ok), Col("cost", "Всего затрат, ₽", "money", True, money),
+            Col("trips", "Рейсов", "int", True, bool(trips_sc)), Col("repair", "На ремонте, сут.", "dec", True)]
     rows = []
     for v in vehicles:
         d = data.get(v.id, {})
         row = {"name": label(v), "km": km_between(series, v.id, c.start, c.end), "liters": round(d.get("liters", 0.0), 1) or None, "per100": d.get("per100"),
-               "cost": fl(cost_total(parts, v.id)), "income": fl(income_total(parts, v.id)), "trips": trips.get(v.id, 0),
-               "repair": round(down[v.id]["days"]["in_repair"], 1), "fines": fl(parts.get("fines", {}).get(v.id))}
-        if active(row, v, ["km", "liters", "cost", "income", "trips", "fines"]):
+               "cost": fl(vehicle_cost(parts, v.id)), "trips": trips.get(v.id, 0), "repair": round(down[v.id]["days"]["in_repair"], 1)}
+        if active(row, v, ["km", "liters", "cost", "trips"]):
             rows.append(row)
     summary = table(cols, rows)
     ch = chart([short(r["name"].split(" · ")[0]) for r in rows], [r["cost"] if money else r["km"] for r in rows], "₽" if money else "км", [r["name"] for r in rows])
@@ -648,8 +638,9 @@ def report_month(c: Ctx) -> dict:
     names = {v.id: label(v) for v in vehicles}
     extras: list[dict] = []
     sheets: list[tuple[str, dict]] = [("Сводка", summary)]
-    if money:
-        sheets.append(("Затраты", report_costs(c)["table"]))
+    costs_t = report_costs(c)["table"] if money else None
+    if costs_t:
+        sheets.append(("Затраты", costs_t))
     if fuel_ok:
         sheets.append(("Топливо", report_fuel(c)["table"]))
     dt_rep = report_downtime(c)
@@ -704,8 +695,11 @@ def report_month(c: Ctx) -> dict:
             sheets.append((e["title"].replace(" за месяц", ""), {"columns": e["columns"], "rows": e["rows"], "totals": e["totals"]}))
         else:
             sheets.append(("Периоды ремонта", {"columns": e["columns"], "rows": e["rows"], "totals": None}))
-    return {"title": "Итоги месяца", "table": summary, "chart": ch, "extras": extras, "sheets": sheets,
-            "note": "Всё за выбранный месяц одним отчётом: пробег, топливо, затраты, простои, обращения, штрафы и рейсы. В Excel каждый раздел на своём листе."}
+    if costs_t and costs_t["rows"]:                                   # затраты по статьям — первой таблицей под сводкой (в Excel это лист «Затраты»)
+        extras.insert(0, {"title": "Затраты по статьям", **costs_t})
+    return {"title": "Итоги и затраты по технике", "table": summary, "chart": ch, "extras": extras, "sheets": sheets,
+            "note": "Всё за выбранный месяц одним отчётом: пробег, топливо, затраты по статьям (топливо, ремонт, детали со склада, штрафы, страховка, прочее), "
+                    "простои, обращения, штрафы и рейсы. В Excel каждый раздел на своём листе."}
 
 
 # ---------------------------------------------------------------- перечень отчётов
@@ -1234,7 +1228,7 @@ def tonnage_report(c: Ctx, garbage: bool) -> dict:
                  "откройте «Журнал тоннажа», отберите «Тоннаж не внесён» и впишите вес по фото.")
     if garbage:
         note = note.replace("В таблице машины, по которым ведётся тоннаж", "В таблице все мусоровозы") + (
-            " Пробег — по показаниям спидометра, топливо — по заправкам за месяц, «Все затраты на машину» — как в отчёте «Затраты по технике»: "
+            " Пробег — по показаниям спидометра, топливо — по заправкам за месяц, «Все затраты на машину» — как в таблице «Затраты по статьям» отчёта «Итоги и затраты по технике»: "
             "топливо, ремонт, детали со склада, штрафы, страховка и прочие затраты.")
     else:
         note += " Мусоровозы здесь не показываются: для них отдельный отчёт «Мусоровозы за месяц»."
@@ -1254,10 +1248,10 @@ class Report:
 
 
 REPORTS: dict[str, Report] = {r.name: r for r in (
-    Report("month", "Итоги месяца", "month", ("vehicles.view",), report_month, desc="Всё за месяц по каждой машине одной таблицей"),
+    Report("month", "Итоги и затраты по технике", "month", ("vehicles.view",), report_month,
+           desc="Всё за месяц по каждой машине: пробег, топливо, затраты по статьям, простои, штрафы и рейсы"),
     Report("mileage", "Пробег", "range", ("vehicles.view",), report_mileage, desc="Сколько проехала каждая машина за период и по дням"),
     Report("fuel", "Топливо", "range", ("fuel_fills.view",), report_fuel, desc="Литры, расход на 100 км и сравнение с нормой"),
-    Report("costs", "Затраты по технике", "range", ("vehicles.view",), report_costs, True, "Топливо, ремонт, детали со склада, штрафы и страховка по машинам"),
     Report("repairs", "Ремонты по месяцам", "year12", ("vehicles.view",), report_repairs, True, "Во что обошёлся ремонт каждой машины по месяцам"),
     Report("waybill_fuel", "Расход по путевым листам", "range", ("waybills.view",), report_waybill_fuel, desc="Расход топлива по закрытым листам и перерасход"),
     Report("downtime", "Простои", "range", ("vehicles.view",), report_downtime, desc="Сколько суток машина в работе, на ремонте, в отпуске"),

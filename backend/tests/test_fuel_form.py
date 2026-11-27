@@ -5,7 +5,7 @@ from tests.test_dossier import png
 from tests.test_entries import day
 
 REQUIRED = {"fill_date", "vehicle_id", "liters"}
-OPTIONAL = {"driver_id", "amount", "odometer", "full_tank", "station", "note"}
+OPTIONAL = {"driver_id", "amount", "odometer", "engine_hours", "station", "note"}
 
 
 def test_meta_has_three_main_fields_and_optional_block(world, make_client):

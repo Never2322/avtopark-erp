@@ -245,7 +245,7 @@ export function ReportsIndex() {
           ? <Empty icon={BarChart3} title="Отчётов для вас пока нет">Отчёты строятся по данным из разделов. Обратитесь к руководителю, если нужен доступ.</Empty>
           : (
             <div className="grid cols-3 report-cards">
-              {d.items.map((r) => (
+              {d.items.filter((r) => r.name !== "garbage_salary").map((r) => (
                 <Link key={r.name} to={`/reports/${r.name}`} className="card report-card">
                   <div className="row"><BarChart3 size={18} aria-hidden /><h2>{r.title}</h2></div>
                   <p className="muted">{r.desc}</p>

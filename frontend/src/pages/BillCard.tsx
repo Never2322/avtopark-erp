@@ -16,7 +16,7 @@ interface Detail {
   id: number; legal_entity_id: number; legal_entity: string; kind: string; kind_label: string; number: string; bill_date: string;
   supplier_name: string; supplier_inn: string; supplier_kpp: string; supplier_addr: string; supplier_phone: string; bank_name: string; bik: string; corr_account: string; account: string;
   basis: string; vehicle_id: number | null; vehicle: string; request_id: number | null; request: { id: number | null; number: number; title: string; status_label: string } | null;
-  vat_pct: number; vat_label: string; total: number; vat: number; words: string; status: string; status_label: string; paid_date: string | null; note: string;
+  vat_pct: number; vat_label: string; total: number; vat: number; words: string; status: string; status_label: string; category: string | null; category_label: string; paid_date: string | null; note: string;
   archived: boolean; archive_reason: string; created_by: string | null; created_at: string; updated_at: string; items: Item[]; files: FileRow[];
   can: { edit: boolean; pay: boolean; void: boolean; restore: boolean; print: boolean; files: boolean };
 }
@@ -96,6 +96,7 @@ export function BillCard() {
               <dt>Прописью</dt><dd>{b.words}</dd>
               <dt>Оплата</dt><dd>{b.status === "paid" ? <>оплачен {fmtDate(b.paid_date)}</> : b.status === "cancelled" ? "отменён" : <span style={{ color: "var(--warning)" }}>ещё не оплачен</span>}</dd>
               <dt>Основание</dt><dd>{b.basis || <span className="muted">не указано</span>}</dd>
+              <dt>Категория</dt><dd>{b.category_label || <span className="muted">без категории</span>}</dd>
               <dt>Машина</dt><dd>{b.vehicle_id ? <Link to={`/vehicles/${b.vehicle_id}`}>{b.vehicle}</Link> : <span className="muted">не привязан</span>}</dd>
               <dt>Обращение</dt><dd>{b.request ? (b.request.id ? <Link to={`/requests/${b.request.id}`}>№ {b.request.number}</Link> : `№ ${b.request.number}`) : <span className="muted">не привязан</span>}{b.request?.title && <span className="muted"> · {b.request.title} ({b.request.status_label})</span>}</dd>
               {b.note && <><dt>Заметка</dt><dd style={{ whiteSpace: "pre-wrap" }}>{b.note}</dd></>}

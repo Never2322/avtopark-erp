@@ -12,7 +12,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.enums import PAY_TARIFF_KINDS, PAY_TARIFF_UNITS, TON_UNITS, WORK_TARIFF_UNITS, WORKLOG_KINDS, WORKLOG_MAX_HOURS
-from app.models import Employee, Tariff, Vehicle, WeighTicket, WorkLog
+from app.models import Employee, GarbageDayRate, Tariff, Vehicle, WeighTicket, WorkLog
 from app.services.vehicles import employee_in_entity
 
 CENT = Decimal("0.01")
@@ -56,12 +56,35 @@ def day_tons(db: Session, pairs) -> dict[tuple[int, dt.date], Decimal]:
     return {(d, day): Decimal(n or 0) for d, day, n in rows}
 
 
+class DayTariff:
+    """Ставка за тонну, проставленная на один день в «Зарплате мусоровозов»: ведёт себя как простой тариф «за тонну»."""
+    unit = "ton"
+    tier_tons = None
+    rate_high = None
+    name = "Ставка на день"
+
+    def __init__(self, rate: Decimal):
+        self.rate = Decimal(rate)
+
+
+def garbage_day_rates(db: Session, tickets) -> dict[tuple[dt.date, int, int], Decimal]:
+    """{(день, машина, сотрудник): ставка} — ставки, проставленные вручную на дни этих талонов."""
+    if not tickets:
+        return {}
+    days = [t.ticket_date for t in tickets]
+    vids = {t.vehicle_id for t in tickets}
+    return {(r.work_date, r.vehicle_id, r.employee_id): Decimal(r.rate) for r in db.scalars(select(GarbageDayRate).where(
+        GarbageDayRate.work_date >= min(days), GarbageDayRate.work_date <= max(days), GarbageDayRate.vehicle_id.in_(vids)))}
+
+
 def ton_rows(db: Session, tickets) -> list[dict]:
     """Сумма по каждому талону весов: тонны × ставка «за тонну» водителя талона (у тарифа с порогом ставка зависит от тонн водителя
     за весь день). Талоны без тоннажа, убранные и у водителей без такого тарифа пропускаются. Ставка берётся из тарифа сотрудника на
-    момент расчёта (в талоне она не запоминается)."""
+    момент расчёта (в талоне она не запоминается). Если в «Зарплате мусоровозов» на этот день водителю проставлена своя ставка,
+    берётся она (и тогда тариф у водителя может не быть)."""
     cache: dict[int, Tariff | None] = {}
     live = [t for t in tickets if t.driver_id is not None and t.tons is not None and t.archived_at is None]
+    day_rates = garbage_day_rates(db, live)
     for t in live:
         if t.driver_id not in cache:
             emp = db.get(Employee, t.driver_id)
@@ -71,6 +94,9 @@ def ton_rows(db: Session, tickets) -> list[dict]:
     out = []
     for t in live:
         tar = cache[t.driver_id]
+        own = day_rates.get((t.ticket_date, t.vehicle_id, t.driver_id))
+        if own is not None:
+            tar = DayTariff(own)
         if tar is not None:
             dtons = per_day.get((t.driver_id, t.ticket_date), Decimal(t.tons))
             rate = day_rate(tar, dtons)

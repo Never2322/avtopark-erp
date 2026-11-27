@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#0B1115" />
-    <script>try{if(localStorage.getItem("erp-theme")==="light"){document.documentElement.dataset.theme="light";document.querySelector('meta[name="theme-color"]').setAttribute("content","#F2F5F6")}}catch(e){}</script>
+    <script>try{var t=localStorage.getItem("erp-theme"),c={light:"#F2F5F6",crimson:"#13090C"}[t];if(c){document.documentElement.dataset.theme=t;document.querySelector('meta[name="theme-color"]').setAttribute("content",c)}}catch(e){}</script>
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
     <meta name="mobile-web-app-capable" content="yes" />

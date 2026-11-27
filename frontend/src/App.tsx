@@ -45,8 +45,7 @@ import { Attendance } from "./pages/Attendance";
 import { TimesheetPrint } from "./pages/TimesheetPrint";
 import { JobsBoard, MyJobs } from "./pages/Jobs";
 import { MapPage } from "./pages/MapPage";
-import { DriverEntries, EntriesFeed } from "./pages/Entries";
-import { Roster } from "./pages/Roster";
+import { DriverEntries } from "./pages/Entries";
 import { DriverHome } from "./pages/DriverHome";
 import { LoaderHome } from "./pages/LoaderHome";
 import { LoaderCrews } from "./pages/LoaderCrews";
@@ -58,6 +57,7 @@ import { BillCard } from "./pages/BillCard";
 import { Stock } from "./pages/Stock";
 import { StockMoves } from "./pages/StockMoves";
 import { ReportsIndex, ReportView } from "./pages/Reports";
+import { GarbageSalary } from "./pages/GarbageSalary";
 import { Expenses } from "./pages/Expenses";
 import { VehicleCosts } from "./pages/VehicleCosts";
 
@@ -106,7 +106,7 @@ export function App() {
         <Route path="map" element={<Guard any={["map.view"]}><MapPage /></Guard>} />
         <Route path="jobs/mine" element={<Guard any={["jobs.view_own"]}><MyJobs /></Guard>} />
         <Route path="entries" element={<Guard any={["trips.view_own", "fuel_fills.view_own"]}><DriverEntries /></Guard>} />
-        <Route path="entries/feed" element={<Guard any={["trips.view", "fuel_fills.view"]}><EntriesFeed /></Guard>} />
+        <Route path="entries/feed" element={<Navigate to="/trips" replace />} />
         <Route path="tonnage" element={<Guard any={["weigh_tickets.view_own"]}><Tonnage /></Guard>} />
         <Route path="hauls" element={<Guard any={["hauls.use_own"]}><Hauls /></Guard>} />
         <Route path="my-routes" element={<Guard any={["route_plan.view_own"]}><MyRoutes /></Guard>} />
@@ -121,6 +121,8 @@ export function App() {
         <Route path="stock" element={<Guard any={["stock_items.view"]}><Stock /></Guard>} />
         <Route path="stock/moves" element={<Guard any={["stock_moves.view"]}><StockMoves /></Guard>} />
         <Route path="reports" element={<Guard any={["reports.view"]}><ReportsIndex /></Guard>} />
+        <Route path="reports/garbage_salary" element={<Navigate to="/garbage-salary" replace />} />
+        <Route path="garbage-salary" element={<Guard any={["worklog.view"]}><GarbageSalary /></Guard>} />
         <Route path="reports/:name" element={<Guard any={["reports.view"]}><ReportView /></Guard>} />
         <Route path="expenses" element={<Guard any={["reports.money"]}><Expenses /></Guard>} />
         <Route path="vehicle-finance" element={<Guard any={["vehicle_finance.view"]}><VehicleCosts /></Guard>} />
@@ -128,7 +130,7 @@ export function App() {
         <Route path="bills/new" element={<Guard any={["bills.create"]}><BillForm /></Guard>} />
         <Route path="bills/:id" element={<Guard any={["bills.view"]}><BillCard /></Guard>} />
         <Route path="bills/:id/edit" element={<Guard any={["bills.edit"]}><BillForm /></Guard>} />
-        <Route path="roster" element={<Guard any={["roster.view"]}><Roster /></Guard>} />
+        <Route path="roster" element={<Navigate to="/vehicles" replace />} />
         <Route path="outbox" element={<OutboxPage />} />
         <Route path="calendar" element={<Guard any={["calendar.view"]}><Calendar /></Guard>} />
         <Route path="reminders" element={<Guard any={["reminders.view"]}><Reminders /></Guard>} />

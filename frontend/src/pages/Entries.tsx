@@ -1,7 +1,6 @@
-// Записи водителей: рейсы и заправки. «Мои записи» у водителя («/entries») и лента «Записи водителей» у диспетчера («/entries/feed»).
-// Журналы рейсов и заправок со списком, правкой и выгрузкой — общие разделы (Registry); здесь внесение с телефона, фото и лента.
+// Записи водителей: рейсы и заправки. «Мои записи» у водителя («/entries»).
+// Диспетчер смотрит рейсы и заправки в журналах (общие разделы Registry): список, правка, выгрузка и фото; здесь внесение с телефона и фото.
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Camera, ExternalLink, Fuel, Route as RouteIcon, Trash2, Truck, X } from "lucide-react";
 import { ApiError, get, post, upload, errorText } from "../api";
@@ -9,7 +8,6 @@ import { shrinkAll } from "../images";
 import { enqueue, isOffline, outboxAvailable } from "../outbox";
 import { OutboxList } from "../components/Outbox";
 import { fmtDate, fmtDateLong, fmtDateTime, fmtMoney, fmtNum, plural, todayIso } from "../format";
-import { useEntityParam } from "../hooks";
 import { Alert, Badge, Button, Card, ConfirmModal, Empty, Field, Modal, PageHeader, QueryState, Tone, numOrNull, useForm, useToast } from "../ui";
 
 interface Pic { id: number; name: string; has_thumb: boolean }
@@ -17,17 +15,13 @@ export interface Entry {
   id: number; kind: "trip" | "fuel" | "ticket"; kind_label: string; date: string; vehicle_id: number; vehicle_id_label: string; driver_id_label: string;
   created_by: string; created_at: string; mine: boolean; legal_entity: string; note: string;
   route?: string; customer?: string; cargo?: string; cargo_kg?: number | null; doc_number?: string; km?: number | null;
-  liters?: number; amount?: number; odometer?: number | null; full_tank?: boolean; station?: string; per_l?: number | null;
+  liters?: number; amount?: number; odometer?: number | null; engine_hours?: number | null; full_tank?: boolean; station?: string; per_l?: number | null;
   consumption?: string; norm?: number | null; check?: { text: string; tone: Tone }; check_notes?: string[];
   tons?: number | null; tons_state?: { text: string; tone: Tone }; read_note?: string;
   pics: Pic[]; can: { photo: boolean; remove_photo: boolean; delete: boolean };
 }
-interface MyVehicle { id: number; label: string; legal_entity_id: number; tank_liters: number | null; fuel_norm: number | null }
+interface MyVehicle { id: number; label: string; legal_entity_id: number; tank_liters: number | null; fuel_norm: number | null; meter?: "km" | "engine_hours" }
 export interface Mine { vehicles: MyVehicle[]; items: Entry[]; can: { trip: boolean; fuel: boolean }; today: string; max_photos: number; delete_hours: number }
-interface Feed {
-  items: Entry[]; truncated: boolean; date_from: string; date_to: string;
-  totals: { trips: number; fills: number; liters: number; amount: number };
-}
 
 const photoUrl = (id: number, thumb = false) => `/api/entries/photos/${id}${thumb ? "?thumb=true" : ""}`;
 export const plateOf = (label: string) => label.split(" · ")[0];
@@ -120,9 +114,9 @@ export function EntryCard({ e, onChanged, showWho }: { e: Entry; onChanged: () =
           <>
             <div className="job-customer">{fmtNum(e.liters, 2)} л{e.amount ? ` · ${fmtMoney(e.amount)} ₽` : ""}{e.per_l ? <span className="muted small"> ({fmtNum(e.per_l, 2)} ₽/л)</span> : null}</div>
             <div className="muted small">
-              {[e.odometer ? `Пробег ${fmtNum(e.odometer, 0)} км` : "", e.full_tank ? "до полного бака" : "не до полного", e.station].filter(Boolean).join(" · ")}
+              {[e.odometer ? `Пробег ${fmtNum(e.odometer, 0)} км` : "", e.engine_hours != null ? `Моточасы ${fmtNum(e.engine_hours, 1)}` : "", e.station].filter(Boolean).join(" · ")}
             </div>
-            {e.consumption && <div>Расход: <strong>{e.consumption} л/100 км</strong>{e.norm ? <span className="muted small"> (норма {fmtNum(e.norm)})</span> : null}</div>}
+            {e.consumption && <div>Расход: <strong>{e.consumption.includes("л/ч") ? e.consumption : `${e.consumption} л/100 км`}</strong>{e.norm ? <span className="muted small"> (норма {fmtNum(e.norm)})</span> : null}</div>}
             {e.check_notes?.map((n) => <Alert key={n} tone="warning">{n}</Alert>)}
           </>
         )}
@@ -162,7 +156,7 @@ export function EntryModal({ kind, data, onClose, onDone }: { kind: "trip" | "fu
   const f = useForm<Record<string, any>>({
     date: data.today, vehicle_id: String(data.vehicles[0]?.id ?? ""),
     route: "", customer: "", cargo: "", cargo_kg: "", doc_number: "", km: "",
-    liters: "", amount: "", odometer: "", full_tank: true, station: "", note: "",
+    liters: "", amount: "", odometer: "", engine_hours: "", meter: data.vehicles[0]?.meter ?? "km", station: "", note: "",
   });
   const urls = useMemo(() => files.map((x) => URL.createObjectURL(x)), [files]);
   useEffect(() => () => urls.forEach((u) => URL.revokeObjectURL(u)), [urls]);
@@ -174,7 +168,8 @@ export function EntryModal({ kind, data, onClose, onDone }: { kind: "trip" | "fu
       const v = f.values;
       const body: Record<string, unknown> = isTrip
         ? { trip_date: v.date, vehicle_id: Number(v.vehicle_id), route: v.route, customer: v.customer, cargo: v.cargo, cargo_kg: numOrNull(String(v.cargo_kg), "cargo_kg"), doc_number: v.doc_number, km: numOrNull(String(v.km), "km"), note: v.note }
-        : { fill_date: v.date, vehicle_id: Number(v.vehicle_id), liters: numOrNull(String(v.liters), "liters"), amount: numOrNull(String(v.amount), "amount") ?? 0, odometer: numOrNull(String(v.odometer), "odometer"), full_tank: !!v.full_tank, station: v.station, note: v.note };
+        : { fill_date: v.date, vehicle_id: Number(v.vehicle_id), liters: numOrNull(String(v.liters), "liters"), amount: numOrNull(String(v.amount), "amount") ?? 0, odometer: v.meter === "km" ? numOrNull(String(v.odometer), "odometer") : null,
+            engine_hours: v.meter === "engine_hours" ? numOrNull(String(v.engine_hours), "engine_hours") : null, station: v.station, note: v.note };
       body.client_id = clientId;
       const form = new FormData();
       form.set("data", JSON.stringify(body));
@@ -237,7 +232,7 @@ export function EntryModal({ kind, data, onClose, onDone }: { kind: "trip" | "fu
           </Field>
           {data.vehicles.length > 1 ? (
             <Field label="Техника" error={f.errors.vehicle_id}>
-              <select className="input" value={f.values.vehicle_id} onChange={(e) => f.set("vehicle_id", e.target.value)}>
+              <select className="input" value={f.values.vehicle_id} onChange={(e) => { f.set("vehicle_id", e.target.value); f.set("meter", data.vehicles.find((x) => String(x.id) === e.target.value)?.meter ?? "km"); }}>
                 {data.vehicles.map((v) => <option key={v.id} value={v.id}>{v.label}</option>)}
               </select>
             </Field>
@@ -259,14 +254,24 @@ export function EntryModal({ kind, data, onClose, onDone }: { kind: "trip" | "fu
                 <input className="input" inputMode="decimal" value={f.values.liters} onChange={(e) => f.set("liters", e.target.value)} />
               </Field>
               <Field label="Сумма по чеку, ₽" error={f.errors.amount}><input className="input" inputMode="decimal" value={f.values.amount} onChange={(e) => f.set("amount", e.target.value)} /></Field>
-              <Field label="Пробег по спидометру, км" error={f.errors.odometer} hint="По нему считается расход топлива">
-                <input className="input" inputMode="numeric" value={f.values.odometer} onChange={(e) => f.set("odometer", e.target.value)} />
-              </Field>
-              <Field label="Заправка (АЗС)" error={f.errors.station}><input className="input" value={f.values.station} maxLength={80} onChange={(e) => f.set("station", e.target.value)} /></Field>
               <div className="field full">
-                <label className="check"><input type="checkbox" checked={!!f.values.full_tank} onChange={(e) => f.set("full_tank", e.target.checked)} /> Залил полный бак</label>
-                <span className="hint">Снимите отметку, если заправились не до пробки: тогда расход на 100 км не считается по этой заправке.</span>
+                <span className="label">Что показывает прибор</span>
+                <div className="seg" role="radiogroup" aria-label="Что показывает прибор">
+                  {([["km", "Пробег по спидометру"], ["engine_hours", "Моточасы"]] as const).map(([k, l]) => (
+                    <button key={k} type="button" role="radio" aria-checked={f.values.meter === k} className={`seg-btn ${f.values.meter === k ? "on" : ""}`} onClick={() => f.set("meter", k)}>{l}</button>
+                  ))}
+                </div>
               </div>
+              {f.values.meter === "km" ? (
+                <Field label="Пробег по спидометру, км" error={f.errors.odometer} hint="По нему считается расход на 100 км. Можно не указывать">
+                  <input className="input" inputMode="numeric" value={f.values.odometer} onChange={(e) => f.set("odometer", e.target.value)} />
+                </Field>
+              ) : (
+                <Field label="Моточасы" error={f.errors.engine_hours} hint="Со счётчика моточасов. По ним считается расход литров в час. Можно не указывать">
+                  <input className="input" inputMode="decimal" value={f.values.engine_hours} onChange={(e) => f.set("engine_hours", e.target.value)} />
+                </Field>
+              )}
+              <Field label="Заправка (АЗС)" error={f.errors.station}><input className="input" value={f.values.station} maxLength={80} onChange={(e) => f.set("station", e.target.value)} /></Field>
             </>
           )}
           <Field label="Заметка" full error={f.errors.note}><textarea className="input" value={f.values.note} maxLength={isTrip ? 500 : 300} onChange={(e) => f.set("note", e.target.value)} /></Field>
@@ -338,58 +343,6 @@ export function DriverEntries() {
   );
 }
 
-/* ---------------- «Записи водителей» (лента сотрудника) ---------------- */
-
-export function EntriesFeed() {
-  const entity = useEntityParam();
-  const [sp, setSp] = useSearchParams();
-  const kind = sp.get("kind") || "";
-  const to = sp.get("to") || todayIso();
-  const from = sp.get("from") || shift(to, -6);
-  const problems = sp.get("problems") === "1";
-  const set = (patch: Record<string, string>) => setSp((old) => { const n = new URLSearchParams(old); for (const [k, v] of Object.entries(patch)) v ? n.set(k, v) : n.delete(k); return n; }, { replace: true });
-  const q = useQuery({
-    queryKey: ["entries-feed", entity, kind, from, to, problems],
-    queryFn: () => get<Feed>("/entries/feed", { legal_entity_id: entity, kind, date_from: from, date_to: to, problems }),
-    placeholderData: (p) => p, refetchInterval: 60_000,
-  });
-  const refresh = useRefresh();
-  const d = q.data;
-  return (
-    <>
-      <PageHeader title="Записи водителей" sub="Рейсы и заправки, которые внесли водители: с фото накладных и чеков. Подозрительные заправки отмечены красным"
-        actions={<><Link className="btn" to="/trips">Журнал рейсов</Link><Link className="btn" to="/fuel-fills">Журнал заправок</Link></>} />
-      <div className="toolbar" style={{ marginBottom: 12 }}>
-        <input className="input compact" type="date" aria-label="С даты" value={from} max={to} onChange={(e) => e.target.value && set({ from: e.target.value })} />
-        <span className="muted">—</span>
-        <input className="input compact" type="date" aria-label="По дату" value={to} onChange={(e) => e.target.value && set({ to: e.target.value, from: "" })} />
-        <select className="input compact" aria-label="Что показать" value={kind} onChange={(e) => set({ kind: e.target.value })}>
-          <option value="">Рейсы и заправки</option><option value="trip">Только рейсы</option><option value="fuel">Только заправки</option>
-        </select>
-        <label className="check"><input type="checkbox" checked={problems} onChange={(e) => set({ problems: e.target.checked ? "1" : "" })} /> Только подозрительные</label>
-      </div>
-      <QueryState q={q}>
-        {d && (
-          <div className="stack">
-            <div className="row wrap" style={{ gap: 8 }}>
-              <Badge tone="neutral">Рейсов: {d.totals.trips}</Badge>
-              <Badge tone="neutral">Заправок: {d.totals.fills}</Badge>
-              {d.totals.fills > 0 && <Badge tone="info">Залито: {fmtNum(d.totals.liters, 1)} л на {fmtMoney(d.totals.amount)} ₽</Badge>}
-            </div>
-            {d.truncated && <Alert tone="info">Показаны самые свежие записи. Сузьте даты или откройте журнал, чтобы увидеть остальные.</Alert>}
-            {d.items.length === 0 ? (
-              <Card><Empty icon={RouteIcon} title={problems ? "Подозрительных записей нет" : "За эти дни записей нет"}>{problems ? "Все заправки в пределах бака и нормы расхода." : "Измените даты или дождитесь, когда водители внесут рейсы и заправки."}</Empty></Card>
-            ) : (
-              <div className="job-list">{d.items.map((it) => <EntryCard key={`${it.kind}-${it.id}`} e={it} showWho onChanged={refresh} />)}</div>
-            )}
-          </div>
-        )}
-      </QueryState>
-    </>
-  );
-}
-
-/* ---------------- фото из журналов рейсов и заправок ---------------- */
 
 function EntryPhotosModal({ kind, id, onClose }: { kind: "trip" | "fuel" | "ticket"; id: number; onClose: () => void }) {
   const q = useQuery({ queryKey: ["entry-one", kind, id], queryFn: () => get<{ item: Entry }>(`/entries/${kind}/${id}`) });

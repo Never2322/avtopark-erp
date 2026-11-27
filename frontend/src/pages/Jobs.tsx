@@ -256,7 +256,6 @@ export function JobsBoard() {
       <PageHeader title="Технические задания" sub="Куда едет каждая машина: адрес, задача, отметки «приехал» и «закончил», фото до и после"
         actions={<>
           {can("map.view") && <Link className="btn" to={date === todayIso() ? "/map" : `/map?date=${date}`}><MapPin size={16} aria-hidden /> На карте</Link>}
-          <Link className="btn" to="/jobs/list">Журнал</Link>
           {d?.can_create && <Button variant="primary" icon={Plus} onClick={() => setEdit("new")}>Новое задание</Button>}
         </>} />
       <div className="toolbar" style={{ marginBottom: 12 }}>

@@ -43,9 +43,9 @@ def test_bill_without_vehicle_is_in_expenses_and_dashboard(world, make_client):
     acc, d = make_client("acc_a"), make_client("dir_a")
     bill(acc, "З-1", "7500,50")                                          # запчасти без привязки к машине
     j = overview(d)
-    assert cats(j)["bills"]["amount"] == 7500.5 and cats(j)["bills"]["count"] == 1 and j["total"] == 7500.5
+    assert cats(j)["bills_other"]["amount"] == 7500.5 and cats(j)["bills_other"]["count"] == 1 and j["total"] == 7500.5
     row = j["items"][0]
-    assert row["cat"] == "bills" and row["title"] == "Счёт № З-1" and row["amount"] == 7500.5 and row["vehicle"] == "" and row["link"].startswith("/bills/")
+    assert row["cat"] == "bills_other" and row["title"] == "Счёт № З-1" and row["amount"] == 7500.5 and row["vehicle"] == "" and row["link"].startswith("/bills/")
     dash = d.get("/dashboard").json()["expenses"]
     assert dash["month_total"] == 7500.5 and dash["months"][-1]["repair"] == 7500.5          # на главной та же сумма
 
@@ -53,10 +53,13 @@ def test_bill_without_vehicle_is_in_expenses_and_dashboard(world, make_client):
 def test_bill_with_vehicle_shows_machine_and_status(world, make_client):
     acc = make_client("acc_a")
     bill(acc, "М-1", "3000", vehicle_id=world.va1)
-    row = overview(acc)["items"][0]
-    assert row["vehicle"] != ""
-    assert row["status"] == "unpaid"
-    assert overview(acc)["bills_unpaid"] == 3000
+    j = overview(acc)
+    row = j["items"][0]                                                  # счёт на ремонт машины — в одной строке «Затраты на технику»
+    assert row["cat"] == "vehicles" and row["amount"] == 3000 and "1 запись" in row["sub"]
+    assert len(j["items"]) == 1 and cats(j)["vehicles"]["count"] == 1
+    assert j["bills_unpaid"] == 3000
+    row = overview(make_client("dir_a"))["items"][0]
+    assert row["link"].startswith("/vehicle-finance?month=")
 
 
 def test_all_sources_add_up(world, make_client):
@@ -72,7 +75,8 @@ def test_all_sources_add_up(world, make_client):
         db.commit()
     j = overview(d)
     c = cats(j)
-    assert (c["bills"]["amount"], c["misc"]["amount"], c["fuel"]["amount"], c["vehicle_finance"]["amount"], c["fines"]["amount"]) == (10000, 1200, 2500, 800, 500)
+    assert (c["bills_other"]["amount"], c["misc"]["amount"], c["vehicles"]["amount"]) == (10000, 1200, 2500 + 800 + 500)
+    assert c["vehicles"]["count"] == 3 and not ({"fuel", "fines", "vehicle_finance", "bills"} & set(c))
     assert j["total"] == 15000                                           # доход и штраф водителя в расходы не входят
     for k, v in c.items():                                               # строки списка сходятся с суммой по статье
         if v["counted"]:
@@ -106,9 +110,9 @@ def test_filter_by_category(world, make_client):
     acc, d = make_client("acc_a"), make_client("dir_a")
     bill(acc, "С-12", "1000")
     fuel(world.A, world.va1, FIRST, "400")
-    j = overview(d, cat="fuel")
-    assert [r["cat"] for r in j["items"]] == ["fuel"] and j["found"] == 1
-    assert j["total"] == 1400 and cats(j)["bills"]["count"] == 1                       # итог и счётчики всегда за весь месяц
+    j = overview(d, cat="vehicles")
+    assert [r["cat"] for r in j["items"]] == ["vehicles"] and j["found"] == 1
+    assert j["total"] == 1400 and cats(j)["bills_other"]["count"] == 1                       # итог и счётчики всегда за весь месяц
     assert d.get("/finance/expenses", params={"cat": "nope"}).status_code == 422
     assert d.get("/finance/expenses", params={"month": "вчера"}).status_code == 422
 
@@ -131,6 +135,17 @@ def test_expenses_are_separated_by_legal_entity(world, make_client):
     admin = make_client("admin")
     assert overview(admin)["total"] == 5700
     assert overview(admin, legal_entity_id=world.B)["total"] == 700
+
+
+def test_vehicle_line_counts_insurance_and_skips_stock_purchases(world, make_client):
+    d = make_client("dir_a")
+    with session_factory()() as db:
+        from app.models import DossierDoc
+        db.add(DossierDoc(vehicle_id=world.va1, kind="osago", title="ОСАГО", issued_on=FIRST, cost=6000))
+        db.commit()
+    j = overview(d)
+    assert cats(j)["vehicles"]["amount"] == 6000 and j["total"] == 6000
+    assert d.get("/dashboard").json()["expenses"]["month_total"] == 6000
     assert make_client("dir_a").get("/finance/expenses", params={"legal_entity_id": world.B}).status_code == 403
 
 
@@ -140,7 +155,8 @@ def test_costs_report_keeps_bills_without_vehicle(world, make_client):
     acc = make_client("acc_a")
     bill(acc, "С-40", "6000")
     bill(acc, "С-41", "1000", vehicle_id=world.va1)
-    r = acc.get("/reports/costs", params={"from": FIRST.isoformat(), "to": TODAY.isoformat()}).json()
+    res = acc.get("/reports/month", params={"month": MONTH}).json()
+    r = {"table": next(e for e in res["extras"] if e["title"] == "Затраты по статьям")}
     labels = [c["label"] for c in r["table"]["columns"]]
     rows = {x[0]: dict(zip(labels, x)) for x in r["table"]["rows"]}
     assert rows["Без привязки к технике"]["Ремонт: счета, ₽"] == 6000 and rows["Без привязки к технике"]["Всего затрат, ₽"] == 6000

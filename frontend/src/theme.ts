@@ -1,14 +1,15 @@
-// Светлая и тёмная тема. Выбор хранится в браузере; по умолчанию тёмная, как было раньше.
-// Первый кадр рисует маленький скрипт в index.html, чтобы страница не мигала тёмным перед светлой.
+// Три темы: чёрная (по умолчанию, как было раньше), светлая и багровая. Выбор хранится в браузере.
+// Первый кадр рисует маленький скрипт в index.html, чтобы страница не мигала тёмным перед другой темой.
 import { useSyncExternalStore } from "react";
 
-export type Theme = "dark" | "light";
+export type Theme = "dark" | "light" | "crimson";
+export const THEMES: { id: Theme; label: string }[] = [{ id: "dark", label: "Чёрная" }, { id: "light", label: "Светлая" }, { id: "crimson", label: "Багровая" }];
 const KEY = "erp-theme";
-const COLOR: Record<Theme, string> = { dark: "#0B1115", light: "#F2F5F6" };
+const COLOR: Record<Theme, string> = { dark: "#0B1115", light: "#F2F5F6", crimson: "#13090C" };
 const listeners = new Set<() => void>();
 
 function stored(): Theme {
-  try { return localStorage.getItem(KEY) === "light" ? "light" : "dark"; } catch { return "dark"; }
+  try { const v = localStorage.getItem(KEY); return v === "light" || v === "crimson" ? v : "dark"; } catch { return "dark"; }
 }
 
 let current: Theme = stored();
@@ -36,7 +37,7 @@ export function setTheme(t: Theme) {
   listeners.forEach((f) => f());
 }
 
-export function useTheme(): [Theme, () => void] {
+export function useTheme(): [Theme, (t: Theme) => void] {
   const t = useSyncExternalStore((cb) => { listeners.add(cb); return () => { listeners.delete(cb); }; }, () => current, () => "dark" as Theme);
-  return [t, () => setTheme(t === "dark" ? "light" : "dark")];
+  return [t, setTheme];
 }

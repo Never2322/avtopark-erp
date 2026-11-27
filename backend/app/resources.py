@@ -856,6 +856,10 @@ def _fill_prepare(db, p, v, obj, m):
         e["liters"] = f"Больше {FUEL_MAX_LITERS} л за раз: проверьте цифры"
     if m.get("odometer") is not None and m["odometer"] > 9_999_999:
         e["odometer"] = "Слишком большой пробег: проверьте цифры"
+    if m.get("engine_hours") is not None and m["engine_hours"] > 999_999:
+        e["engine_hours"] = "Слишком много моточасов: проверьте цифры"
+    if m.get("odometer") is not None and m.get("engine_hours") is not None:
+        e["engine_hours"] = "Укажите что-то одно: пробег по спидометру или моточасы"
     if e:
         raise Invalid(e)
 
@@ -865,17 +869,20 @@ def _fill_computed(db, objs):
     vehicles = {o.vehicle_id for o in objs}
     specs = fuel_calc.norms(db, vehicles)
     segs: dict[int, dict] = {}
+    hours: dict[int, dict] = {}
     for vid in vehicles:
         segs.update(fuel_calc.segments(db, vid))
+        hours.update(fuel_calc.hour_segments(db, vid))
     out = {}
     for o in objs:
         tank, norm = specs.get(o.vehicle_id, (None, None))
         seg = segs.get(o.id)
+        hseg = hours.get(o.id)
         notes = fuel_calc.remarks(o, tank, norm, seg)
         check = {"text": "Проверить", "tone": "error"} if notes else None
         out[o.id] = {
             "per_l": (o.amount / o.liters).quantize(Decimal("0.01")) if o.amount and o.liters else None,
-            "consumption": f"{seg['per100']:.1f}".replace(".", ",") if seg else "", "norm": norm,
+            "consumption": f"{seg['per100']:.1f}".replace(".", ",") if seg else f"{hseg['per_hour']:.1f} л/ч".replace(".", ",") if hseg else "", "norm": norm,
             "check": check or ({"text": "В норме", "tone": "success"} if seg and norm else {"text": "—", "tone": "neutral"}),
             "check_notes": notes, "photos": photos.get(o.id, 0) or "",
         }
@@ -883,21 +890,23 @@ def _fill_computed(db, objs):
 
 
 def _fill_after_save(db, p, obj, creating):
-    """Пробег с заправки попадает в показания техники (источник «Заправка»). Не получилось — запись целиком не сохраняется."""
-    if not creating or obj.odometer is None:
+    """Пробег или моточасы с заправки попадают в показания техники (источник «Заправка»). Не получилось — запись целиком не сохраняется."""
+    if not creating or (obj.odometer is None and obj.engine_hours is None):
         return None
+    hours = obj.odometer is None
     from fastapi import HTTPException
     from app.services.readings import add_reading
     vehicle = db.get(Vehicle, obj.vehicle_id)
     today = job_today()
     at = None if obj.fill_date >= today else dt.datetime.combine(obj.fill_date, dt.time(12, 0), tzinfo=org_tz())
     try:
-        reading = add_reading(db, p, vehicle, "km", Decimal(obj.odometer), recorded_at=at, source="fuel", note=f"Заправка {num(obj.liters)} л")
+        reading = add_reading(db, p, vehicle, "engine_hours" if hours else "km", Decimal(obj.engine_hours if hours else obj.odometer), recorded_at=at,
+                              source="fuel", note=f"Заправка {num(obj.liters)} л")
     except HTTPException as ex:
         d = ex.detail
-        raise HTTPException(status_code=ex.status_code, detail={**d, "field": "odometer"}) from None
+        raise HTTPException(status_code=ex.status_code, detail={**d, "field": "engine_hours" if hours else "odometer"}) from None
     if reading.review_state == "pending":
-        return ["Пробег намного больше прошлого показания: он отправлен механику на проверку"]
+        return [("Моточасы намного больше" if hours else "Пробег намного больше") + " прошлого показания: отправлено механику на проверку"]
     return None
 
 
@@ -914,13 +923,14 @@ register(R(
         F("liters", "Литров", "decimal", places=2, lo=Decimal("0.01"), required=True),
         F("driver_id", "Водитель", "ref", ref="employee", hint="Если пусто, подставится водитель, закреплённый за машиной", more=True),
         F("amount", "Сумма по чеку, ₽", "money", default="0", sum=True, more=True),
-        F("odometer", "Пробег по спидометру, км", "int", lo=0, hint="По нему считается расход. Можно не указывать", more=True),
-        F("full_tank", "Залит полный бак", "bool", default="1", hint="Отметьте, если заправились «до пробки»: тогда считается расход на 100 км", more=True),
+        F("odometer", "Пробег по спидометру, км", "int", lo=0, hint="Для машин со спидометром. По нему считается расход на 100 км. Можно не указывать", more=True),
+        F("engine_hours", "Моточасы", "decimal", places=1, lo=Decimal(0), hint="Для спецтехники со счётчиком моточасов вместо пробега. "
+          "По ним считается расход в литрах за моточас. Укажите что-то одно: пробег или моточасы", more=True),
         F("station", "Заправка (АЗС)", max=80, suggest=True, more=True),
         F("note", "Заметка", "textarea", max=300, list=False, more=True),
         F("client_id", "Код отправки", max=64, auto=True, list=False),
     ],
-    cols=[Col("per_l", "Цена за литр, ₽", "money"), Col("consumption", "Расход, л/100 км", "text"), Col("check", "Проверка", "badge"),
+    cols=[Col("per_l", "Цена за литр, ₽", "money"), Col("consumption", "Расход, л/100 км или л/ч", "text"), Col("check", "Проверка", "badge"),
           Col("photos", "Фото", "text", xl=False)],
     photos=("fuel", "Фото чека"),
     search=("station", "note"),

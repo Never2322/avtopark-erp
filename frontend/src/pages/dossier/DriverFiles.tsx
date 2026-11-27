@@ -95,7 +95,7 @@ export function DriverFile() {
   return (
     <>
       <PageHeader
-        crumb={<Link to="/dossier/employees"><ArrowLeft size={14} aria-hidden /> Личные дела водителей</Link>}
+        crumb={<Link to="/dossier/employees"><ArrowLeft size={14} aria-hidden /> Личные дела</Link>}
         title={e?.full_name ?? "Личное дело"}
         sub={e ? [e.position, e.legal_entities.map((x) => x.name).join(", ")].filter(Boolean).join(" · ") : undefined}
         actions={e && can("employees.view") ? <Link className="btn" to="/employees">Карточка в «Сотрудниках»</Link> : undefined} />

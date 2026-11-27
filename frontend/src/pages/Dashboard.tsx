@@ -32,7 +32,7 @@ interface Dash {
 function GarbageCard({ g }: { g: NonNullable<Dash["garbage"]> }) {
   const max = Math.max(...g.trucks.map((t) => t.tons), 1);
   return (
-    <Card title="Мусоровозы" icon={Recycle} actions={<span className="muted small">за {g.month} · <Link to="/reports/garbage_salary">подробнее</Link></span>}>
+    <Card title="Мусоровозы" icon={Recycle} actions={<span className="muted small">за {g.month} · <Link to="/garbage-salary">подробнее</Link></span>}>
       {g.trips === 0 ? <Empty icon={Recycle} title="В этом месяце талонов пока нет">Их присылают водители или загружают из Excel в «Журнале тоннажа».</Empty> : (
         <div className="stack-sm">
           <div className="garbage-nums">

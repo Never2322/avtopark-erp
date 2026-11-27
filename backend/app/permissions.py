@@ -128,6 +128,7 @@ PERMISSIONS: list[tuple[str, str, str]] = [
     ("users.view", "Администрирование", "Видеть пользователей"),
     ("users.manage", "Администрирование", "Создавать пользователей и назначать роли"),
     ("roles.manage", "Администрирование", "Менять права ролей"),
+    ("menu.manage", "Администрирование", "Настраивать меню для всех: перетаскивать разделы и менять их названия"),
     ("audit.view", "Администрирование", "Смотреть журнал действий"),
     ("backups.manage", "Администрирование", "Делать, скачивать и проверять резервные копии"),
 ]
@@ -296,3 +297,5 @@ ROLE_DEFAULTS["mechanic"] += _all("repair_photos", only=_WORK)
 ROLE_DEFAULTS["director"] += ["route_notes.view", "route_notes.resolve"]
 ROLE_DEFAULTS["dispatcher"] += ["route_notes.view", "route_notes.resolve"]
 assert all(c in PERMISSION_CODES for codes in ROLE_DEFAULTS.values() for c in codes)
+# Меню (порядок и названия разделов одно на всю программу). Допущение: настраивают директор и администратор (у него есть всё).
+ROLE_DEFAULTS["director"] += ["menu.manage"]

@@ -24,8 +24,8 @@ from app.common import fail, like, page_of, utcnow
 from app.exporting import check_format, table_response
 from app.db import get_db
 from app.deps import Principal, current, require
-from app.enums import BILL_KINDS, BILL_MAX_FILES, BILL_STATUSES, BILL_UNITS, BILL_YEAR_MAX, BILL_YEAR_MIN, REQUEST_STATUSES, VAT_RATES
-from app.models import (Counterparty, LegalEntity, RepairBill, RepairBillFile, RepairBillItem, RequestPart, ServiceRequest, StoredFile, User,
+from app.enums import BILL_CATEGORIES, BILL_KINDS, BILL_MAX_FILES, BILL_STATUSES, BILL_UNITS, BILL_YEAR_MAX, BILL_YEAR_MIN, REQUEST_STATUSES, VAT_RATES
+from app.models import (BillBudget, Counterparty, LegalEntity, RepairBill, RepairBillFile, RepairBillItem, RequestPart, ServiceRequest, StoredFile, User,
                         Vehicle)
 from app.registry import org_tz
 from app.routers.dossier import read_uploads, store
@@ -74,6 +74,7 @@ class BillIn(BaseModel):
     vat: str | int | float | None = None
     status: str | None = None
     paid_date: dt.date | None = None
+    category: str | None = None
     note: str | None = Field(default=None, max_length=1200)
     items: list[dict] | None = Field(default=None, max_length=300)
 
@@ -81,6 +82,16 @@ class BillIn(BaseModel):
 class StatusIn(BaseModel):
     status: str
     paid_date: dt.date | None = None
+
+
+class CategoryIn(BaseModel):
+    category: str | None = None
+
+
+class BudgetIn(BaseModel):
+    month: str = Field(min_length=7, max_length=7)
+    category: str
+    amount: str | int | float | None = None
 
 
 class ReasonIn(BaseModel):
@@ -129,7 +140,8 @@ def row_out(db: Session, p: Principal, b: RepairBill, vehicles: dict, requests: 
             "supplier_inn": b.supplier_inn, "basis": b.basis, "vehicle_id": b.vehicle_id, "vehicle": vehicle_label(v), "request_id": b.request_id,
             "request_number": r.number if r else None, "total": money(b.total), "vat": money(b.vat), "status": b.status,
             "status_label": BILL_STATUSES[b.status], "paid_date": b.paid_date.isoformat() if b.paid_date else None,
-            "files": files_n.get(b.id, 0), "archived": b.archived_at is not None}
+            "files": files_n.get(b.id, 0), "archived": b.archived_at is not None,
+            "category": b.category, "category_label": BILL_CATEGORIES.get(b.category or "", "")}
 
 
 def detail_out(db: Session, p: Principal, b: RepairBill) -> dict:
@@ -149,6 +161,7 @@ def detail_out(db: Session, p: Principal, b: RepairBill) -> dict:
         "vat_pct": b.vat_pct, "vat_label": VAT_RATES[str(b.vat_pct)], "total": money(b.total), "vat": money(b.vat),
         "words": amount_in_words(b.total), "status": b.status, "status_label": BILL_STATUSES[b.status],
         "paid_date": b.paid_date.isoformat() if b.paid_date else None, "note": b.note, "archived": b.archived_at is not None,
+        "category": b.category, "category_label": BILL_CATEGORIES.get(b.category or "", ""),
         "archive_reason": b.archive_reason, "created_by": name_of(db, b.created_by_id), "created_at": b.created_at.isoformat(),
         "updated_at": b.updated_at.isoformat(),
         "items": [{"pos": i.pos, "name": i.name, "article": i.article, "qty": float(i.qty), "qty_text": parts_svc.qty_text(i.qty), "unit": i.unit,
@@ -163,7 +176,7 @@ def detail_out(db: Session, p: Principal, b: RepairBill) -> dict:
 
 
 def filters(p: Principal, perm: str, *, month: str, vehicle_id: int | None, status: str, kind: str, q: str, legal_entity_id: int | None,
-            archived: bool, date_from: str = "", date_to: str = "") -> list:
+            archived: bool, date_from: str = "", date_to: str = "", category: str = "") -> list:
     scope = p.scope(perm)
     if not scope:
         raise fail(403, "forbidden", "Нет доступа к счетам на ремонт")
@@ -196,6 +209,12 @@ def filters(p: Principal, perm: str, *, month: str, vehicle_id: int | None, stat
         if status not in BILL_STATUSES:
             raise fail(422, "bad_status", "Неизвестное состояние счёта", "status")
         cond.append(RepairBill.status == status)
+    if category == "none":
+        cond.append(RepairBill.category.is_(None))
+    elif category:
+        if category not in BILL_CATEGORIES:
+            raise fail(422, "bad_category", "Неизвестная категория счёта", "category")
+        cond.append(RepairBill.category == category)
     if kind:
         if kind not in BILL_KINDS:
             raise fail(422, "bad_kind", "Неизвестный вид счёта", "kind")
@@ -215,6 +234,36 @@ def sums(db: Session, cond: list) -> dict:
         func.coalesce(func.sum(RepairBill.total).filter(RepairBill.status == "unpaid"), 0),
         func.coalesce(func.sum(RepairBill.vat).filter(live), 0), func.count().filter(RepairBill.status == "cancelled")).where(*cond)).one()
     return {"count": row[0], "total": money(row[1]), "paid": money(row[2]), "unpaid": money(row[3]), "vat": money(row[4]), "cancelled": row[5]}
+
+
+def month_first(month: str) -> dt.date | None:
+    try:
+        if len(month) != 7 or month[4] != "-":
+            raise ValueError
+        return dt.date(int(month[:4]), int(month[5:7]), 1)
+    except ValueError:
+        return None
+
+
+def budgets(db: Session, p: Principal, month: str, legal_entity_id: int | None) -> dict | None:
+    """Бюджет месяца по категориям: выделено, потрачено (счета категории за месяц, кроме отменённых и убранных в архив), осталось."""
+    first = month_first(month)
+    if first is None:
+        return None
+    last = (first.replace(day=28) + dt.timedelta(days=4)).replace(day=1) - dt.timedelta(days=1)
+    scope = p.scope("bills.view")
+    cond = [scope.cond(RepairBill.legal_entity_id), RepairBill.archived_at.is_(None), RepairBill.status != "cancelled",
+            RepairBill.bill_date >= first, RepairBill.bill_date <= last]
+    if legal_entity_id is not None:
+        cond.append(RepairBill.legal_entity_id == legal_entity_id)
+    spent = dict(db.execute(select(RepairBill.category, func.sum(RepairBill.total)).where(*cond).group_by(RepairBill.category)).all())
+    given = {b.category: b.amount for b in db.scalars(select(BillBudget).where(BillBudget.month == first))}
+    items = []
+    for code, label in BILL_CATEGORIES.items():
+        g, sp = given.get(code), spent.get(code) or 0
+        items.append({"code": code, "label": label, "budget": money(g) if g is not None else None, "spent": money(sp),
+                      "left": money((g or 0) - sp) if g is not None else None})
+    return {"month": month, "items": items, "none": money(spent.get(None) or 0), "can_edit": bool(p.scope("bills.edit"))}
 
 
 def lookups(db: Session, rows: list[RepairBill]):
@@ -244,7 +293,8 @@ def meta(p: Principal = Depends(require("bills.view")), db: Session = Depends(ge
     create = p.scope("bills.create")
     ents = [{"id": e.id, "name": e.short_name or e.name} for e in db.scalars(select(LegalEntity).where(LegalEntity.archived_at.is_(None)).order_by(LegalEntity.id))
             if create.allows(e.id)]
-    return {"statuses": [{"code": k, "label": v} for k, v in BILL_STATUSES.items()], "kinds": [{"code": k, "label": v} for k, v in BILL_KINDS.items()],
+    return {"categories": [{"code": k, "label": v} for k, v in BILL_CATEGORIES.items()],
+            "statuses": [{"code": k, "label": v} for k, v in BILL_STATUSES.items()], "kinds": [{"code": k, "label": v} for k, v in BILL_KINDS.items()],
             "vat_rates": [{"value": int(k), "label": v} for k, v in VAT_RATES.items()], "units": list(BILL_UNITS), "months": months,
             "month_labels": {m: f"{MONTH_NAMES[int(m[5:]) - 1]} {m[:4]}" for m in months}, "default_month": cur, "entities": ents,
             "can": {"create": bool(create), "export": bool(p.scope("bills.export")), "pay": bool(p.scope("bills.pay")), "edit": bool(p.scope("bills.edit")),
@@ -253,16 +303,17 @@ def meta(p: Principal = Depends(require("bills.view")), db: Session = Depends(ge
 
 @router.get("/bills")
 def list_bills(month: str | None = None, vehicle_id: int | None = None, status: str = "", kind: str = "", q: str = "", legal_entity_id: int | None = None,
-               archived: bool = False, page: int = 1, page_size: int = 50, p: Principal = Depends(require("bills.view")), db: Session = Depends(get_db)):
+               archived: bool = False, category: str = "", page: int = 1, page_size: int = 50, p: Principal = Depends(require("bills.view")), db: Session = Depends(get_db)):
     if month is None:
         t = today()
         month = f"{t.year:04d}-{t.month:02d}"
-    cond = filters(p, "bills.view", month=month, vehicle_id=vehicle_id, status=status, kind=kind, q=q, legal_entity_id=legal_entity_id, archived=archived)
+    cond = filters(p, "bills.view", month=month, vehicle_id=vehicle_id, status=status, kind=kind, q=q, legal_entity_id=legal_entity_id, archived=archived,
+                   category=category)
     rows, total = page_of(db, select(RepairBill).where(*cond).order_by(RepairBill.bill_date.desc(), RepairBill.id.desc()), page, page_size)
     objs = [r[0] for r in rows]
     vehicles, requests, ents, files_n = lookups(db, objs)
     return {"items": [row_out(db, p, b, vehicles, requests, ents, files_n) for b in objs], "total": total, "page": page, "page_size": page_size,
-            "totals": sums(db, cond), "month": month}
+            "totals": sums(db, cond), "month": month, "budget": budgets(db, p, month, legal_entity_id)}
 
 
 def export_rows(db: Session, cond: list) -> list[RepairBill]:
@@ -379,7 +430,7 @@ def resolve_links(db: Session, p: Principal, perm: str, v: dict, bill: RepairBil
 def merged(b: RepairBill | None, body: BillIn, items: list | None) -> dict:
     """Текущие значения счёта, поверх них то, что прислали. Так создание и правка проверяются одним кодом."""
     cur = {} if b is None else {k: getattr(b, k) for k in ("number", "bill_date", "supplier_id", "basis", "vehicle_id", "request_id", "vat_pct", "status",
-                                                         "paid_date", "note", "total", "vat") + SUPPLIER_FIELDS}
+                                                         "paid_date", "note", "total", "vat", "category") + SUPPLIER_FIELDS}
     given = body.model_dump(exclude_unset=True)
     cur.update({k: val for k, val in given.items() if k not in ("items", "kind")})
     cur["_given"] = set(given)
@@ -489,6 +540,11 @@ def validate(db: Session, p: Principal, v: dict, kind: str, bill: RepairBill | N
                 if same_amount:
                     raise fail(422, "duplicate_bill", f"Такой счёт уже внесён (запись № {cid}). Проверьте номер, дату и сумму.", "number")
     values["number"] = number
+    if "category" in v["_given"] or bill is None:
+        cat = v.get("category") or None
+        if cat is not None and cat not in BILL_CATEGORIES:
+            raise fail(422, "bad_category", "Выберите категорию из списка: запчасти, жидкости или расходники", "category")
+        values["category"] = cat
     return values, items, auto
 
 
@@ -525,7 +581,7 @@ def attach_prepared(db: Session, p: Principal, bill: RepairBill, prepared: list)
 
 def describe(db: Session, b: RepairBill) -> dict:
     return {"number": b.number, "bill_date": b.bill_date.isoformat(), "supplier": b.supplier_name, "total": str(b.total), "vat": str(b.vat),
-            "vat_pct": b.vat_pct, "vehicle_id": b.vehicle_id, "request_id": b.request_id, "basis": b.basis, "note": b.note}
+            "vat_pct": b.vat_pct, "vehicle_id": b.vehicle_id, "request_id": b.request_id, "basis": b.basis, "note": b.note, "category": b.category}
 
 
 # ---------------------------------------------------------------- создание, чтение, правка
@@ -776,6 +832,45 @@ def update_bill(bid: int, body: BillIn, p: Principal = Depends(require("bills.ed
     db.commit()
     db.refresh(b)
     return detail_out(db, p, b)
+
+
+@router.post("/bills/{bid}/category")
+def set_category(bid: int, body: CategoryIn, p: Principal = Depends(require("bills.edit")), db: Session = Depends(get_db)):
+    """Категория счёта прямо из списка: по ней счёт вычитается из бюджета месяца."""
+    b = get_bill(db, p, bid, "bills.edit")
+    cat = body.category or None
+    if cat is not None and cat not in BILL_CATEGORIES:
+        raise fail(422, "bad_category", "Выберите категорию из списка: запчасти, жидкости или расходники", "category")
+    if cat != b.category:
+        audit.log(db, p, "bill.update", "bill", b.id, b.legal_entity_id, number=b.number,
+                  changes={"category": {"было": BILL_CATEGORIES.get(b.category or "", "—"), "стало": BILL_CATEGORIES.get(cat or "", "—")}})
+        b.category, b.updated_by_id = cat, p.id
+        db.commit()
+    return {"id": b.id, "category": b.category, "category_label": BILL_CATEGORIES.get(b.category or "", "")}
+
+
+@router.put("/bills/budget")
+def set_budget(body: BudgetIn, p: Principal = Depends(require("bills.edit")), db: Session = Depends(get_db)):
+    """Сколько выделено на месяц на категорию. Пустая сумма — бюджет убран."""
+    first = month_first(body.month)
+    if first is None:
+        raise fail(422, "bad_month", "Месяц нужен в виде 2026-11", "month")
+    if body.category not in BILL_CATEGORIES:
+        raise fail(422, "bad_category", "Неизвестная категория", "category")
+    row = db.scalar(select(BillBudget).where(BillBudget.month == first, BillBudget.category == body.category))
+    if body.amount in (None, ""):
+        if row:
+            db.delete(row)
+    else:
+        amount = svc.to_money(body.amount, what="Бюджет", field="amount")
+        if row:
+            row.amount, row.updated_by_id = amount, p.id
+        else:
+            db.add(BillBudget(month=first, category=body.category, amount=amount, updated_by_id=p.id))
+    audit.log(db, p, "bill.budget", "bill_budget", None, None, month=body.month, category=BILL_CATEGORIES[body.category],
+              amount=str(body.amount or ""))
+    db.commit()
+    return budgets(db, p, body.month, None)
 
 
 @router.post("/bills/{bid}/status")

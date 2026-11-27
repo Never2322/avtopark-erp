@@ -2,8 +2,8 @@ import { ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import {
-  BellRing, Building2, Camera, CalendarCheck, CalendarClock, CalendarDays, ChevronDown, ChevronRight, ClipboardList, DatabaseBackup, Gauge, LayoutDashboard, LogOut, Menu, ScrollText, Search, ShieldCheck,
-  Truck, User as UserIcon, UserCheck, UserCog, UserSquare2, Users, UsersRound, Wrench, FolderOpen, Fuel, NotebookPen, ShoppingCart, ReceiptText, Receipt, Megaphone, Newspaper, Boxes, ArrowLeftRight, BarChart3, FileUp, Hourglass, ListOrdered, MapPin, Recycle, Signpost, CalendarRange, Send, Settings, Wallet, Weight, X, type LucideIcon,
+  BellRing, Building2, Camera, CalendarCheck, CalendarClock, CalendarDays, ChevronDown, ChevronRight, ClipboardList, DatabaseBackup, Gauge, LayoutDashboard, LogOut, Menu, PencilLine, ScrollText, Search, ShieldCheck,
+  Truck, User as UserIcon, UserCheck, UserCog, Users, UsersRound, Wrench, FolderOpen, NotebookPen, ShoppingCart, ReceiptText, Receipt, Megaphone, Newspaper, Boxes, ArrowLeftRight, BarChart3, FileUp, Hourglass, ListOrdered, MapPin, Recycle, Signpost, CalendarRange, Send, Settings, Wallet, Weight, X, type LucideIcon,
   PiggyBank,
 } from "lucide-react";
 import { ConnectionBar, useOutboxSync } from "./Outbox";
@@ -11,12 +11,13 @@ import { BellMenu, useNotifSummary } from "./Bell";
 import { ThemeToggle } from "./ThemeToggle";
 import { useAuth } from "../auth";
 import { get } from "../api";
+import { applyLayout, MenuEditor, type MenuLayoutRes } from "./MenuEditor";
 import { SECTIONS } from "../sections";
 import { Empty } from "../ui";
 
 /** sub: заголовок подраздела внутри группы (есть у каждого пункта подраздела, показывается над первым видимым: если первый скрыт правами, заголовок не пропадает); words: как ещё люди называют этот раздел (для поиска). */
-interface Item { to: string; label: string; icon: LucideIcon; any: string[]; end?: boolean; badge?: "pending" | "reminders" | "news"; unless?: string[]; all?: string[]; feature?: "tonnage" | "hauls" | "routes"; sub?: string; words?: string }
-interface Group { key: string; title: string; icon: LucideIcon; tone: string; items: Item[]; flat?: boolean }
+export interface Item { id?: string; to: string; label: string; icon: LucideIcon; any: string[]; end?: boolean; badge?: "pending" | "reminders" | "news"; unless?: string[]; all?: string[]; feature?: "tonnage" | "hauls" | "routes"; sub?: string; words?: string }
+export interface Group { key: string; title: string; icon: LucideIcon; tone: string; items: Item[]; flat?: boolean }
 
 const sectionItems = (...keys: string[]): Item[] =>
   keys.map((k) => SECTIONS.find((x) => x.key === k)!).map((x) => ({ to: x.path, label: x.label, icon: x.icon, any: [`${x.key}.view`] }));
@@ -29,7 +30,7 @@ const NAV: Group[] = [
     key: "home", title: "Главное", icon: LayoutDashboard, tone: "mint", flat: true,
     items: [
       { to: "/", label: "Главная", icon: LayoutDashboard, any: ["dashboard.view"], end: true, words: "сводка начало" },
-      { to: "/", label: "Мой мусоровоз", icon: Recycle, any: ["loaders.view_own"], unless: ["dashboard.view"], end: true, words: "грузчик машина маршрут замечание" },
+      { id: "my-truck", to: "/", label: "Мой мусоровоз", icon: Recycle, any: ["loaders.view_own"], unless: ["dashboard.view"], end: true, words: "грузчик машина маршрут замечание" },
       { to: "/calendar", label: "Календарь", icon: CalendarClock, any: ["calendar.view"], words: "даты сроки события" },
       { to: "/reminders", label: "Напоминания", icon: BellRing, any: ["reminders.view"], badge: "reminders", words: "сроки то просрочено" },
       { to: "/announcements", label: "Объявления", icon: Megaphone, any: ["announcements.view"], badge: "news", words: "новости сообщения" },
@@ -40,10 +41,9 @@ const NAV: Group[] = [
     key: "work", title: "Работа", icon: CalendarCheck, tone: "info",
     items: [
       ...withSub("Задания", [
-        { to: "/jobs", label: "Технические задания", icon: CalendarCheck, any: ["jobs.view"], end: true, words: "наряд заявка на день" },
+        { to: "/jobs", label: "Технические задания", icon: CalendarCheck, any: ["jobs.view"], end: true, words: "наряд заявка на день журнал заданий" },
         { to: "/jobs/mine", label: "Мои задания", icon: CalendarCheck, any: ["jobs.view_own"], unless: ["jobs.view"], end: true, words: "наряд на сегодня" },
         { to: "/map", label: "Карта", icon: MapPin, any: ["map.view"], words: "где машины объекты" },
-        ...sectionItems("jobs"),
       ]),
       ...withSub("Путевые листы и показания", [
         { to: "/waybills", label: "Путевые листы", icon: ClipboardList, any: ["waybills.view", "waybills.view_own"] },
@@ -52,7 +52,6 @@ const NAV: Group[] = [
       ]),
       ...withSub("Рейсы и заправки", [
         { to: "/entries", label: "Мои записи", icon: NotebookPen, any: ["trips.view_own", "fuel_fills.view_own"], unless: ["trips.view", "fuel_fills.view"], end: true, words: "рейс заправка внести" },
-        { to: "/entries/feed", label: "Записи водителей", icon: Fuel, any: ["trips.view", "fuel_fills.view"], words: "рейсы заправки лента" },
         ...sectionItems("trips", "fuel_fills"),
       ]),
     ],
@@ -62,9 +61,9 @@ const NAV: Group[] = [
     items: [
       ...withSub("Маршруты", [
         { to: "/my-routes", label: "Мои маршруты", icon: Signpost, any: ["route_plan.view_own"], unless: ["route_plan.view"], feature: "routes", end: true, words: "мусоровоз улицы объезд по дням" },
-        { to: "/route-board", label: "Маршруты по дням", icon: CalendarRange, any: ["route_plan.view"], end: true, words: "какой мусоровоз где сегодня работает улицы" },
+        { to: "/route-board", label: "Маршруты по дням", icon: CalendarRange, any: ["route_plan.view"], end: true, words: "какой мусоровоз где сегодня работает улицы расписание маршрутов" },
         { to: "/loaders", label: "Бригады и замечания", icon: UsersRound, any: ["route_notes.view"], end: true, words: "грузчики бригада экипаж замечания не вывезли контейнер" },
-        ...sectionItems("route_plan", "garbage_routes"),
+        ...sectionItems("garbage_routes"),
       ]),
       ...withSub("Тоннаж и ходки", [
         { to: "/tonnage", label: "Тоннаж", icon: Weight, any: ["weigh_tickets.view_own"], unless: ["weigh_tickets.view"], feature: "tonnage", end: true, words: "талон вес весы тонны" },
@@ -73,7 +72,7 @@ const NAV: Group[] = [
         { to: "/reports/garbage", label: "Мусоровозы за месяц", icon: BarChart3, any: ["weigh_tickets.view"], all: ["reports.view"], words: "тонны итог отчёт мусоровозы пробег топливо затраты" },
       ]),
       ...withSub("Зарплата", [
-        { to: "/reports/garbage_salary", label: "Зарплата мусоровозов", icon: Wallet, any: ["worklog.view"], all: ["reports.view"], words: "зарплата заработок выплата тонны водители мусоровозов аванс" },
+        { to: "/garbage-salary", label: "Зарплата мусоровозов", icon: Wallet, any: ["worklog.view"], words: "зарплата заработок выплата тонны водители мусоровозов аванс" },
       ]),
     ],
   },
@@ -81,7 +80,6 @@ const NAV: Group[] = [
     key: "fleet", title: "Техника", icon: Truck, tone: "mint",
     items: [
       { to: "/vehicles", label: "Транспорт", icon: Truck, any: ["vehicles.view", "vehicles.view_own"], words: "машины автомобили парк спецтехника" },
-      { to: "/roster", label: "Водители и техника", icon: UsersRound, any: ["roster.view"], words: "закрепление кто на чём" },
       { to: "/dossier/vehicles", label: "Личные дела техники", icon: FolderOpen, any: ["vehicle_files.view"], words: "документы птс страховка осаго" },
       ...withSub("Обслуживание", sectionItems("maintenance", "vehicle_events", "tires", "vehicle_repairs")),
       ...withSub("Деньги по технике", [{ to: "/vehicle-finance", label: "Затраты на спецтехнику", icon: PiggyBank, any: ["vehicle_finance.view"], end: true, words: "расходы затраты страховка топливо склад детали" }, ...sectionItems("fines", "fuel_cards", "rentals")]),
@@ -97,17 +95,16 @@ const NAV: Group[] = [
         ...sectionItems("parts"),
       ]),
       ...withSub("Склад", [
-        { to: "/stock", label: "Остатки", icon: Boxes, any: ["stock_items.view"], end: true, words: "склад сколько осталось" },
+        { to: "/stock", label: "Остатки", icon: Boxes, any: ["stock_items.view"], end: true, words: "склад сколько осталось товары на складе" },
         { to: "/stock/moves", label: "Движение товара", icon: ArrowLeftRight, any: ["stock_moves.view"], words: "приход расход списание" },
-        ...sectionItems("stock_items", "warehouses"),
+        ...sectionItems("warehouses"),
       ]),
     ],
   },
   {
     key: "people", title: "Сотрудники", icon: Users, tone: "success",
     items: [
-      { to: "/employees", label: "Сотрудники", icon: Users, any: ["employees.view"], words: "люди водители работники" },
-      { to: "/dossier/employees", label: "Личные дела водителей", icon: UserSquare2, any: ["employee_files.view"], words: "документы права медосмотр" },
+      { to: "/employees", label: "Сотрудники", icon: Users, any: ["employees.view"], words: "люди водители работники личные дела документы права медосмотр" },
       { to: "/timesheet", label: "Табель", icon: CalendarDays, any: ["timesheet.view"], words: "часы зарплата выходы учёт времени" },
       { to: "/my-time", label: "Мои часы", icon: Hourglass, any: ["worklog.view_own"], unless: ["worklog.view"], words: "заработок зарплата" },
       { to: "/hours-entry", label: "Внести часы", icon: Hourglass, any: ["worklog.enter"], unless: ["worklog.create"], words: "ремонт механик" },
@@ -146,11 +143,33 @@ const EXTRA_TITLES: Record<string, string> = { "/profile": "Профиль и п
 
 const matches = (i: Item, path: string) => (i.end ? path === i.to : path === i.to || path.startsWith(i.to + "/"));
 
+/** Страницы, которые раньше были отдельными пунктами меню, а теперь одна страница с переключателем сверху. В меню — только первая. */
+interface PageTab { to: string; label: string; perm: string }
+const PAGE_TABS: PageTab[][] = [
+  [{ to: "/jobs", label: "На день", perm: "jobs.view" }, { to: "/jobs/list", label: "Журнал заданий", perm: "jobs.view" }],
+  [{ to: "/route-board", label: "На день", perm: "route_plan.view" }, { to: "/route-plan", label: "Расписание", perm: "route_plan.view" }],
+  [{ to: "/stock", label: "Остатки", perm: "stock_items.view" }, { to: "/stock-items", label: "Товары", perm: "stock_items.view" }],
+  [{ to: "/employees", label: "Сотрудники", perm: "employees.view" }, { to: "/dossier/employees", label: "Личные дела", perm: "employee_files.view" }],
+];
+const tabOf = (path: string) => PAGE_TABS.find((g) => g.some((t) => path === t.to || (t.to !== g[0].to && path.startsWith(t.to + "/"))));
+
+function PageSwitch({ path }: { path: string }) {
+  const { can } = useAuth();
+  const g = tabOf(path)?.filter((t) => can(t.perm));
+  if (!g || g.length < 2) return null;
+  return (
+    <nav className="page-switch" aria-label="Вид страницы">
+      {g.map((t, i) => <NavLink key={t.to} to={t.to} end className={({ isActive }) => `page-switch-btn ${isActive || (i > 0 && path.startsWith(t.to + "/")) ? "on" : ""}`}>{t.label}</NavLink>)}
+    </nav>
+  );
+}
+
 export function Shell() {
   const { me, can, canAny, entityId, setEntityId, logout } = useAuth();
   const [open, setOpen] = useState(false);
   const [menu, setMenu] = useState(false);
   const [quick, setQuick] = useState(false);
+  const [editing, setEditing] = useState(false);
   const [q, setQ] = useState("");
   const nav = useNavigate();
   const loc = useLocation();
@@ -199,15 +218,17 @@ export function Shell() {
   const canSearch = canAny("vehicles.view", "vehicles.view_own");
   const roleNames = Array.from(new Set(me!.roles.map((r) => r.name))).join(", ");
 
+  // порядок и названия, которые задали директор или администратор (одни на всех)
+  const layout = useQuery({ queryKey: ["menu-layout"], queryFn: () => get<MenuLayoutRes>("/menu-layout"), staleTime: 5 * 60_000 });
+  const full = useMemo(() => applyLayout(NAV, layout.data?.layout), [layout.data]);
   // что доступно этому человеку; пустые группы не показываются
-  const groups = NAV.map((g) => ({
-    ...g,
-    items: g.items.filter((i) => canAny(...i.any) && !(i.unless && canAny(...i.unless)) && (!i.all || i.all.every((k) => can(k))) && (!i.feature || me!.features?.[i.feature])),
-  })).filter((g) => g.items.length > 0);
+  const visible = (i: Item) => canAny(...i.any) && !(i.unless && canAny(...i.unless)) && (!i.all || i.all.every((k) => can(k))) && (!i.feature || !!me!.features?.[i.feature]);
+  const groups = full.map((g) => ({ ...g, items: g.items.filter(visible) })).filter((g) => g.items.length > 0);
 
   // где человек сейчас: самый подходящий пункт меню (самый длинный адрес) и его группа
   let here: { group: Group; item: Item } | null = null;
-  for (const g of groups) for (const i of g.items) if (matches(i, loc.pathname) && (!here || i.to.length > here.item.to.length)) here = { group: g, item: i };
+  const navPath = tabOf(loc.pathname)?.[0].to ?? loc.pathname;           // вторая вкладка страницы подсвечивает в меню первую
+  for (const g of groups) for (const i of g.items) if (matches(i, navPath) && (!here || i.to.length > here.item.to.length)) here = { group: g, item: i };
   const hereKey = here?.group.key ?? "";
   const hereTitle = here?.item.label ?? EXTRA_TITLES[loc.pathname] ?? "";
 
@@ -219,7 +240,7 @@ export function Shell() {
   useEffect(() => { document.title = hereTitle ? `${hereTitle} · Автопарк ERP` : "Автопарк ERP"; }, [hereTitle]);
 
   return (
-    <div className="app">
+    <div className={`app ${editing ? "menu-editing" : ""}`}>
       <a className="skip" href="#content">К содержимому</a>
       <aside className={`sidebar ${open ? "open" : ""}`} aria-label="Главное меню">
         <div className="brand">
@@ -232,7 +253,7 @@ export function Shell() {
           <span>Найти раздел</span>
           <kbd aria-hidden>Ctrl K</kbd>
         </button>
-        {groups.map((g) => {
+        {editing && layout.data ? <MenuEditor nav={NAV} layout={layout.data.layout} visible={visible} onDone={() => setEditing(false)} /> : groups.map((g) => {
           const expanded = g.flat || openKey === g.key;
           const hasHere = hereKey === g.key;
           const sum = g.items.reduce((n, i) => n + badgeOf(i.badge), 0);
@@ -256,7 +277,7 @@ export function Shell() {
                     return (
                       <div key={i.to}>
                         {cap && <div className="nav-sub">{cap}</div>}
-                        <NavLink to={i.to} end={i.end} title={i.label} className={({ isActive }) => `nav-link ${isActive ? "active" : ""}`}>
+                        <NavLink to={i.to} end={i.end} title={i.label} className={({ isActive }) => `nav-link ${isActive || here?.item === i ? "active" : ""}`}>
                           <i.icon size={17} aria-hidden />
                           <span className="nav-label">{i.label}</span>
                           {n > 0 && <span className="count" title={i.badge === "pending" ? "Ждут проверки" : i.badge === "reminders" ? "Наступило" : "Адресовано вам, не открыто"}>{n}</span>}
@@ -269,6 +290,11 @@ export function Shell() {
             </nav>
           );
         })}
+        {!editing && layout.data?.can_edit && (
+          <button type="button" className="nav-edit" onClick={() => setEditing(true)} title="Перетащить разделы и поменять их названия для всех">
+            <PencilLine size={15} aria-hidden /> Настроить меню
+          </button>
+        )}
       </aside>
       {open && <div className="scrim" onClick={() => setOpen(false)} />}
 
@@ -318,6 +344,7 @@ export function Shell() {
         </header>
         <ConnectionBar />
         <main className="content" id="content" tabIndex={-1}>
+          <PageSwitch path={loc.pathname} />
           <Outlet />
         </main>
       </div>

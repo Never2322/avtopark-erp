@@ -1,24 +1,26 @@
 // Счета на ремонт: список по месяцам, сводка «сколько потратили» и выгрузка в Excel.
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Download, FilePlus2, FileUp, Paperclip, ReceiptText, Search, Upload } from "lucide-react";
-import { get, qs } from "../api";
+import { errorText, get, post, put, qs } from "../api";
 import { fmtDate, fmtMoney } from "../format";
 import { Page, useDebounced, useEntityParam, useUrlState } from "../hooks";
 import { useVehicleOptions } from "../components/pickers";
-import { Badge, Button, Card, Empty, FilterChips, PageHeader, Pagination, QueryState, Table, Tabs } from "../ui";
+import { Badge, Button, Card, Empty, FilterChips, PageHeader, Pagination, QueryState, Table, Tabs, useToast } from "../ui";
 import { BillAuto } from "./BillAuto";
 
 export interface BillRow {
   id: number; legal_entity_id: number; legal_entity: string; kind: string; kind_label: string; number: string; bill_date: string; supplier_name: string; supplier_inn: string;
   basis: string; vehicle_id: number | null; vehicle: string; request_id: number | null; request_number: number | null; total: number; vat: number;
-  status: string; status_label: string; paid_date: string | null; files: number; archived: boolean;
+  status: string; status_label: string; paid_date: string | null; files: number; archived: boolean; category: string | null; category_label: string;
 }
+interface BudgetItem { code: string; label: string; budget: number | null; spent: number; left: number | null }
+interface Budget { month: string; items: BudgetItem[]; none: number; can_edit: boolean }
 interface Totals { count: number; total: number; paid: number; unpaid: number; vat: number; cancelled: number }
-interface BillPage extends Page<BillRow> { totals: Totals; month: string }
+interface BillPage extends Page<BillRow> { totals: Totals; month: string; budget: Budget | null }
 export interface BillMeta {
-  statuses: { code: string; label: string }[]; kinds: { code: string; label: string }[]; vat_rates: { value: number; label: string }[]; units: string[];
+  categories: { code: string; label: string }[]; statuses: { code: string; label: string }[]; kinds: { code: string; label: string }[]; vat_rates: { value: number; label: string }[]; units: string[];
   months: string[]; month_labels: Record<string, string>; default_month: string; entities: { id: number; name: string }[];
   can: { create: boolean; export: boolean; pay: boolean; edit: boolean; void: boolean; catalog: boolean; purchases: boolean };
 }
@@ -26,6 +28,36 @@ export const useBillMeta = () => useQuery({ queryKey: ["bills-meta"], queryFn: (
 
 export function BillStatus({ code, label }: { code: string; label: string }) {
   return <Badge tone={code === "paid" ? "success" : code === "cancelled" ? "neutral" : "warning"}>{label}</Badge>;
+}
+
+/** Бюджет на месяц по категории: сумму вписывает директор, счета этой категории за месяц вычитаются из неё. */
+function BudgetBox({ b, month, can, onSaved }: { b: BudgetItem; month: string; can: boolean; onSaved: () => void }) {
+  const toast = useToast();
+  const [v, setV] = useState<string | null>(null);
+  const shown = v ?? (b.budget != null ? String(b.budget).replace(".", ",") : "");
+  const save = async () => {
+    if (v === null) return;
+    const before = b.budget != null ? String(b.budget).replace(".", ",") : "";
+    if (v.trim() === before) { setV(null); return; }
+    try { await put("/bills/budget", { month, category: b.code, amount: v.trim() || null }); onSaved(); } catch (e) { toast.error(errorText(e)); } finally { setV(null); }
+  };
+  const over = b.left != null && b.left < 0;
+  return (
+    <div className={`budget-box cat-${b.code} ${over ? "over" : ""}`}>
+      <span className="budget-title">{b.label}</span>
+      {can ? (
+        <label className="budget-input">
+          <span className="muted small">Выделено на месяц, ₽</span>
+          <input className="input compact" inputMode="decimal" placeholder="впишите сумму" value={shown} aria-label={`Бюджет на ${b.label.toLowerCase()}, ₽`}
+            onChange={(e) => setV(e.target.value)} onBlur={save} onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); if (e.key === "Escape") setV(null); }} />
+        </label>
+      ) : <span className="muted small">Выделено: {b.budget != null ? `${fmtMoney(b.budget)} ₽` : "не задано"}</span>}
+      <span className="budget-line"><span className="muted small">Потрачено</span><strong>{fmtMoney(b.spent)} ₽</strong></span>
+      <span className="budget-line"><span className="muted small">{over ? "Перерасход" : "Осталось"}</span>
+        <strong className="budget-left">{b.left == null ? "—" : `${fmtMoney(Math.abs(b.left))} ₽`}</strong></span>
+      {b.budget ? <div className="budget-bar"><span style={{ width: `${Math.min(100, Math.round((b.spent / b.budget) * 100))}%` }} /></div> : null}
+    </div>
+  );
 }
 
 interface SummaryRow { key: string | null; label: string; count: number; total: number; paid: number; unpaid: number; vat: number }
@@ -76,7 +108,9 @@ export function Bills() {
   const nav = useNavigate();
   const entity = useEntityParam();
   const meta = useBillMeta();
-  const [s, setS] = useUrlState({ q: "", month: "", status: "", vehicle: "", archived: "", tab: "list", page: "1" });
+  const [s, setS] = useUrlState({ q: "", month: "", cat: "", vehicle: "", archived: "", tab: "list", page: "1" });
+  const qc = useQueryClient();
+  const toast = useToast();
   const [text, setText] = useState(s.q);
   const [auto, setAuto] = useState(false);
   const debounced = useDebounced(text);
@@ -85,11 +119,14 @@ export function Bills() {
   useEffect(() => { setText(s.q); }, [s.q]);
 
   const month = s.month || meta.data?.default_month || "";
-  const params = { q: s.q, month, status: s.status, vehicle_id: s.vehicle, archived: s.archived === "1", legal_entity_id: entity, page: Number(s.page), page_size: 25 };
+  const params = { q: s.q, month, category: s.cat, vehicle_id: s.vehicle, archived: s.archived === "1", legal_entity_id: entity, page: Number(s.page), page_size: 25 };
   const list = useQuery({ queryKey: ["bills", params], queryFn: () => get<BillPage>("/bills", params), enabled: !!month && s.tab === "list", placeholderData: (p) => p });
   const d = list.data;
   const can = meta.data?.can;
-  const filtered = !!(s.q || s.status || s.vehicle || s.archived);
+  const filtered = !!(s.q || s.cat || s.vehicle || s.archived);
+  const refresh = () => qc.invalidateQueries({ queryKey: ["bills"] });
+  const setCategory = (r: BillRow, category: string) =>
+    post(`/bills/${r.id}/category`, { category: category || null }).then(refresh).catch((e) => toast.error(errorText(e)));
 
   return (
     <>
@@ -124,21 +161,19 @@ export function Bills() {
         {s.tab === "list" ? (
           <>
             <div style={{ padding: "12px 14px" }}>
-              <FilterChips value={s.status} onChange={(v) => setS({ status: v })}
-                options={[{ id: "", label: "Все" }, ...(meta.data?.statuses.map((x) => ({ id: x.code, label: x.label })) ?? [])]} />
+              <FilterChips value={s.cat} onChange={(v) => setS({ cat: v, page: "1" })}
+                options={[{ id: "", label: "Все" }, ...(meta.data?.categories.map((x) => ({ id: x.code, label: x.label })) ?? []), { id: "none", label: "Без категории" }]} />
             </div>
-            {d && !d.totals.count && !d.totals.cancelled ? null : d && (
-              <div className="bill-totals">
-                <div><span className="muted small">Счетов</span><strong>{d.totals.count}</strong></div>
-                <div><span className="muted small">На сумму, ₽</span><strong>{fmtMoney(d.totals.total)}</strong></div>
-                <div><span className="muted small">Оплачено, ₽</span><strong>{fmtMoney(d.totals.paid)}</strong></div>
-                <div className={d.totals.unpaid ? "warn" : ""}><span className="muted small">Ждёт оплаты, ₽</span><strong>{fmtMoney(d.totals.unpaid)}</strong></div>
+            {d?.budget ? (
+              <div className="budget-boxes">
+                {d.budget.items.map((b) => <BudgetBox key={`${d.budget!.month}-${b.code}`} b={b} month={d.budget!.month} can={d.budget!.can_edit} onSaved={refresh} />)}
+                {d.budget.none > 0 && <p className="muted small budget-none">Счета без категории на {fmtMoney(d.budget.none)} ₽ в бюджет не входят: выберите им категорию в списке.</p>}
               </div>
-            )}
+            ) : month === "all" ? <p className="muted small" style={{ padding: "0 14px 10px" }}>Бюджет показывается, когда выбран один месяц.</p> : null}
             <QueryState q={list}>
               {d && (d.items.length === 0 ? (
                 <Empty icon={ReceiptText} title={filtered ? "Ничего не найдено" : "Счетов за этот период нет"}>
-                  {filtered ? <Button onClick={() => { setText(""); setS({ q: "", status: "", vehicle: "", archived: "" }); }}>Сбросить фильтры</Button>
+                  {filtered ? <Button onClick={() => { setText(""); setS({ q: "", cat: "", vehicle: "", archived: "" }); }}>Сбросить фильтры</Button>
                     : can?.create ? "Нажмите «Загрузить счёт» и приложите файл или фото счёта: программа прочитает его сама. Или выпишите счёт здесь." : "Когда счета появятся, они будут здесь."}
                 </Empty>
               ) : (
@@ -148,6 +183,13 @@ export function Bills() {
                       { key: "n", header: "№ счёта", render: (r) => <><strong>{r.number}</strong>{r.files > 0 && <Paperclip size={13} aria-label="есть файл" style={{ marginLeft: 6, color: "var(--text-2)" }} />}</> },
                       { key: "d", header: "Дата", render: (r) => fmtDate(r.bill_date) },
                       { key: "s", header: "Поставщик", render: (r) => r.supplier_name },
+                      { key: "c", header: "Категория", render: (r) => (can?.edit && !r.archived ? (
+                        <select className="input compact bill-cat" value={r.category ?? ""} aria-label={`Категория счёта ${r.number}`} onClick={(e) => e.stopPropagation()}
+                          onChange={(e) => setCategory(r, e.target.value)}>
+                          <option value="">—</option>
+                          {meta.data?.categories.map((c) => <option key={c.code} value={c.code}>{c.label}</option>)}
+                        </select>
+                      ) : r.category_label || <span className="muted">—</span>) },
                       { key: "v", header: "Машина", hideSm: true, render: (r) => r.vehicle || <span className="muted">—</span> },
                       { key: "r", header: "Обращение", hideSm: true, render: (r) => (r.request_id ? <Link to={`/requests/${r.request_id}`} onClick={(e) => e.stopPropagation()}>№ {r.request_number}</Link> : <span className="muted">—</span>) },
                       { key: "t", header: "Сумма, ₽", num: true, render: (r) => <strong>{fmtMoney(r.total)}</strong> },

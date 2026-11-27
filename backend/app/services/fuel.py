@@ -38,6 +38,20 @@ def segments(db: Session, vehicle_id: int) -> dict[int, dict]:
     return out
 
 
+def hour_segments(db: Session, vehicle_id: int) -> dict[int, dict]:
+    """То же для техники с моточасами: {id заправки: {"hours", "liters", "per_hour"}} — литры с прошлой заправки, делённые на моточасы."""
+    fills = db.scalars(select(FuelFill).where(FuelFill.vehicle_id == vehicle_id, FuelFill.archived_at.is_(None), FuelFill.engine_hours.is_not(None))
+                       .order_by(FuelFill.fill_date, FuelFill.id)).all()
+    out: dict[int, dict] = {}
+    prev = None
+    for f in fills:
+        if prev is not None and f.engine_hours > prev:
+            h = f.engine_hours - prev
+            out[f.id] = {"hours": h, "liters": f.liters, "per_hour": (f.liters / h).quantize(Decimal("0.1"))}
+        prev = f.engine_hours
+    return out
+
+
 def norms(db: Session, vehicle_ids) -> dict[int, tuple[Decimal | None, Decimal | None]]:
     """{id техники: (объём бака, норма расхода)}"""
     ids = set(vehicle_ids)

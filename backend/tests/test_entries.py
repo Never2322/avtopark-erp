@@ -115,12 +115,11 @@ def test_consumption_between_full_tanks_and_remarks(world, make_client):
     adm = make_client("admin")
     d = make_client("disp_a")
     assert set_specs(world, adm, world.va1, tank_liters="100", fuel_norm="25").status_code == 200
-    # первая полная заправка — точка отсчёта; потом частичная и полная
+    # первая заправка — точка отсчёта (галочки «полный бак» больше нет: каждая заправка считается до полного)
     assert d.post("/fuel_fills", fuel_body(world, fill_date=day(6), liters="90", odometer=1000)).status_code == 201
-    assert d.post("/fuel_fills", fuel_body(world, fill_date=day(4), liters="40", odometer=1150, full_tank=False)).status_code == 201
-    r = d.post("/fuel_fills", fuel_body(world, fill_date=day(2), liters="60", odometer=1400))
+    r = d.post("/fuel_fills", fuel_body(world, fill_date=day(2), liters="100", odometer=1400))
     assert r.status_code == 201
-    # (40 + 60) л на 400 км = 25,0 л/100 км — ровно по норме
+    # 100 л на 400 км = 25,0 л/100 км — ровно по норме
     rows = {x["id"]: x for x in d.get("/fuel_fills").json()["items"]}
     last = rows[r.json()["id"]]
     assert last["consumption"] == "25,0" and last["check"]["text"] == "В норме"
@@ -132,7 +131,7 @@ def test_consumption_between_full_tanks_and_remarks(world, make_client):
     row = next(x for x in d.get("/fuel_fills").json()["items"] if x["id"] == r.json()["id"])
     assert row["consumption"] == "40,0" and row["check"]["tone"] == "error" and row["check_notes"]
     # то же приходит предупреждением при сохранении, а запись остаётся
-    r = d.post("/fuel_fills", fuel_body(world, fill_date=day(0), liters="150", odometer=1650, full_tank=False))
+    r = d.post("/fuel_fills", fuel_body(world, fill_date=day(0), liters="150", odometer=1650))
     assert r.status_code == 201
     assert any("бак вмещает" in x for x in d.get("/fuel_fills").json()["items"][0]["check_notes"])
 

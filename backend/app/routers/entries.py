@@ -26,7 +26,7 @@ from app.common import fail, utcnow
 from app.db import get_db
 from app.deps import Principal, current, entity_filter
 from app.enums import ENTRY_DELETE_HOURS, ENTRY_MAX_PHOTOS
-from app.models import EntryPhoto, FuelFill, StoredFile, Trip, Vehicle, VehicleSpecs, WeighTicket
+from app.models import EntryPhoto, FuelFill, StoredFile, Trip, Vehicle, VehicleSpecs, VehicleType, WeighTicket
 from app.registry import RESOURCES, _vehicle_label, rows_out, save
 from app.resources import job_today
 from app.routers.dossier import read_uploads, store
@@ -153,7 +153,8 @@ def my_entries(p: Principal = Depends(current), db: Session = Depends(get_db)):
             s = specs.get(v.id)
             vehicles.append({"id": v.id, "label": _vehicle_label(v), "legal_entity_id": v.legal_entity_id,
                              "tank_liters": float(s.tank_liters) if s and s.tank_liters else None,
-                             "fuel_norm": float(s.fuel_norm) if s and s.fuel_norm else None})
+                             "fuel_norm": float(s.fuel_norm) if s and s.fuel_norm else None,
+                             "meter": "engine_hours" if db.get(VehicleType, v.type_id).primary_reading == "engine_hours" else "km"})
     since = job_today() - dt.timedelta(days=MY_DAYS)
     items: list[dict] = []
     can = {}
@@ -246,8 +247,8 @@ def delete_mine(kind: str, oid: int, p: Principal = Depends(current), db: Sessio
     audit.log(db, p, "entries.driver_void", k.res, obj.id, obj.legal_entity_id, kind=k.key)
     db.commit()
     note = ""
-    if k.key == "fuel" and obj.odometer is not None:
-        note = "Пробег из этой заправки остался в показаниях техники: если он неверный, скажите механику, он исправит"
+    if k.key == "fuel" and (obj.odometer is not None or obj.engine_hours is not None):
+        note = "Пробег или моточасы из этой заправки остался в показаниях техники: если он неверный, скажите механику, он исправит"
     return {"ok": True, "note": note}
 
 

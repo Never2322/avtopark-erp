@@ -1,5 +1,6 @@
-// «Расходы»: всё, что компания потратила за месяц, одним экраном. Счета на ремонт и запчасти (в том числе без машины), топливо, штрафы,
-// общие и прочие траты. Итог совпадает с плиткой «Расходы за месяц» на главной.
+// «Расходы»: всё, что компания потратила за месяц, одним экраном. Все затраты по машинам — одной строкой «Затраты на технику»
+// (подробно — на странице «Затраты на спецтехнику»), отдельно счета без машины и закупки на склад, общие расходы и аренда.
+// Итог совпадает с плиткой «Расходы за месяц» на главной.
 import { Link, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowDown, ArrowUp, ChevronLeft, ChevronRight, Info, Plus, Receipt, Truck } from "lucide-react";
@@ -20,12 +21,9 @@ const shiftMonth = (m: string, delta: number) => { const [y, mo] = m.split("-").
 
 /** Куда ведёт «Открыть раздел» у каждой статьи и какое право для этого нужно. */
 const OPEN: Record<string, { to: string; perm: string }> = {
-  bills: { to: "/bills", perm: "bills.view" },
+  vehicles: { to: "/vehicle-finance", perm: "vehicle_finance.view" },
+  bills_other: { to: "/bills", perm: "bills.view" },
   misc: { to: "/expenses/general", perm: "expenses.view" },
-  fuel: { to: "/fuel-fills", perm: "fuel_fills.view" },
-  requests: { to: "/requests", perm: "requests.view" },
-  vehicle_finance: { to: "/vehicle-finance", perm: "vehicle_finance.view" },
-  fines: { to: "/fines", perm: "fines.view" },
   rent_in: { to: "/rentals", perm: "rentals.view" },
   repairs: { to: "/vehicle-repairs", perm: "vehicle_repairs.view" },
 };
@@ -54,7 +52,7 @@ export function Expenses() {
     <>
       <PageHeader
         title="Расходы"
-        sub="Всё, что компания потратила за месяц: счета на ремонт и запчасти, топливо, штрафы и общие траты. Итог тот же, что на главной странице."
+        sub="Всё, что компания потратила за месяц. Затраты по машинам здесь одной строкой, подробно — в «Затратах на спецтехнику». Итог тот же, что на главной странице."
         actions={<>
           {can("bills.create") && <Link className="btn" to="/bills/new"><Plus size={16} aria-hidden /> Внести счёт</Link>}
           {can("expenses.create") && <Link className="btn" to="/expenses/general?new=1"><Plus size={16} aria-hidden /> Общий расход</Link>}
@@ -88,7 +86,7 @@ export function Expenses() {
             </div>
 
             {withData.length === 0 ? (
-              <Card><Empty icon={Receipt} title={`За ${d.title} расходов нет`}>Они появятся, когда внесут счета на ремонт и запчасти, заправки, штрафы или общие траты. Другой месяц можно выбрать выше.</Empty></Card>
+              <Card><Empty icon={Receipt} title={`За ${d.title} расходов нет`}>Они появятся, когда внесут счета, заправки, штрафы, полисы или общие траты. Другой месяц можно выбрать выше.</Empty></Card>
             ) : (
               <section aria-label="Расходы по статьям">
                 <h2 className="exp-h">По статьям <span className="muted small">нажмите на статью, чтобы увидеть её строки</span></h2>
@@ -131,7 +129,7 @@ export function Expenses() {
                         {!r.counted && <div className="muted small">{r.cat_label}</div>}
                       </div>
                     ) },
-                    { key: "v", header: "Машина", hideSm: true, render: (r) => r.vehicle ? <span className="nowrap"><Truck size={13} aria-hidden /> {r.vehicle}</span> : <span className="muted">{r.cat === "bills" ? "без привязки" : "—"}</span> },
+                    { key: "v", header: "Машина", hideSm: true, render: (r) => r.vehicle ? <span className="nowrap"><Truck size={13} aria-hidden /> {r.vehicle}</span> : <span className="muted">{r.cat === "bills_other" ? "без привязки" : "—"}</span> },
                     { key: "s", header: "Состояние", hideSm: true, render: (r) => r.status === "unpaid" ? <Badge tone="warning">не оплачен</Badge> : r.status === "paid" ? <Badge tone="success">оплачен</Badge> : null },
                     { key: "a", header: "Сумма, ₽", num: true, render: (r) => <strong>{fmtMoney(r.amount)}</strong> },
                   ]}
@@ -145,7 +143,7 @@ export function Expenses() {
                 <Info size={14} aria-hidden /> Записи о ремонте техники со стоимостью ({reference.map((c) => `${fmtMoney(c.amount)} ₽`).join(", ")}) показаны справочно и в итог не входят: ремонт обычно уже внесён счётом, и сумма сложилась бы дважды.
               </Alert>
             )}
-            <p className="muted small">Счета считаются по дате счёта: и оплаченные, и ждущие оплаты. Штрафы — только те, что платит компания, аренда — по суткам внутри месяца.</p>
+            <p className="muted small">Счета считаются по дате счёта: и оплаченные, и ждущие оплаты. Детали со склада входят в закупки на склад, а не в строку техники, чтобы не считать их дважды. Аренда — по суткам внутри месяца.</p>
           </div>
         )}
       </QueryState>

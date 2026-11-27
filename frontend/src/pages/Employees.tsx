@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Archive, Plus, RotateCcw, Search, UserPlus, Users as UsersIcon } from "lucide-react";
+import { Archive, FolderOpen, Plus, RotateCcw, Search, UserPlus, Users as UsersIcon } from "lucide-react";
 import { get, patch, post } from "../api";
 import { useAuth } from "../auth";
 import { fmtDate, todayIso } from "../format";
@@ -67,6 +68,7 @@ function EmployeeForm({ initial, onClose }: { initial?: Employee; onClose: () =>
   });
   return (
     <Modal title={initial ? "Изменить сотрудника" : "Добавить сотрудника"} wide onClose={onClose} footer={<>
+      {initial && can("employee_files.view") && <Link className="btn" to={`/dossier/employees/${initial.id}`} style={{ marginRight: "auto" }}><FolderOpen size={16} aria-hidden /> Личное дело</Link>}
       <Button onClick={onClose}>Отмена</Button>
       <Button variant="primary" loading={m.isPending} disabled={!f.values.last_name.trim() || (!initial && !f.values.legal_entity_id)} onClick={() => { f.clear(); m.mutate(); }}>Сохранить</Button>
     </>}>

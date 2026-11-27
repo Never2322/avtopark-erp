@@ -46,6 +46,11 @@ def row_of(res, plate):
     return dict(zip([c["key"] for c in res["table"]["columns"]], rows[0]))
 
 
+def costs_of(res):
+    """Таблица «Затраты по статьям» из отчёта «Итоги и затраты по технике» в виде отдельного отчёта."""
+    return {"table": next(e for e in res["extras"] if e["title"] == "Затраты по статьям")}
+
+
 def keys(res):
     return [c["key"] for c in res["table"]["columns"]]
 
@@ -102,12 +107,12 @@ def seed_may(world):
 
 def test_list_depends_on_rights(make_client, world):
     names = lambda who: {x["name"] for x in make_client(who).get("/reports").json()["items"]}          # noqa: E731
-    assert names("dir_a") == {"month", "mileage", "fuel", "costs", "repairs", "waybill_fuel", "downtime", "orders", "salary", "garbage_salary", "tonnage", "garbage", "day"}
-    assert names("acc_a") >= {"costs", "repairs", "orders", "mileage"}
+    assert names("dir_a") == {"month", "mileage", "fuel", "repairs", "waybill_fuel", "downtime", "orders", "salary", "garbage_salary", "tonnage", "garbage", "day"}
+    assert names("acc_a") >= {"month", "repairs", "orders", "mileage"}
     disp = names("disp_a")
-    assert {"month", "mileage", "fuel", "downtime", "orders"} <= disp and not ({"costs", "repairs"} & disp)
+    assert {"month", "mileage", "fuel", "downtime", "orders"} <= disp and "repairs" not in disp
     mech = names("mech_a")
-    assert "mileage" in mech and "fuel" in mech and not ({"costs", "repairs", "orders"} & mech)
+    assert "mileage" in mech and "fuel" in mech and not ({"repairs", "orders"} & mech)
     for who in ("drv1", "store_a", "emp_a"):
         assert make_client(who).get("/reports").status_code == 403
     can = make_client("dir_a").get("/reports").json()["can"]
@@ -128,8 +133,8 @@ def test_money_is_hidden_without_right(make_client, world):
     seed_may(world)
     boss, disp = make_client("dir_a"), make_client("disp_a")
     full, plain = rep(boss, "month", P_MAY), rep(disp, "month", P_MAY)
-    assert {"cost", "income", "fines"} <= set(keys(full)) and full["hidden"] == []
-    assert not ({"cost", "income", "fines"} & set(keys(plain)))
+    assert "cost" in keys(full) and "income" not in keys(full) and full["hidden"] == []
+    assert "cost" not in keys(plain)
     assert any("рублях" in h for h in plain["hidden"])
     assert row_of(plain, "К100")["km"] == row_of(full, "К100")["km"]                  # остальное одинаково
     fuel_plain = rep(disp, "fuel", RANGE_MAY)
@@ -203,7 +208,7 @@ def test_costs_do_not_count_twice(make_client, world):
         db.add(StockMove(legal_entity_id=v.legal_entity_id, move_date=dt.date(2026, 5, 7), kind="receipt", item_id=mv.item_id, warehouse_id=mv.warehouse_id,
                          qty=Decimal("3"), price=Decimal("150"), bill_id=b.id))
         db.commit()
-    res = rep(make_client("dir_a"), "costs", RANGE_MAY)
+    res = costs_of(rep(make_client("dir_a"), "month", P_MAY))
     row = row_of(res, "К100")
     assert row["fuel"] == 10000.0
     assert row["bills_net"] == 12000.0                                           # счета Б-1 и Б-2; архивный Б-3 и складской Б-С не считаются
@@ -215,7 +220,7 @@ def test_costs_do_not_count_twice(make_client, world):
     labels = [c["label"] for c in res["table"]["columns"]]
     assert not any("Доход" in x or "Аренда" in x or "1 км" in x for x in labels)
     assert labels.index("Детали со склада, ₽") == labels.index("Штрафы (платит компания), ₽") + 1
-    assert make_client("acc_a").get("/reports/costs?" + RANGE_MAY).status_code == 200
+    assert costs_of(rep(make_client("acc_a"), "month", P_MAY))["table"]["rows"]
 
 
 def test_repairs_by_month(make_client, world):
@@ -307,14 +312,15 @@ def test_month_report_summary_and_extras(make_client, world):
     res = rep(make_client("dir_a"), "month", P_MAY)
     row = row_of(res, "К100")
     assert row["km"] == 650.0 and row["liters"] == 130.0 and row["per100"] == 20.0
-    assert row["cost"] == 26700.0 and row["income"] == 23000.0 and row["trips"] == 2 and row["fines"] == 700.0
+    assert row["cost"] == 26000.0 and row["trips"] == 2                       # та же сумма, что «Всего затрат» в «Затратах по статьям»
+    assert costs_of(res)["table"]["rows"] and row_of(costs_of(res), "К100")["cost"] == row["cost"]
     titles = [e["title"] for e in res["extras"]]
-    assert titles == ["Штрафы за месяц", "Рейсы за месяц", "Общие расходы за месяц"]                # обращений, созданных в мае, нет
-    fines = res["extras"][0]
+    assert titles == ["Затраты по статьям", "Штрафы за месяц", "Рейсы за месяц", "Общие расходы за месяц"]                # обращений, созданных в мае, нет
+    fines = res["extras"][1]
     assert [c["key"] for c in fines["columns"]][:2] == ["d", "v"] and len(fines["rows"]) == 2 and fines["totals"][4] == 1000.0
-    trips = res["extras"][1]
+    trips = res["extras"][2]
     assert trips["totals"][-1] == 80
-    assert res["extras"][2]["totals"][-1] == 1234.5
+    assert res["extras"][3]["totals"][-1] == 1234.5
 
 
 # ---------------------------------------------------------------- юрлица и периоды
@@ -378,13 +384,13 @@ def test_excel_export_month(make_client, world):
     book = sheets_of(r.content)
     assert list(book) == ["Сводка", "Затраты", "Топливо", "Простои", "Штрафы", "Рейсы", "Общие расходы", "О отчёте"]
     summary = book["Сводка"]
-    assert summary[0][0] == "Машина" and "Затраты, ₽" in summary[0]
+    assert summary[0][0] == "Машина" and "Всего затрат, ₽" in summary[0]
     k100 = [x for x in summary if str(x[0]).startswith("К100")][0]
-    assert 26700.0 in k100 and summary[-1][0] == "Итого"
+    assert 26000.0 in k100 and summary[-1][0] == "Итого"
     fines = book["Штрафы"]
     assert fines[1][0] == serial(dt.date(2026, 5, 11)) and "=SUM(A1)" in fines[1]                    # дата настоящей датой; текст, не формула
     about = dict((x[0], x[1]) for x in book["О отчёте"][1:] if len(x) > 1)
-    assert about["Отчёт"] == "Итоги месяца" and about["Период"] == "2026-05" and "Сформирован" in about
+    assert about["Отчёт"] == "Итоги и затраты по технике" and about["Период"] == "2026-05" and "Сформирован" in about
     with session_factory()() as db:
         log = db.scalar(select(AuditLog).where(AuditLog.action == "reports.export"))
         assert log.details["report"] == "month" and log.details["format"] == "xlsx"
@@ -412,12 +418,12 @@ def test_export_needs_its_own_right(make_client, world):
 
 def test_csv_export(make_client, world):
     seed_may(world)
-    r = make_client("dir_a").get(f"/reports/costs/export.csv?{RANGE_MAY}")
+    r = make_client("dir_a").get(f"/reports/month/export.csv?{P_MAY}")
     assert r.status_code == 200 and r.content.startswith("\ufeff".encode())
     text = r.content.decode("utf-8-sig")
     lines = text.split("\r\n")
-    assert lines[0].startswith("Машина;Топливо, л;Топливо, ₽;")
-    k = [x for x in lines if x.startswith("К100")][0].split(";")
+    head = next(i for i, x in enumerate(lines) if x.startswith("Машина;Топливо, л;Топливо, ₽;"))
+    k = [x for x in lines[head:] if x.startswith("К100")][0].split(";")
     assert "26000,0" in k and "10000,0" in k                                          # десятичная запятая, как ждёт Excel
     m = make_client("dir_a").get(f"/reports/month/export.csv?{P_MAY}").content.decode("utf-8-sig")
     assert "Штрафы за месяц" in m and "'=SUM(A1)" in m                                                  # формулу Excel обезвреживает апостроф

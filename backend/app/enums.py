@@ -166,6 +166,8 @@ REQUEST_PARTS_MAX = 60               # деталей в одном обраще
 REQUEST_PARTS_OPEN = ("new", "diagnostics", "approval", "in_progress", "waiting_parts")   # детали такого обращения ещё нужны
 BILL_KINDS = {"issued": "Выписан в программе", "uploaded": "Получен от поставщика"}
 BILL_STATUSES = {"unpaid": "Не оплачен", "paid": "Оплачен", "cancelled": "Отменён"}
+# категории счетов: на каждую директор выделяет бюджет на месяц, счета категории вычитаются из него
+BILL_CATEGORIES = {"parts": "Запчасти", "fluids": "Жидкости", "consumables": "Расходники"}
 BILL_MAX_ITEMS = 100
 BILL_MAX_FILES = 10
 REPAIR_PHOTO_MAX = 20                # фото к одному результату ремонта
