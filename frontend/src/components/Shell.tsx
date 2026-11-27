@@ -17,7 +17,9 @@ import { SECTIONS } from "../sections";
 import { Empty } from "../ui";
 
 /** sub: заголовок подраздела внутри группы (есть у каждого пункта подраздела, показывается над первым видимым: если первый скрыт правами, заголовок не пропадает); words: как ещё люди называют этот раздел (для поиска). */
-export interface Item { id?: string; to: string; label: string; icon: LucideIcon; any: string[]; end?: boolean; badge?: "pending" | "reminders" | "news"; unless?: string[]; all?: string[]; feature?: "tonnage" | "hauls" | "routes"; sub?: string; words?: string }
+export interface Item { id?: string; to: string; label: string; icon: LucideIcon; any: string[]; end?: boolean; badge?: "pending" | "reminders" | "news"; unless?: string[]; all?: string[]; feature?: Feat | Feat[]; noFeature?: Feat; sub?: string; words?: string }
+/** Что включено человеку по закреплённой машине: тоннаж, счётчик ходок (самосвал), маршруты, мусоровоз. */
+type Feat = "tonnage" | "hauls" | "routes" | "garbage";
 export interface Group { key: string; title: string; icon: LucideIcon; tone: string; items: Item[]; flat?: boolean }
 
 const sectionItems = (...keys: string[]): Item[] =>
@@ -51,6 +53,11 @@ const NAV: Group[] = [
         { to: "/readings", label: "Показания на проверке", icon: Gauge, any: ["readings.review"], badge: "pending", end: true, words: "пробег моточасы одометр" },
         { to: "/readings/import", label: "Ввод показаний", icon: FileUp, any: ["readings.import", "readings.create", "readings.create_own"], words: "спидометр пробег моточасы вручную файл загрузка показаний" },
       ]),
+      ...withSub("Тоннаж и ходки", [
+        { id: "tonnage-dump", to: "/tonnage", label: "Тоннаж", icon: Weight, any: ["weigh_tickets.view_own"], unless: ["weigh_tickets.view"], feature: "tonnage", noFeature: "garbage", end: true, words: "талон вес весы тонны самосвал" },
+        { to: "/hauls", label: "Счётчик ходок", icon: ListOrdered, any: ["hauls.use_own"], feature: "hauls", end: true, words: "ходки рейсы самосвал" },
+        { id: "my-routes-other", to: "/my-routes", label: "Мои маршруты", icon: Signpost, any: ["route_plan.view_own"], unless: ["route_plan.view"], feature: "routes", noFeature: "garbage", end: true, words: "маршрут по дням" },
+      ]),
       ...withSub("Рейсы и заправки", [
         { to: "/entries", label: "Мои записи", icon: NotebookPen, any: ["trips.view_own", "fuel_fills.view_own"], unless: ["trips.view", "fuel_fills.view"], end: true, words: "рейс заправка внести" },
         ...sectionItems("trips", "fuel_fills"),
@@ -61,14 +68,13 @@ const NAV: Group[] = [
     key: "garbage", title: "Мусоровозы", icon: Recycle, tone: "success",
     items: [
       ...withSub("Маршруты", [
-        { to: "/my-routes", label: "Мои маршруты", icon: Signpost, any: ["route_plan.view_own"], unless: ["route_plan.view"], feature: "routes", end: true, words: "мусоровоз улицы объезд по дням" },
+        { to: "/my-routes", label: "Мои маршруты", icon: Signpost, any: ["route_plan.view_own"], unless: ["route_plan.view"], feature: ["routes", "garbage"], end: true, words: "мусоровоз улицы объезд по дням" },
         { to: "/route-board", label: "Маршруты по дням", icon: CalendarRange, any: ["route_plan.view"], end: true, words: "какой мусоровоз где сегодня работает улицы расписание маршрутов" },
         { to: "/loaders", label: "Бригады и замечания", icon: UsersRound, any: ["route_notes.view"], end: true, words: "грузчики бригада экипаж замечания не вывезли контейнер" },
         ...sectionItems("garbage_routes"),
       ]),
       ...withSub("Тоннаж и ходки", [
-        { to: "/tonnage", label: "Тоннаж", icon: Weight, any: ["weigh_tickets.view_own"], unless: ["weigh_tickets.view"], feature: "tonnage", end: true, words: "талон вес весы тонны" },
-        { to: "/hauls", label: "Счётчик ходок", icon: ListOrdered, any: ["hauls.use_own"], feature: "hauls", end: true, words: "ходки рейсы" },
+        { to: "/tonnage", label: "Тоннаж", icon: Weight, any: ["weigh_tickets.view_own"], unless: ["weigh_tickets.view"], feature: ["tonnage", "garbage"], end: true, words: "талон вес весы тонны" },
         ...sectionItems("weigh_tickets"),
         { to: "/reports/garbage", label: "Мусоровозы за месяц", icon: BarChart3, any: ["weigh_tickets.view"], all: ["reports.view"], words: "тонны итог отчёт мусоровозы пробег топливо затраты" },
       ]),
@@ -223,7 +229,7 @@ export function Shell() {
   const layout = useQuery({ queryKey: ["menu-layout"], queryFn: () => get<MenuLayoutRes>("/menu-layout"), staleTime: 5 * 60_000 });
   const full = useMemo(() => applyLayout(NAV, layout.data?.layout), [layout.data]);
   // что доступно этому человеку; пустые группы не показываются
-  const visible = (i: Item) => canAny(...i.any) && !(i.unless && canAny(...i.unless)) && (!i.all || i.all.every((k) => can(k))) && (!i.feature || !!me!.features?.[i.feature]);
+  const visible = (i: Item) => canAny(...i.any) && !(i.unless && canAny(...i.unless)) && (!i.all || i.all.every((k) => can(k))) && [i.feature ?? []].flat().every((f) => !!me!.features?.[f]) && !(i.noFeature && me!.features?.[i.noFeature]);
   const groups = full.map((g) => ({ ...g, items: g.items.filter(visible) })).filter((g) => g.items.length > 0);
 
   // где человек сейчас: самый подходящий пункт меню (самый длинный адрес) и его группа

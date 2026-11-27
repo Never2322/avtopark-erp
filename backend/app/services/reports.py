@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session, aliased
 
 from app.common import fail
 from app.deps import Principal, Scope
-from app.enums import EFFECTIVE_STATES, FINE_PAYERS, INSURANCE_DOC_KINDS, REQUEST_STATUSES, VEHICLE_STATUSES, status_now
+from app.enums import BILL_CATEGORIES, EFFECTIVE_STATES, FINE_PAYERS, INSURANCE_DOC_KINDS, REQUEST_STATUSES, VEHICLE_STATUSES, status_now
 from app.models import (Counterparty, DossierDoc, Employee, Fine, LegalEntity, FuelFill, MiscExpense, Order, Rental, RepairBill, ServiceRequest, StockMove, Trip, Vehicle,
                         VehicleFinance, VehicleReading, VehicleStatusHistory, VehicleType, Waybill, WeighTicket, WorkLog)
 from app.services import payroll as pay
@@ -397,18 +397,28 @@ def report_repairs(c: Ctx) -> dict:
     last = month_bounds(*months[-1])[1]
     sc = c.money
     by: dict[tuple[int, str], float] = {}
+    # на что потрачено: категория счёта (запчасти, жидкости, расходники), без категории и ремонт по обращениям без счёта
+    cat_v: dict[tuple[int, str], float] = {}
+    cat_m: dict[tuple[str, str], float] = {}
+
+    def put_cat(vid: int, month: str, cat: str, amount: float) -> None:
+        cat_v[(vid, cat)] = cat_v.get((vid, cat), 0.0) + amount
+        cat_m[(month, cat)] = cat_m.get((month, cat), 0.0) + amount
+
     if sc and ids:
-        for vid, d, total in c.db.execute(select(RepairBill.vehicle_id, RepairBill.bill_date, RepairBill.total).where(
-                RepairBill.vehicle_id.in_(ids), RepairBill.archived_at.is_(None), sc.cond(RepairBill.legal_entity_id),
+        for vid, d, total, cat in c.db.execute(select(RepairBill.vehicle_id, RepairBill.bill_date, RepairBill.total, RepairBill.category).where(
+                RepairBill.vehicle_id.in_(ids), RepairBill.archived_at.is_(None), RepairBill.status != "cancelled", sc.cond(RepairBill.legal_entity_id),
                 RepairBill.bill_date >= first, RepairBill.bill_date <= last)):
             k = (vid, d.strftime("%Y-%m"))
             by[k] = by.get(k, 0.0) + float(total)
+            put_cat(vid, k[1], cat or "none", float(total))
         has_bill = exists().where(RepairBill.request_id == ServiceRequest.id, RepairBill.archived_at.is_(None))
         for vid, closed, cost in c.db.execute(select(ServiceRequest.vehicle_id, ServiceRequest.closed_at, ServiceRequest.cost_actual).where(
                 ServiceRequest.vehicle_id.in_(ids), ServiceRequest.status == "closed", ServiceRequest.cost_actual.is_not(None), ~has_bill,
                 sc.cond(ServiceRequest.legal_entity_id), ServiceRequest.closed_at >= day_start(first), ServiceRequest.closed_at < day_start(last + dt.timedelta(days=1)))):
             k = (vid, local_day(closed).strftime("%Y-%m"))
             by[k] = by.get(k, 0.0) + float(cost)
+            put_cat(vid, k[1], "requests", float(cost))
     cols = [Col("name", "Машина")] + [Col(f"m{i}", month_label(y, m), "money", True) for i, (y, m) in enumerate(months)] + [Col("sum", "Всего, ₽", "money", True)]
     rows = []
     for v in vehicles:
@@ -420,9 +430,28 @@ def report_repairs(c: Ctx) -> dict:
             rows.append(row)
     tbl = table(cols, rows)
     totals = tbl["totals"] or []
+    extras = []
+    if sc and (cat_v or cat_m):
+        kinds = [(k, f"{label_}, ₽") for k, label_ in (*BILL_CATEGORIES.items(), ("none", "Счета без категории"), ("requests", "Обращения без счёта"))]
+        used = [(k, t) for k, t in kinds if k in BILL_CATEGORIES or any(cat == k for (_, cat) in cat_v)]   # три категории всегда, остальное — если есть
+        ccols = [{"key": k, "label": t, "kind": "money", "sum": True} for k, t in used] + [{"key": "sum", "label": "Всего, ₽", "kind": "money", "sum": True}]
+        vrows = []
+        for v in vehicles:
+            vals = [fl(cat_v.get((v.id, k))) for k, _ in used]
+            if any(vals):
+                vrows.append([label(v), *vals, fl(sum(vals))])
+        vrows.sort(key=lambda r: -r[-1])
+        extras.append(extra("На что потрачено по машинам", [{"key": "name", "label": "Машина", "kind": "text"}, *ccols], vrows, c, True))
+        mrows = []
+        for y, m in months:
+            key = f"{y}-{m:02d}"
+            vals = [fl(cat_m.get((key, k))) for k, _ in used]
+            mrows.append([month_label(y, m), *vals, fl(sum(vals))])
+        extras.append(extra("На что потрачено по месяцам", [{"key": "name", "label": "Месяц", "kind": "text"}, *ccols], mrows, c, True))
     return {"title": "Ремонты по месяцам", "table": tbl, "chart": chart([month_label(y, m) for y, m in months], totals[1:-1] if totals else [], "₽"),
-            "extras": [], "note": "Последние 12 месяцев. Счета на ремонт по дате счёта (с НДС) плюс фактические затраты закрытых обращений без счёта "
-                                  "по дате закрытия. Выбранный месяц — последний в таблице."}
+            "extras": extras, "note": "Последние 12 месяцев. Счета на ремонт по дате счёта (с НДС, кроме отменённых) плюс фактические затраты закрытых обращений "
+                                      "без счёта по дате закрытия. Выбранный месяц — последний в таблице. Ниже — на что потрачено: запчасти, жидкости, "
+                                      "расходники (категория счёта), счета без категории и обращения без счёта."}
 
 
 # ---------------------------------------------------------------- простои

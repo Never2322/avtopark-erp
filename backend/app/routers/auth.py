@@ -48,8 +48,9 @@ def me_payload(db: Session, p: Principal) -> dict:
         "csrf_token": p.session.csrf_token,
         "org_timezone": s.org_timezone,
         # что включено именно этому человеку, а не его роли: вкладка «Тоннаж» нужна, когда за ним закреплена машина с галочкой «Вести тоннаж»,
-        # а «Счётчик ходок» только водителю, за которым закреплён самосвал
-        "features": {"tonnage": weigh_svc.has_tonnage(db, p), "hauls": hauls_svc.has_hauls(db, p), "routes": routes_svc.has_routes(db, p)},
+        # а «Счётчик ходок» только водителю, за которым закреплён самосвал; группа «Мусоровозы» — только тому, за кем закреплён мусоровоз
+        "features": {"tonnage": weigh_svc.has_tonnage(db, p), "hauls": hauls_svc.has_hauls(db, p), "routes": routes_svc.has_routes(db, p),
+                     "garbage": routes_svc.has_garbage(db, p)},
     }
 
 

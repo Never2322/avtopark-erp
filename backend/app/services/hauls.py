@@ -28,7 +28,9 @@ def dump_vehicle_ids(db: Session, vehicle_ids) -> list[int]:
     q = (select(Vehicle.id).join(VehicleType, VehicleType.id == Vehicle.type_id)
          .where(Vehicle.id.in_(ids), Vehicle.archived_at.is_(None),
                 or_(VehicleType.code.in_(DUMP_CODES), *[func.lower(VehicleType.name).like(f"%{w}%") for w in DUMP_WORDS])))
-    return list(db.scalars(q))
+    from app.services.routes import waste_vehicle_ids          # мусоровоз (даже с типом «Самосвал») счётчика ходок не получает
+    waste = set(waste_vehicle_ids(db, ids))
+    return [v for v in db.scalars(q) if v not in waste]
 
 
 def has_hauls(db: Session, p) -> bool:

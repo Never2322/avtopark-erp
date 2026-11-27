@@ -159,10 +159,20 @@ def waste_vehicle_ids(db: Session, vehicle_ids) -> list[int]:
     ids = list(vehicle_ids or ())
     if not ids:
         return []
+    # мусоровоз по типу, по марке или модели («КАМАЗ мусоровоз» с типом «Самосвал» из старой программы) или добавлен в бригады вручную
     q = (select(Vehicle.id).join(VehicleType, VehicleType.id == Vehicle.type_id)
          .where(Vehicle.id.in_(ids), Vehicle.archived_at.is_(None),
-                or_(VehicleType.code.in_(WASTE_CODES), *[func.lower(VehicleType.name).like(f"%{w}%") for w in WASTE_WORDS])))
+                or_(VehicleType.code.in_(WASTE_CODES), *[func.lower(VehicleType.name).like(f"%{w}%") for w in WASTE_WORDS],
+                    *[func.lower(Vehicle.model).like(f"%{w}%") for w in WASTE_WORDS], *[func.lower(Vehicle.make).like(f"%{w}%") for w in WASTE_WORDS],
+                    Vehicle.in_crews.is_(True))))
     return list(db.scalars(q))
+
+
+def has_garbage(db: Session, p) -> bool:
+    """Водитель мусоровоза: за ним закреплён мусоровоз. Только у таких людей в меню группа «Мусоровозы»."""
+    if p.employee_id is None:
+        return False
+    return bool(waste_vehicle_ids(db, assigned_vehicle_ids(db, p.employee_id)))
 
 
 def has_routes(db: Session, p) -> bool:
