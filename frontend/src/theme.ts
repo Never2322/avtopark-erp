@@ -33,8 +33,11 @@ export function initTheme() {
 export function setTheme(t: Theme) {
   current = t;
   try { localStorage.setItem(KEY, t); } catch { /* хранилище закрыто: тема продержится до закрытия вкладки */ }
-  apply(t);
-  listeners.forEach((f) => f());
+  const run = () => { apply(t); listeners.forEach((f) => f()); };
+  // плавная смена темы: старая картинка растворяется в новой (там, где браузер это умеет и движение не выключено)
+  const doc = document as Document & { startViewTransition?: (cb: () => void) => unknown };
+  if (doc.startViewTransition && !document.hidden && !window.matchMedia("(prefers-reduced-motion: reduce)").matches) doc.startViewTransition(run);
+  else run();
 }
 
 export function useTheme(): [Theme, (t: Theme) => void] {

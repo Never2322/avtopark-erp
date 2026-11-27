@@ -1,4 +1,4 @@
-import { ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -237,13 +237,35 @@ export function Shell() {
   const [openKey, setOpenKey] = useState<string>(hereKey);
   useEffect(() => { if (hereKey) setOpenKey(hereKey); }, [hereKey]);
 
+  // светящаяся «капсула» выбранного пункта меню: при переходе плавно переезжает на новый пункт
+  const sideRef = useRef<HTMLElement>(null);
+  const pillRef = useRef<HTMLSpanElement>(null);
+  useLayoutEffect(() => {
+    const place = () => {
+      const side = sideRef.current, pill = pillRef.current;
+      if (!side || !pill) return;
+      const a = side.querySelector<HTMLElement>(".nav-link.active");
+      if (!a || a.closest(".nav-body")?.hasAttribute("inert")) { pill.style.opacity = "0"; return; }
+      const sr = side.getBoundingClientRect(), r = a.getBoundingClientRect();
+      pill.style.opacity = "1";
+      pill.style.transform = `translate3d(${r.left - sr.left + side.scrollLeft}px, ${r.top - sr.top + side.scrollTop}px, 0)`;
+      pill.style.width = `${r.width}px`;
+      pill.style.height = `${r.height}px`;
+    };
+    place();
+    const timers = [80, 180, 260, 420].map((ms) => setTimeout(place, ms));      // группа меню раскрывается с анимацией: догоняем её
+    window.addEventListener("resize", place);
+    return () => { timers.forEach(clearTimeout); window.removeEventListener("resize", place); };
+  }, [loc.pathname, openKey, editing, layout.data, open]);
+
   // название раздела в заголовке вкладки браузера
   useEffect(() => { document.title = hereTitle ? `${hereTitle} · Контур` : "Контур"; }, [hereTitle]);
 
   return (
     <div className={`app ${editing ? "menu-editing" : ""}`}>
       <a className="skip" href="#content">К содержимому</a>
-      <aside className={`sidebar ${open ? "open" : ""}`} aria-label="Главное меню">
+      <aside className={`sidebar ${open ? "open" : ""}`} aria-label="Главное меню" ref={sideRef}>
+        {!editing && <span className="nav-pill" ref={pillRef} aria-hidden />}
         <div className="brand">
           <Logo />
           <button type="button" className="btn ghost icon-btn drawer-close" onClick={() => setOpen(false)} aria-label="Закрыть меню"><X size={18} aria-hidden /></button>
@@ -304,7 +326,7 @@ export function Shell() {
           {hereTitle && (
             <nav className="where" aria-label="Вы находитесь">
               {here && !here.group.flat && <><span className="where-group">{here.group.title}</span><ChevronRight size={14} aria-hidden className="where-sep" /></>}
-              <strong aria-current="page">{hereTitle}</strong>
+              <strong aria-current="page" key={hereTitle} className="where-title">{hereTitle}</strong>
             </nav>
           )}
           {canSearch && (
@@ -345,7 +367,8 @@ export function Shell() {
         <ConnectionBar />
         <main className="content" id="content" tabIndex={-1}>
           <PageSwitch path={loc.pathname} />
-          <Outlet />
+          {/* при переходе на другую страницу она плавно появляется (ключ по адресу запускает анимацию заново) */}
+          <div className="page-enter" key={loc.pathname}><Outlet /></div>
         </main>
       </div>
       {quick && <QuickNav groups={groups} onClose={() => setQuick(false)} onPick={(to) => { setQuick(false); setOpen(false); nav(to); }} />}

@@ -5,6 +5,7 @@ import { useAuth } from "../auth";
 import { Alert, Button } from "../ui";
 import { errorText } from "../api";
 import { ThemeToggle } from "../components/ThemeToggle";
+import { LoginScene } from "../components/LoginScene";
 
 export function Login() {
   const { login, sessionExpired } = useAuth();
@@ -36,6 +37,7 @@ export function Login() {
       <div className="login-theme"><ThemeToggle /></div>
       <div className="login-stage">
         <h2 className="sr-only">Контур</h2>
+        <LoginScene />
         <form className="card login-card stack" onSubmit={submit} noValidate>
           <div className="login-head">
             <span className="login-badge" aria-hidden>

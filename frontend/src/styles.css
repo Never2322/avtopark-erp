@@ -1603,7 +1603,7 @@ html[data-theme="crimson"] .crew-tile.tone-mint, html[data-theme="crimson"] .cre
 .week-day.today { background: linear-gradient(160deg, var(--mint-hover), color-mix(in srgb, var(--mint) 70%, #000)); box-shadow: 0 0 0 1px rgba(var(--glow), 0.6), 0 0 16px rgba(var(--glow), 0.5); }
 
 /* ---------- вход: картинка «Контур» целиком, форма стоит ровно на нарисованной ---------- */
-.login-wrap { position: fixed; inset: 0; overflow: hidden; display: block; padding: 0; background: #02050d; }
+.login-wrap { position: fixed; inset: 0; overflow: hidden; overflow: clip; display: block; padding: 0; background: #02050d; }
 .login-wrap::before { display: none; }
 /* «сцена» повторяет пропорции картинки и закрывает весь экран (как cover), поэтому места формы и кнопки совпадают с рисунком */
 .login-stage { position: absolute; left: 50%; top: 50%; width: max(100vw, calc(100vh * 1672 / 941)); aspect-ratio: 1672 / 941; transform: translate(-50%, -50%);
@@ -1617,7 +1617,6 @@ html[data-theme="crimson"] .crew-tile.tone-mint, html[data-theme="crimson"] .cre
   border: 1.5px solid transparent;
   background: linear-gradient(160deg, rgba(10, 20, 44, 0.94), rgba(6, 10, 26, 0.96)) padding-box,
               linear-gradient(120deg, #2f86ff, #6d55ff 50%, #ff2b4a) border-box;
-  -webkit-backdrop-filter: blur(16px); backdrop-filter: blur(16px);
   box-shadow: -10px 0 34px rgba(47, 134, 255, 0.45), 10px 0 34px rgba(255, 43, 74, 0.42), 0 24px 60px rgba(0, 0, 0, 0.6); }
 .login-stage .login-card .muted { color: #a9b8d8; }
 .login-head { display: flex; align-items: center; gap: 16px; margin-bottom: 4px; }
@@ -1647,7 +1646,7 @@ html[data-theme="crimson"] .crew-tile.tone-mint, html[data-theme="crimson"] .cre
 
 /* узкий экран (телефон): картинка остаётся фоном, форма просто по центру */
 @media (max-width: 760px), (max-height: 520px) {
-  .login-wrap { overflow-y: auto; }
+  .login-wrap { overflow: hidden auto; }
   .login-stage { position: relative; left: 0; top: 0; transform: none; width: 100%; min-height: 100%; aspect-ratio: auto; display: grid; place-items: center;
     align-items: start; padding: 31vh 16px 24px;
     background: linear-gradient(180deg, rgba(2, 5, 13, 0) 0%, rgba(2, 5, 13, 0) 24%, rgba(2, 5, 13, 0.94) 30%, #02050d 100%),
@@ -1656,4 +1655,406 @@ html[data-theme="crimson"] .crew-tile.tone-mint, html[data-theme="crimson"] .cre
   .login-theme { right: 14px; top: 14px; width: 44px; }
   .login-head h1 { font-size: 22px; }
   .login-badge { width: 52px; height: 52px; }
+}
+
+/* =====================================================================================================================
+   Анимации «Контур»: живой фон, плавный переход между страницами, появление карточек, отклик при наведении.
+   Двигаются только transform и opacity (это дёшево для браузера). Если в системе включено «уменьшить движение», всё выключается.
+   ===================================================================================================================== */
+
+/* фон: свечение по углам медленно «дышит» и чуть плывёт */
+@keyframes bg-breathe { from { opacity: 0.72; transform: scale(1.02) translate3d(0.6%, -0.6%, 0); } to { opacity: 1; transform: scale(1.06) translate3d(-0.8%, 0.8%, 0); } }
+@keyframes bg-breathe-light { from { opacity: 0.5; transform: scale(1.02) translate3d(0.6%, -0.6%, 0); } to { opacity: 0.8; transform: scale(1.06) translate3d(-0.8%, 0.8%, 0); } }
+.app::before { animation: bg-breathe 11s ease-in-out infinite alternate; will-change: opacity, transform; }
+html[data-theme="light"] .app::before { animation-name: bg-breathe-light; }
+
+/* фон: светящиеся лучи пролетают по диагонали, как на образцах (синий и красный, с разной скоростью) */
+@keyframes beam-fly {
+  0% { transform: translate3d(-50%, -50%, 0) rotate(-62deg) translateX(-80vmax); opacity: 0; }
+  6% { opacity: 1; }
+  34% { opacity: 1; }
+  40% { transform: translate3d(-50%, -50%, 0) rotate(-62deg) translateX(80vmax); opacity: 0; }
+  100% { transform: translate3d(-50%, -50%, 0) rotate(-62deg) translateX(80vmax); opacity: 0; }
+}
+.app::after, .main::before { content: ""; position: fixed; z-index: -1; pointer-events: none; width: 34vmax; height: 2px; border-radius: 2px; opacity: 0;
+  will-change: transform, opacity; animation: beam-fly 9s cubic-bezier(0.45, 0, 0.35, 1) infinite; }
+.app::after { left: 68%; top: 46%;
+  background: linear-gradient(90deg, transparent, rgba(var(--glow), 0.95) 60%, #fff 92%, transparent);
+  box-shadow: 0 0 12px 2px rgba(var(--glow), 0.55); }
+.main::before { left: 30%; top: 62%; animation-duration: 13s; animation-delay: 3.5s;
+  background: linear-gradient(90deg, transparent, rgba(var(--glow-2), 0.9) 60%, #fff 92%, transparent);
+  box-shadow: 0 0 12px 2px rgba(var(--glow-2), 0.5); }
+html[data-theme="light"] .app::after, html[data-theme="light"] .main::before { mix-blend-mode: multiply; filter: saturate(1.3); }
+
+/* переход между страницами: новая страница мягко поднимается и проявляется.
+   Только backwards, не both: пока у элемента висит transform-анимация, окна внутри него (position: fixed) не растягиваются на весь экран */
+@keyframes page-in { from { opacity: 0; transform: translate3d(0, 12px, 0); } to { opacity: 1; transform: none; } }
+.page-enter { animation: page-in 0.34s cubic-bezier(0.2, 0.8, 0.2, 1) backwards; }
+
+/* карточки появляются по очереди */
+@keyframes card-in { from { opacity: 0; transform: translate3d(0, 14px, 0) scale(0.985); } to { opacity: 1; transform: none; } }
+.page-enter .card { animation: card-in 0.46s cubic-bezier(0.2, 0.8, 0.2, 1) backwards; }
+.page-enter :nth-child(2) > .card, .page-enter .card:nth-child(2) { animation-delay: 0.04s; }
+.page-enter :nth-child(3) > .card, .page-enter .card:nth-child(3) { animation-delay: 0.08s; }
+.page-enter :nth-child(4) > .card, .page-enter .card:nth-child(4) { animation-delay: 0.12s; }
+.page-enter :nth-child(5) > .card, .page-enter .card:nth-child(5) { animation-delay: 0.16s; }
+.page-enter :nth-child(6) > .card, .page-enter .card:nth-child(6) { animation-delay: 0.2s; }
+.page-enter :nth-child(n + 7) > .card, .page-enter .card:nth-child(n + 7) { animation-delay: 0.24s; }
+.page-enter .modal .card, .page-enter .card .card { animation: none; }
+
+/* шапка страницы: черта у заголовка «вырастает» */
+@keyframes bar-grow { from { transform: scaleY(0); opacity: 0; } to { transform: none; opacity: 1; } }
+.page-enter .page-head h1::before { animation: bar-grow 0.5s 0.1s cubic-bezier(0.2, 0.8, 0.2, 1) both; transform-origin: 50% 100%; }
+
+/* отклик при наведении */
+.card.deco, .vc-cat, .budget-box { transition: transform 0.22s cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 0.22s, border-color 0.22s; }
+a.card.deco:hover, button.card.vc-cat:hover { transform: translate3d(0, -3px, 0); }
+.nav-link { transition: background 0.2s, color 0.2s, box-shadow 0.25s, transform 0.18s; }
+.nav-link:not(.active):hover { transform: translate3d(3px, 0, 0); }
+.nav-link svg { transition: transform 0.2s; }
+.nav-link:hover svg { transform: scale(1.12); }
+.btn { transition: background 0.15s, border-color 0.15s, box-shadow 0.25s, transform 0.12s, filter 0.2s; }
+.btn:active:not(:disabled) { transform: scale(0.97); }
+
+/* главная кнопка: по ней пробегает блик */
+@keyframes shine { from { transform: translate3d(-120%, 0, 0) skewX(-20deg); } to { transform: translate3d(320%, 0, 0) skewX(-20deg); } }
+.btn.primary { position: relative; overflow: hidden; }
+.btn.primary::after { content: ""; position: absolute; top: 0; bottom: 0; left: 0; width: 35%; pointer-events: none; opacity: 0;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.35), transparent); transform: translate3d(-120%, 0, 0) skewX(-20deg); }
+.btn.primary:hover:not(:disabled)::after { opacity: 1; animation: shine 0.75s ease-out; }
+
+/* активный пункт меню и сегодняшний день мягко пульсируют свечением */
+@keyframes glow-pulse { from { opacity: 0.55; } to { opacity: 1; } }
+.nav-link.active { position: relative; }
+.nav-link.active::after { content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
+  box-shadow: 0 0 20px rgba(var(--glow), 0.45); animation: glow-pulse 2.6s ease-in-out infinite alternate; }
+html[data-theme="light"] .nav-link.active::after { box-shadow: 0 0 14px rgba(var(--glow), 0.25); }
+
+/* логотип: уголки рамки слегка «мерцают», как неон */
+@keyframes neon { 0%, 100% { opacity: 1; } 45% { opacity: 0.82; } 50% { opacity: 1; } 52% { opacity: 0.9; } }
+.kontur-frame .k-blue { animation: neon 5s ease-in-out infinite; }
+.kontur-frame .k-red { animation: neon 5s 1.3s ease-in-out infinite; }
+
+/* окна: появляются чуть мягче */
+@keyframes pop-in { from { opacity: 0; transform: translate3d(0, 10px, 0) scale(0.97); } to { opacity: 1; transform: none; } }
+.modal, .menu, .bell-pop, .theme-menu { animation: pop-in 0.2s cubic-bezier(0.2, 0.8, 0.2, 1) backwards; }
+
+/* вход: картинка медленно «наезжает», форма проявляется, рамка формы дышит свечением */
+@keyframes stage-in { from { transform: translate(-50%, -50%) scale(1.07); opacity: 0.4; } to { transform: translate(-50%, -50%) scale(1); opacity: 1; } }
+.login-stage { animation: stage-in 1.6s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+@keyframes login-card-in { from { opacity: 0; transform: translate3d(0, 18px, 0) scale(0.97); } to { opacity: 1; transform: none; } }
+.login-stage .login-card { animation: login-card-in 0.7s 0.35s cubic-bezier(0.2, 0.8, 0.2, 1) backwards; }
+.login-stage .login-card::before { content: ""; position: absolute; inset: -2px; border-radius: 24px; z-index: -1; pointer-events: none;
+  box-shadow: -14px 0 44px rgba(47, 134, 255, 0.55), 14px 0 44px rgba(255, 43, 74, 0.5); animation: glow-pulse 3.2s ease-in-out infinite alternate; }
+.login-wrap::after { content: ""; position: fixed; left: 70%; top: 40%; z-index: 1; pointer-events: none; width: 30vmax; height: 2px; opacity: 0;
+  background: linear-gradient(90deg, transparent, rgba(47, 134, 255, 0.95) 60%, #fff 92%, transparent); box-shadow: 0 0 12px 2px rgba(47, 134, 255, 0.55);
+  animation: beam-fly 8s 1.2s cubic-bezier(0.45, 0, 0.35, 1) infinite; }
+
+@media (max-width: 760px), (max-height: 520px) {
+  .login-stage { animation: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app::after, .main::before, .login-wrap::after, .btn.primary::after { display: none; }
+  *, *::before, *::after { animation-iteration-count: 1 !important; }
+}
+@media print {
+  .app::after, .main::before, .nav-link.active::after { display: none; }
+  .page-enter, .page-enter .card { animation: none; }
+}
+
+/* плавная смена темы */
+::view-transition-old(root), ::view-transition-new(root) { animation-duration: 0.45s; animation-timing-function: ease; }
+
+/* =====================================================================================================================
+   Анимации, часть 2: капсула меню, новый переход между страницами, отклик на всех кликабельных элементах, больше неона.
+   ===================================================================================================================== */
+@property --nr { syntax: "<angle>"; initial-value: 0deg; inherits: false; }
+@keyframes neon-spin { to { --nr: 360deg; } }
+
+/* ---------- капсула выбранного пункта меню: переезжает с пункта на пункт ---------- */
+.nav-pill { position: absolute; top: 0; left: 0; width: 0; height: 0; z-index: 0; pointer-events: none; border-radius: 10px; opacity: 0;
+  background: linear-gradient(90deg, var(--mint), color-mix(in srgb, var(--mint) 45%, transparent));
+  box-shadow: 0 0 0 1px rgba(var(--glow), 0.6), 0 0 22px rgba(var(--glow), 0.45);
+  transition: transform 0.5s cubic-bezier(0.34, 1.32, 0.5, 1), width 0.4s ease, height 0.4s ease, opacity 0.3s ease; will-change: transform; }
+.nav-pill::after { content: ""; position: absolute; inset: 0; border-radius: inherit; box-shadow: 0 0 26px rgba(var(--glow), 0.55); animation: glow-pulse 2.4s ease-in-out infinite alternate; }
+.nav-pill::before { content: ""; position: absolute; inset: 0; border-radius: inherit; overflow: hidden;
+  background: linear-gradient(100deg, transparent 30%, rgba(255, 255, 255, 0.28) 50%, transparent 70%) -150% 0 / 60% 100% no-repeat;
+  animation: pill-shine 3.6s ease-in-out infinite; }
+@keyframes pill-shine { 0%, 55% { background-position: -150% 0; } 85%, 100% { background-position: 260% 0; } }
+html[data-theme="light"] .nav-pill { background: color-mix(in srgb, var(--mint) 10%, #fff); box-shadow: 0 0 0 1px color-mix(in srgb, var(--mint) 60%, transparent), 0 6px 18px rgba(var(--glow), 0.18); }
+html[data-theme="light"] .nav-pill::after { box-shadow: 0 0 16px rgba(var(--glow), 0.25); }
+.sidebar .nav-group, .sidebar .nav-link, .sidebar .nav-head, .sidebar .nav-sub { position: relative; z-index: 1; }
+html .sidebar .nav-group .nav-link.active { background: transparent; box-shadow: none; }
+html .sidebar .nav-group .nav-link.active::after { display: none; }
+
+/* ---------- переход между страницами ---------- */
+@keyframes page-in-2 {
+  0% { opacity: 0; transform: translate3d(0, 22px, 0) scale(0.985); filter: blur(6px); }
+  60% { filter: blur(0); }
+  100% { opacity: 1; transform: none; filter: none; }
+}
+.page-enter { position: relative; animation: page-in-2 0.5s cubic-bezier(0.16, 1, 0.3, 1) backwards; }
+/* неоновая линия пробегает сверху вниз по новой странице */
+@keyframes page-scan { 0% { transform: translate3d(0, 0, 0) scaleX(0.2); opacity: 0; } 12% { opacity: 1; transform: translate3d(0, 4vh, 0) scaleX(1); }
+  100% { transform: translate3d(0, 70vh, 0) scaleX(1); opacity: 0; } }
+.page-enter::before { content: ""; position: absolute; left: -24px; right: -24px; top: 0; height: 2px; z-index: 5; pointer-events: none; opacity: 0;
+  background: linear-gradient(90deg, transparent, rgba(var(--glow), 0.9) 30%, rgba(var(--glow-2), 0.9) 70%, transparent);
+  box-shadow: 0 0 18px 3px rgba(var(--glow), 0.4); animation: page-scan 0.85s cubic-bezier(0.3, 0.6, 0.3, 1) both; }
+/* карточки: вылет снизу с лёгким поворотом в глубину */
+@keyframes card-in-2 { from { opacity: 0; transform: perspective(900px) translate3d(0, 26px, 0) rotateX(8deg) scale(0.97); } to { opacity: 1; transform: none; } }
+.page-enter .card { animation: card-in-2 0.6s cubic-bezier(0.16, 1, 0.3, 1) backwards; }
+/* строки таблиц проявляются волной */
+@keyframes row-in { from { opacity: 0; transform: translate3d(-10px, 0, 0); } to { opacity: 1; transform: none; } }
+.page-enter .table tbody tr { animation: row-in 0.4s cubic-bezier(0.16, 1, 0.3, 1) backwards; }
+.page-enter .table tbody tr:nth-child(1) { animation-delay: 0.12s; } .page-enter .table tbody tr:nth-child(2) { animation-delay: 0.15s; }
+.page-enter .table tbody tr:nth-child(3) { animation-delay: 0.18s; } .page-enter .table tbody tr:nth-child(4) { animation-delay: 0.21s; }
+.page-enter .table tbody tr:nth-child(5) { animation-delay: 0.24s; } .page-enter .table tbody tr:nth-child(6) { animation-delay: 0.27s; }
+.page-enter .table tbody tr:nth-child(7) { animation-delay: 0.3s; } .page-enter .table tbody tr:nth-child(8) { animation-delay: 0.33s; }
+.page-enter .table tbody tr:nth-child(n + 9) { animation-delay: 0.36s; }
+/* заголовок страницы вспыхивает неоном */
+@keyframes title-neon { 0% { text-shadow: none; opacity: 0.4; } 30% { text-shadow: 0 0 14px rgba(var(--glow), 0.9), 0 0 30px rgba(var(--glow), 0.5); opacity: 1; }
+  40% { opacity: 0.75; } 46% { opacity: 1; } 100% { text-shadow: 0 0 10px rgba(var(--glow), 0.25); } }
+.page-enter .page-head h1 { animation: title-neon 1.1s ease-out both; }
+html[data-theme="light"] .page-enter .page-head h1 { animation: none; }
+/* «где я» в верхней строке меняется с подъёмом */
+@keyframes where-in { from { opacity: 0; transform: translate3d(0, 8px, 0); filter: blur(3px); } to { opacity: 1; transform: none; filter: none; } }
+.where-title { display: inline-block; animation: where-in 0.4s cubic-bezier(0.16, 1, 0.3, 1) backwards; }
+/* вкладки внутри страницы: содержимое тоже проявляется при переключении */
+@keyframes tab-line { from { transform: scaleX(0); } to { transform: none; } }
+.tab { position: relative; }
+.tab[aria-selected="true"]::after { content: ""; position: absolute; left: 8px; right: 8px; bottom: -1px; height: 2px; border-radius: 2px;
+  background: linear-gradient(90deg, rgb(var(--glow)), rgb(var(--glow-2))); box-shadow: 0 0 10px rgba(var(--glow), 0.8); animation: tab-line 0.35s cubic-bezier(0.16, 1, 0.3, 1); }
+.tab[aria-selected="true"] { border-color: transparent; text-shadow: 0 0 12px rgba(var(--glow), 0.6); }
+
+/* ---------- отклик при наведении на ВСЁ кликабельное ---------- */
+.btn:not(:disabled):hover { transform: translate3d(0, -2px, 0); box-shadow: 0 6px 18px rgba(var(--glow), 0.22), 0 0 0 1px rgba(var(--glow), 0.35); border-color: color-mix(in srgb, rgb(var(--glow)) 45%, var(--border)); }
+.btn.ghost:not(:disabled):hover { box-shadow: 0 0 14px rgba(var(--glow), 0.25); }
+.btn:not(:disabled):hover svg { animation: icon-wiggle 0.5s ease; }
+@keyframes icon-wiggle { 0% { transform: none; } 30% { transform: scale(1.18) rotate(-8deg); } 60% { transform: scale(1.1) rotate(6deg); } 100% { transform: none; } }
+.icon-btn:not(:disabled):hover { transform: translate3d(0, -2px, 0) scale(1.06); }
+.theme-toggle:hover svg { animation: spin-once 0.6s cubic-bezier(0.34, 1.4, 0.5, 1); }
+@keyframes spin-once { from { transform: rotate(0); } to { transform: rotate(360deg); } }
+@keyframes bell-swing { 0%, 100% { transform: rotate(0); } 20% { transform: rotate(16deg); } 40% { transform: rotate(-12deg); } 60% { transform: rotate(8deg); } 80% { transform: rotate(-4deg); } }
+.topbar .btn:hover svg.lucide-bell, .topbar .btn:hover svg.lucide-bell-ring { animation: bell-swing 0.7s ease; transform-origin: 50% 10%; }
+
+.chip-btn { transition: transform 0.18s cubic-bezier(0.34, 1.4, 0.5, 1), background 0.15s, color 0.15s, border-color 0.15s, box-shadow 0.2s; }
+.chip-btn:hover { transform: translate3d(0, -2px, 0); border-color: color-mix(in srgb, rgb(var(--glow)) 55%, var(--border)); box-shadow: 0 0 12px rgba(var(--glow), 0.3); }
+.chip-btn[aria-pressed="true"] { box-shadow: 0 0 14px rgba(var(--glow), 0.35), inset 0 0 10px rgba(var(--glow), 0.15); }
+.tab { transition: color 0.2s, transform 0.18s; }
+.tab:hover { transform: translate3d(0, -2px, 0); color: var(--text); text-shadow: 0 0 10px rgba(var(--glow), 0.5); }
+.page-switch-btn, .seg-btn { transition: background 0.2s, color 0.2s, transform 0.18s, box-shadow 0.2s; }
+.page-switch-btn:hover, .seg-btn:hover { transform: translate3d(0, -1px, 0); box-shadow: 0 0 12px rgba(var(--glow), 0.25); }
+
+.nav-head { transition: background 0.2s, transform 0.18s, color 0.2s; }
+.nav-head:hover { transform: translate3d(3px, 0, 0); }
+.nav-head .nav-ico { transition: transform 0.25s cubic-bezier(0.34, 1.4, 0.5, 1), box-shadow 0.25s; }
+.nav-head:hover .nav-ico { transform: scale(1.12) rotate(-6deg); box-shadow: 0 0 14px color-mix(in srgb, var(--tone) 60%, transparent), inset 0 0 0 1px color-mix(in srgb, var(--tone) 50%, transparent); }
+.nav-link:hover:not(.active) { text-shadow: 0 0 10px rgba(var(--glow), 0.45); }
+.nav-search, .nav-edit { transition: background 0.2s, border-color 0.2s, box-shadow 0.25s, transform 0.18s, color 0.2s; }
+.nav-search:hover, .nav-edit:hover { transform: translate3d(0, -1px, 0); box-shadow: 0 0 14px rgba(var(--glow), 0.25); border-color: color-mix(in srgb, rgb(var(--glow)) 45%, var(--border)); }
+
+.table tbody tr { transition: background 0.15s, box-shadow 0.2s; }
+.table tbody tr:hover { box-shadow: inset 3px 0 0 rgb(var(--glow)), inset 0 0 30px rgba(var(--glow), 0.06); }
+.table tbody tr.clickable:hover td:first-child { text-shadow: 0 0 10px rgba(var(--glow), 0.45); }
+
+.input, select.input { transition: border-color 0.2s, box-shadow 0.25s, background 0.2s; }
+.input:hover:not(:focus):not(:disabled) { border-color: color-mix(in srgb, rgb(var(--glow)) 45%, var(--border)); box-shadow: 0 0 10px rgba(var(--glow), 0.14); }
+.check { transition: color 0.15s; }
+.check:hover { color: var(--text); }
+.check input { transition: transform 0.18s cubic-bezier(0.34, 1.4, 0.5, 1); }
+.check:hover input { transform: scale(1.12); }
+
+.menu a, .menu button, .qnav-item, .bell-item, .me-item { transition: background 0.15s, transform 0.18s, padding 0.18s; }
+.menu a:hover, .menu button:hover { transform: translate3d(3px, 0, 0); box-shadow: inset 2px 0 0 rgb(var(--glow)); }
+.qnav-item.on { transition: background 0.15s; }
+
+a:not(.btn):not(.nav-link):not(.card):not(.page-switch-btn) { transition: color 0.15s, text-shadow 0.2s; }
+a:not(.btn):not(.nav-link):not(.card):not(.page-switch-btn):hover { text-shadow: 0 0 10px rgba(var(--glow), 0.6); }
+
+/* любая карточка при наведении: по кромке бежит неоновый свет */
+.card { position: relative; transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.25s, border-color 0.25s; }
+.card::after { content: ""; position: absolute; inset: 0; border-radius: inherit; padding: 2.5px; pointer-events: none; opacity: 0; z-index: 3;
+  background: conic-gradient(from var(--nr), transparent 0 52%, rgba(var(--glow), 0.6) 62%, rgb(var(--glow)) 70%, #fff 74%, rgb(var(--glow-2)) 79%, rgba(var(--glow-2), 0.5) 86%, transparent 94%);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask-composite: exclude;
+  transition: opacity 0.3s; }
+.card:hover::after { opacity: 1; animation: neon-spin 2.6s linear infinite; }
+.card:hover { border-color: color-mix(in srgb, rgb(var(--glow)) 40%, var(--border)); box-shadow: 0 0 0 1px rgba(var(--glow), 0.15), 0 14px 34px rgba(0, 0, 0, 0.35), 0 0 30px rgba(var(--glow), 0.14); }
+a.card:hover, button.card:hover, .card.deco:hover, .budget-box:hover { transform: translate3d(0, -4px, 0); }
+.modal .card::after, .login-card::after { display: none; }
+html[data-theme="light"] .card:hover { box-shadow: 0 0 0 1px rgba(var(--glow), 0.18), 0 14px 30px rgba(28, 62, 130, 0.14); }
+
+/* иконки в плитках светятся и покачиваются при наведении */
+.crew-tile-ico, .deco svg:first-child, .card-head .card-icon { transition: transform 0.3s cubic-bezier(0.34, 1.4, 0.5, 1), filter 0.3s; }
+.card:hover .crew-tile-ico, .card:hover .card-head .card-icon { transform: scale(1.14) rotate(-6deg); filter: drop-shadow(0 0 8px rgba(var(--glow), 0.8)); }
+
+/* ---------- ещё неон ---------- */
+/* по светящейся линии под верхней строкой бежит блик */
+@keyframes line-run { from { transform: translate3d(-30%, 0, 0); } to { transform: translate3d(130%, 0, 0); } }
+.topbar { overflow: visible; }
+.topbar::before { content: ""; position: absolute; left: 0; bottom: -1px; width: 22%; height: 3px; pointer-events: none; z-index: 1;
+  background: linear-gradient(90deg, transparent, #fff, rgba(var(--glow), 0.9), transparent); filter: blur(1px); opacity: 0.8;
+  animation: line-run 5.5s cubic-bezier(0.45, 0, 0.35, 1) infinite; }
+/* по кромке бокового меню течёт свет сверху вниз */
+@keyframes edge-run { from { transform: translate3d(0, -40vh, 0); } to { transform: translate3d(0, 140vh, 0); } }
+.main::after { content: ""; position: fixed; left: calc(var(--sidebar-w) - 1px); top: 0; width: 2px; height: 26vh; pointer-events: none; z-index: 21;
+  background: linear-gradient(180deg, transparent, rgba(var(--glow), 0.95), rgba(var(--glow-2), 0.9), transparent); box-shadow: 0 0 12px rgba(var(--glow), 0.6);
+  animation: edge-run 7s cubic-bezier(0.45, 0, 0.35, 1) infinite; }
+@media (max-width: 900px) { .main::after { display: none; } }
+/* логотип: по слову пробегает блик, уголки мерцают как неоновые трубки */
+@keyframes logo-shine { 0%, 70% { background-position: -160% 0; } 100% { background-position: 260% 0; } }
+.kontur-word { background-image: linear-gradient(100deg, transparent 35%, rgba(255, 255, 255, 0.95) 50%, transparent 65%), linear-gradient(180deg, #ffffff, #c6d3ea 55%, #9fb0cf);
+  background-size: 45% 100%, 100% 100%; background-repeat: no-repeat; animation: logo-shine 6s ease-in-out infinite; }
+html[data-theme="light"] .kontur-word { background-image: linear-gradient(100deg, transparent 35%, rgba(47, 128, 255, 0.9) 50%, transparent 65%), linear-gradient(180deg, #23345a, #0e1a33); }
+@keyframes neon-tube { 0%, 100% { opacity: 1; } 8% { opacity: 0.35; } 9% { opacity: 1; } 11% { opacity: 0.5; } 12%, 60% { opacity: 1; } 61% { opacity: 0.6; } 62% { opacity: 1; } }
+.kontur-frame .k-blue { animation: neon-tube 6s linear infinite; }
+.kontur-frame .k-red { animation: neon-tube 6s 2.1s linear infinite; }
+/* счётчики-уведомления пульсируют кольцом */
+@keyframes ping { 0% { box-shadow: 0 0 0 0 rgba(var(--glow-2), 0.6); } 100% { box-shadow: 0 0 0 8px rgba(var(--glow-2), 0); } }
+.nav-link .count, .nav-head .count, .topbar .badge-dot, .bell-count { animation: ping 1.8s ease-out infinite; }
+/* кольца «Готовность парка» и проценты: мягкое неоновое дыхание */
+@keyframes ring-glow { from { filter: drop-shadow(0 0 6px rgba(var(--glow), 0.35)); } to { filter: drop-shadow(0 0 16px rgba(var(--glow), 0.8)); } }
+.ring { animation: ring-glow 2.8s ease-in-out infinite alternate; }
+/* значки статусов «На линии» и т. п.: лёгкое свечение */
+.badge.success, .badge.info, .badge.mint { box-shadow: 0 0 10px color-mix(in srgb, currentColor 25%, transparent); }
+/* сегодняшний день в календаре пульсирует */
+.week-day.today { animation: glow-pulse 2.2s ease-in-out infinite alternate; }
+/* вход: вокруг формы бежит неоновый свет */
+.login-stage .login-card::after { content: ""; display: block; position: absolute; inset: -1.5px; border-radius: 22px; padding: 2px; pointer-events: none; z-index: 2;
+  background: conic-gradient(from var(--nr), transparent 0 40%, rgba(47, 134, 255, 1) 55%, #fff 60%, rgba(255, 43, 74, 1) 66%, transparent 80%);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask-composite: exclude;
+  animation: neon-spin 4s linear infinite; filter: drop-shadow(0 0 6px rgba(255, 255, 255, 0.5)); }
+.login-stage .btn.login-go:not(:disabled) { background-size: 200% 100%; animation: login-btn 4s ease-in-out infinite alternate; }
+@keyframes login-btn { from { background-position: 0% 0; } to { background-position: 100% 0; } }
+.login-stage .btn.login-go { background-image: linear-gradient(90deg, #12b4ff, #2f6bff 25%, #ff2b4a 50%, #2f6bff 75%, #12b4ff); }
+
+@media (prefers-reduced-motion: reduce) {
+  .page-enter::before, .topbar::before, .main::after, .nav-pill::before { display: none; }
+  .nav-pill { transition: none; }
+}
+@media print {
+  .nav-pill, .page-enter::before, .topbar::before, .main::after, .card::after { display: none; }
+  .page-enter, .page-enter .card, .page-enter .table tbody tr, .page-enter .page-head h1 { animation: none; }
+}
+
+/* =====================================================================================================================
+   Вход, часть 2: живая сцена поверх картинки и три темы (чёрная, светлая, багровая) — и для сцены, и для формы.
+   ===================================================================================================================== */
+.login-wrap {
+  --lg-c1: #2f86ff; --lg-c2: #ff2b4a; --lg-c1-rgb: 47, 134, 255; --lg-c2-rgb: 255, 43, 74;
+  --lg-card: linear-gradient(160deg, rgba(10, 20, 44, 0.985), rgba(6, 10, 26, 0.99));
+  --lg-text: #eaf1ff; --lg-muted: #a9b8d8; --lg-label: #dfe7fb; --lg-ico: #c9d5f0;
+  --lg-input: rgba(10, 20, 44, 0.85); --lg-input-border: rgba(110, 140, 230, 0.38); --lg-ph: #7f8fb2;
+  --lg-badge: linear-gradient(160deg, #0d1a3a, #070d22); --lg-page: #02050d;
+}
+html[data-theme="crimson"] .login-wrap {
+  --lg-c1: #ff2d50; --lg-c2: #ff7a45; --lg-c1-rgb: 255, 45, 80; --lg-c2-rgb: 255, 122, 69;
+  --lg-card: linear-gradient(160deg, rgba(38, 6, 16, 0.985), rgba(20, 3, 9, 0.99));
+  --lg-text: #ffeef1; --lg-muted: #d7a3ad; --lg-label: #ffe1e6; --lg-ico: #f3c3cc;
+  --lg-input: rgba(40, 8, 18, 0.85); --lg-input-border: rgba(255, 80, 110, 0.38); --lg-ph: #b07f89;
+  --lg-badge: linear-gradient(160deg, #3a0a18, #1c040b); --lg-page: #0d0207;
+}
+html[data-theme="light"] .login-wrap {
+  --lg-c1: #1f6bff; --lg-c2: #ff2b4a; --lg-c1-rgb: 31, 107, 255; --lg-c2-rgb: 255, 43, 74;
+  --lg-card: linear-gradient(160deg, #ffffff, #f1f5ff);
+  --lg-text: #0f1c36; --lg-muted: #5a6a88; --lg-label: #22314f; --lg-ico: #5a6a88;
+  --lg-input: rgba(246, 249, 255, 0.95); --lg-input-border: rgba(31, 107, 255, 0.28); --lg-ph: #8592ad;
+  --lg-badge: linear-gradient(160deg, #ffffff, #e9f0ff); --lg-page: #edf2fa;
+}
+.login-wrap { background: var(--lg-page); transition: background 0.4s; }
+.login-stage { background: none; }
+
+/* картинка: в каждой теме своя окраска */
+.login-bg { position: absolute; inset: 0; background: url("/login/bg.webp") center / 100% 100% no-repeat; transition: filter 0.5s, opacity 0.5s; }
+.login-bg::after { content: ""; position: absolute; inset: 0; pointer-events: none; opacity: 0; transition: opacity 0.5s; }
+html[data-theme="crimson"] .login-bg { filter: grayscale(1) sepia(1) hue-rotate(-48deg) saturate(4.2) brightness(0.82) contrast(1.12); }
+html[data-theme="crimson"] .login-bg::after { opacity: 1; background: radial-gradient(70% 60% at 50% 40%, transparent, rgba(20, 0, 6, 0.45)); }
+html[data-theme="light"] .login-bg { filter: brightness(1.35) saturate(0.85) contrast(0.85); }
+html[data-theme="light"] .login-bg::after { opacity: 1; background: linear-gradient(180deg, rgba(237, 242, 250, 0.55), rgba(237, 242, 250, 0.72) 60%, rgba(237, 242, 250, 0.82)); }
+
+/* слой эффектов в координатах картинки */
+.login-fx { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
+.lg-run { fill: none; stroke-width: 4; stroke-linecap: round; stroke-dasharray: 9 91; stroke-dashoffset: 100; animation: lg-run 4s linear infinite; }
+.lg-halo { stroke-width: 10; opacity: 0.4; }
+html[data-theme="light"] .lg-halo { opacity: 0.22; }
+html[data-theme="light"] .lg-core { stroke: var(--lg-c1); opacity: 0.8; }
+.lg-halo.c1 { stroke: var(--lg-c1); }
+.lg-halo.c2 { stroke: var(--lg-c2); }
+.lg-core { stroke: #fff; stroke-width: 3.5; }
+@keyframes lg-run { from { stroke-dashoffset: 100; } to { stroke-dashoffset: 0; } }
+.lg-corner { fill: none; stroke-width: 7; stroke-linecap: square; opacity: 0; animation: lg-tube 6.8s linear infinite; }
+.lg-corner.c1 { stroke: var(--lg-c1); }
+.lg-corner.c2 { stroke: var(--lg-c2); }
+@keyframes lg-tube { 0%, 100% { opacity: 0.55; } 10% { opacity: 0.95; } 11% { opacity: 0.1; } 12% { opacity: 0.9; } 14% { opacity: 0.2; } 15%, 60% { opacity: 0.7; } 61% { opacity: 0.15; } 62% { opacity: 0.85; } }
+.lg-shine { opacity: 0.4; animation: lg-shine 5.5s ease-in-out infinite; }
+@keyframes lg-shine { 0%, 55% { transform: translate3d(0, 0, 0); } 90%, 100% { transform: translate3d(500px, 0, 0); } }
+.lg-flare { transform-box: fill-box; transform-origin: center; animation: lg-flare 3.2s ease-in-out infinite alternate; }
+.lg-flare.red { animation-duration: 1.6s; }
+@keyframes lg-flare { from { opacity: 0.45; transform: scale(0.85); } to { opacity: 1; transform: scale(1.15); } }
+.lg-blink { fill: #000; opacity: 0; animation: lg-blink 7s steps(1, end) infinite; }
+.lg-blink.late { animation-duration: 9.5s; animation-delay: 3s; }
+@keyframes lg-blink { 0%, 100% { opacity: 0; } 70% { opacity: 0.65; } 71% { opacity: 0; } 73% { opacity: 0.5; } 74% { opacity: 0; } }
+html[data-theme="light"] .lg-blink { display: none; }
+
+/* туман медленно плывёт */
+.login-mist { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+.login-mist span { position: absolute; width: 70%; height: 55%; border-radius: 50%; opacity: 0.35; will-change: transform; }
+.login-mist span:first-child { left: -10%; top: 20%; background: radial-gradient(closest-side, rgba(var(--lg-c1-rgb), 0.35), transparent); animation: lg-mist 18s ease-in-out infinite alternate; }
+.login-mist span:last-child { right: -15%; bottom: 0; background: radial-gradient(closest-side, rgba(var(--lg-c2-rgb), 0.3), transparent); animation: lg-mist 22s ease-in-out infinite alternate-reverse; }
+@keyframes lg-mist { from { transform: translate3d(-6%, 3%, 0) scale(1); } to { transform: translate3d(8%, -4%, 0) scale(1.15); } }
+
+/* блики на мокром асфальте */
+.login-ground { position: absolute; left: 0; bottom: 0; width: 200%; height: 30%; pointer-events: none; opacity: 0.45; will-change: transform;
+  background: linear-gradient(90deg, transparent 0%, rgba(var(--lg-c1-rgb), 0.22) 10%, transparent 20%, rgba(var(--lg-c2-rgb), 0.2) 32%, transparent 45%,
+                                     transparent 50%, rgba(var(--lg-c1-rgb), 0.22) 60%, transparent 70%, rgba(var(--lg-c2-rgb), 0.2) 82%, transparent 95%);
+  -webkit-mask: linear-gradient(180deg, transparent, #000 40%); mask: linear-gradient(180deg, transparent, #000 40%);
+  animation: lg-ground 16s linear infinite; }
+@keyframes lg-ground { from { transform: translate3d(0, 0, 0); } to { transform: translate3d(-50%, 0, 0); } }
+html[data-theme="light"] .login-ground { opacity: 0.25; }
+
+/* искры поднимаются вверх */
+.login-sparks { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+.login-sparks span { position: absolute; bottom: -10px; border-radius: 50%; background: #fff; opacity: 0; animation: lg-spark 8s linear infinite; will-change: transform, opacity; }
+.login-sparks span.c1 { box-shadow: 0 0 6px 2px var(--lg-c1); }
+.login-sparks span.c2 { box-shadow: 0 0 6px 2px var(--lg-c2); }
+@keyframes lg-spark { 0% { transform: translate3d(0, 0, 0); opacity: 0; } 10% { opacity: 0.9; } 80% { opacity: 0.6; } 100% { transform: translate3d(40px, -75vh, 0); opacity: 0; } }
+
+/* форма: цвета по теме */
+.login-wrap .login-stage .login-card { color: var(--lg-text);
+  background: var(--lg-card) padding-box, linear-gradient(120deg, var(--lg-c1), color-mix(in srgb, var(--lg-c1) 50%, var(--lg-c2)) 50%, var(--lg-c2)) border-box;
+  box-shadow: -10px 0 34px rgba(var(--lg-c1-rgb), 0.45), 10px 0 34px rgba(var(--lg-c2-rgb), 0.42), 0 24px 60px rgba(0, 0, 0, 0.5); }
+html[data-theme="light"] .login-wrap .login-stage .login-card { box-shadow: -10px 0 30px rgba(var(--lg-c1-rgb), 0.25), 10px 0 30px rgba(var(--lg-c2-rgb), 0.22), 0 24px 50px rgba(28, 62, 130, 0.18); }
+.login-stage .login-card::before { box-shadow: -14px 0 44px rgba(var(--lg-c1-rgb), 0.55), 14px 0 44px rgba(var(--lg-c2-rgb), 0.5); }
+.login-stage .login-card::after { background: conic-gradient(from var(--nr), transparent 0 40%, var(--lg-c1) 55%, #fff 60%, var(--lg-c2) 66%, transparent 80%); }
+.login-stage .login-card .muted { color: var(--lg-muted); }
+.login-head h1 { color: var(--lg-text); }
+.login-badge { background: var(--lg-badge); border-color: color-mix(in srgb, var(--lg-c1) 35%, transparent); box-shadow: 0 0 18px rgba(var(--lg-c1-rgb), 0.25); }
+.login-badge .k-blue { stroke: var(--lg-c1); filter: drop-shadow(0 0 3px var(--lg-c1)); }
+.login-badge .k-red { stroke: var(--lg-c2); filter: drop-shadow(0 0 3px var(--lg-c2)); }
+.login-label { color: var(--lg-label); }
+.login-label svg, .login-input-ico, .login-eye { color: var(--lg-ico); }
+.login-stage .login-input .input { color: var(--lg-text); background: var(--lg-input); border-color: var(--lg-input-border); }
+.login-stage .login-input .input::placeholder { color: var(--lg-ph); }
+.login-stage .login-input .input:focus { border-color: var(--lg-c1); box-shadow: 0 0 0 3px rgba(var(--lg-c1-rgb), 0.25), 0 0 16px rgba(var(--lg-c1-rgb), 0.35); }
+.login-stage .check { color: var(--lg-text); }
+.login-stage .check input { accent-color: var(--lg-c1); }
+.login-stage .btn.login-go { background-image: linear-gradient(90deg, color-mix(in srgb, var(--lg-c1) 70%, #12d4ff), var(--lg-c1) 25%, var(--lg-c2) 50%, var(--lg-c1) 75%, color-mix(in srgb, var(--lg-c1) 70%, #12d4ff));
+  box-shadow: -6px 0 22px rgba(var(--lg-c1-rgb), 0.5), 6px 0 22px rgba(var(--lg-c2-rgb), 0.5); }
+.login-foot svg { color: var(--lg-c1); }
+.login-theme .theme-toggle { background: color-mix(in srgb, var(--lg-page) 80%, transparent); color: var(--lg-text); border-color: color-mix(in srgb, var(--lg-c1) 40%, transparent); }
+.login-wrap::after { background: linear-gradient(90deg, transparent, var(--lg-c1) 60%, #fff 92%, transparent); box-shadow: 0 0 12px 2px rgba(var(--lg-c1-rgb), 0.55); }
+
+/* телефон: картинка и эффекты сверху, ниже затемнение по цвету темы */
+@media (max-width: 760px), (max-height: 520px) {
+  .login-stage { background: none; overflow: hidden; overflow: clip; }  /* clip: при автофокусе браузер не может прокрутить сцену вбок */
+  .login-bg, .login-fx, .login-mist { position: absolute; top: 0; left: 50%; right: auto; bottom: auto; width: calc(100vh * 1672 / 941); height: 100vh; transform: translateX(-50%); }
+  .login-ground { display: none; }
+  .login-stage::before { content: ""; position: absolute; inset: 0; pointer-events: none; z-index: 1;
+    background: linear-gradient(180deg, transparent 0%, transparent 24%, color-mix(in srgb, var(--lg-page) 94%, transparent) 30%, var(--lg-page) 100%); }
+  .login-sparks { z-index: 1; }
+  .login-wrap .login-stage .login-card { position: relative; z-index: 2; left: auto; top: auto; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .login-sparks, .login-ground, .lg-run, .lg-shine { display: none; }
 }
